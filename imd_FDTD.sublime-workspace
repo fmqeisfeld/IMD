@@ -1,0 +1,504 @@
+{
+	"auto_complete":
+	{
+		"selected_items":
+		[
+		]
+	},
+	"buffers":
+	[
+		{
+			"contents": "calc_ttm\nupdate_fd\ndo_FILLMESH\ndo_COMMFLUX\ninit_ttm\ndo_ADV\ndo_DIFF\nttm_writeout\nttm_create_mpi_datatypes\nttm_fill_ghost_layers\nttm_read\nfermi_E\nfermi_T\nomega_pl\nbMin\nbMax\ncoulomb_log\nne_cr\nfd_density\nr0\nMeanCharge\nnumet\nnumax\nnupl\ngetGamma\ngetKappa\nstrsplit\nCFL_maxdt\nQfromT\nEOS_ee_from_r_te\nEOS_cve_from_r_te\nEOS_te_from_r_ee\neeminfun\nSwapTTM\nfitDL",
+			"settings":
+			{
+				"buffer_size": 349,
+				"line_ending": "Unix",
+				"name": "𝌆 Outline",
+				"scratch": true
+			}
+		},
+		{
+			"file": "imd_ttm.c",
+			"settings":
+			{
+				"buffer_size": 140966,
+				"encoding": "UTF-8",
+				"line_ending": "Unix"
+			}
+		},
+		{
+			"file": "globals.h",
+			"settings":
+			{
+				"buffer_size": 78079,
+				"encoding": "UTF-8",
+				"line_ending": "Unix"
+			}
+		}
+	],
+	"build_system": "",
+	"build_system_choices":
+	[
+	],
+	"build_varint": "",
+	"command_palette":
+	{
+		"height": 0.0,
+		"last_filter": "",
+		"selected_items":
+		[
+			[
+				"browse",
+				"Browse Mode: Outline (Right)"
+			],
+			[
+				"outl",
+				"Browse Mode: FileBrowser Left, Outline Right"
+			],
+			[
+				"Package Control: ",
+				"Package Control: Install Package"
+			]
+		],
+		"width": 0.0
+	},
+	"console":
+	{
+		"height": 0.0,
+		"history":
+		[
+		]
+	},
+	"distraction_free":
+	{
+		"menu_visible": true,
+		"show_minimap": false,
+		"show_open_files": false,
+		"show_tabs": false,
+		"side_bar_visible": false,
+		"status_bar_visible": false
+	},
+	"file_history":
+	[
+		"/user/eisfeld/imd_FDTD/src/imd_ttm.c"
+	],
+	"find":
+	{
+		"height": 0.0
+	},
+	"find_in_files":
+	{
+		"height": 0.0,
+		"where_history":
+		[
+		]
+	},
+	"find_state":
+	{
+		"case_sensitive": false,
+		"find_history":
+		[
+		],
+		"highlight": true,
+		"in_selection": false,
+		"preserve_case": false,
+		"regex": false,
+		"replace_history":
+		[
+		],
+		"reverse": false,
+		"show_context": true,
+		"use_buffer2": true,
+		"whole_word": false,
+		"wrap": true
+	},
+	"groups":
+	[
+		{
+			"selected": 0,
+			"sheets":
+			[
+				{
+					"buffer": 0,
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 349,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								5,
+								5
+							]
+						],
+						"settings":
+						{
+							"current_file": "/user/eisfeld/imd_FDTD/src/imd_ttm.c",
+							"outline_rename_mode": false,
+							"symkeys":
+							[
+								[
+									14654,
+									14662
+								],
+								[
+									21657,
+									21666
+								],
+								[
+									31835,
+									31846
+								],
+								[
+									37910,
+									37921
+								],
+								[
+									52600,
+									52608
+								],
+								[
+									62625,
+									62631
+								],
+								[
+									74909,
+									74916
+								],
+								[
+									86377,
+									86389
+								],
+								[
+									95128,
+									95152
+								],
+								[
+									107057,
+									107078
+								],
+								[
+									113907,
+									113915
+								],
+								[
+									121910,
+									121917
+								],
+								[
+									122069,
+									122076
+								],
+								[
+									122198,
+									122206
+								],
+								[
+									122337,
+									122341
+								],
+								[
+									122539,
+									122543
+								],
+								[
+									122836,
+									122847
+								],
+								[
+									123032,
+									123037
+								],
+								[
+									123279,
+									123289
+								],
+								[
+									123539,
+									123541
+								],
+								[
+									123883,
+									123893
+								],
+								[
+									127729,
+									127734
+								],
+								[
+									128032,
+									128037
+								],
+								[
+									128231,
+									128235
+								],
+								[
+									128750,
+									128758
+								],
+								[
+									130307,
+									130315
+								],
+								[
+									132163,
+									132171
+								],
+								[
+									133379,
+									133388
+								],
+								[
+									135254,
+									135260
+								],
+								[
+									135494,
+									135510
+								],
+								[
+									136074,
+									136091
+								],
+								[
+									136755,
+									136771
+								],
+								[
+									137102,
+									137110
+								],
+								[
+									137433,
+									137440
+								],
+								[
+									139564,
+									139569
+								]
+							],
+							"symlist":
+							[
+								"calc_ttm",
+								"update_fd",
+								"do_FILLMESH",
+								"do_COMMFLUX",
+								"init_ttm",
+								"do_ADV",
+								"do_DIFF",
+								"ttm_writeout",
+								"ttm_create_mpi_datatypes",
+								"ttm_fill_ghost_layers",
+								"ttm_read",
+								"fermi_E",
+								"fermi_T",
+								"omega_pl",
+								"bMin",
+								"bMax",
+								"coulomb_log",
+								"ne_cr",
+								"fd_density",
+								"r0",
+								"MeanCharge",
+								"numet",
+								"numax",
+								"nupl",
+								"getGamma",
+								"getKappa",
+								"strsplit",
+								"CFL_maxdt",
+								"QfromT",
+								"EOS_ee_from_r_te",
+								"EOS_cve_from_r_te",
+								"EOS_te_from_r_ee",
+								"eeminfun",
+								"SwapTTM",
+								"fitDL"
+							],
+							"syntax": "Packages/Outline/outline.hidden-tmLanguage"
+						},
+						"translation.x": 0.0,
+						"translation.y": 0.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 1,
+					"type": "text"
+				}
+			]
+		},
+		{
+			"selected": 0,
+			"sheets":
+			[
+				{
+					"buffer": 1,
+					"file": "imd_ttm.c",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 140966,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								13966,
+								13966
+							]
+						],
+						"settings":
+						{
+							"syntax": "Packages/C++/C.sublime-syntax",
+							"tab_size": 2,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": 0.0,
+						"translation.y": 3349.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 0,
+					"type": "text"
+				},
+				{
+					"buffer": 2,
+					"file": "globals.h",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 78079,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								1949,
+								1949
+							]
+						],
+						"settings":
+						{
+							"syntax": "Packages/C++/C++.sublime-syntax",
+							"tab_size": 2,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": 0.0,
+						"translation.y": 810.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 2,
+					"type": "text"
+				}
+			]
+		}
+	],
+	"incremental_find":
+	{
+		"height": 0.0
+	},
+	"input":
+	{
+		"height": 39.0
+	},
+	"layout":
+	{
+		"cells":
+		[
+			[
+				0,
+				0,
+				1,
+				1
+			],
+			[
+				1,
+				0,
+				2,
+				1
+			]
+		],
+		"cols":
+		[
+			0.0,
+			0.138961343711,
+			1.0
+		],
+		"rows":
+		[
+			0.0,
+			1.0
+		]
+	},
+	"menu_visible": true,
+	"output.find_results":
+	{
+		"height": 0.0
+	},
+	"pinned_build_system": "",
+	"project": "imd_FDTD.sublime-project",
+	"replace":
+	{
+		"height": 0.0
+	},
+	"save_all_on_build": true,
+	"select_file":
+	{
+		"height": 0.0,
+		"last_filter": "",
+		"selected_items":
+		[
+		],
+		"width": 0.0
+	},
+	"select_project":
+	{
+		"height": 0.0,
+		"last_filter": "",
+		"selected_items":
+		[
+		],
+		"width": 0.0
+	},
+	"select_symbol":
+	{
+		"height": 0.0,
+		"last_filter": "",
+		"selected_items":
+		[
+		],
+		"width": 0.0
+	},
+	"selected_group": 1,
+	"settings":
+	{
+		"last_automatic_layout":
+		[
+			[
+				0,
+				0,
+				1,
+				1
+			],
+			[
+				1,
+				0,
+				2,
+				1
+			]
+		]
+	},
+	"show_minimap": true,
+	"show_open_files": true,
+	"show_tabs": true,
+	"side_bar_visible": true,
+	"side_bar_width": 150.0,
+	"status_bar_visible": true,
+	"template_settings":
+	{
+	}
+}
