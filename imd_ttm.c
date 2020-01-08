@@ -173,6 +173,8 @@
 // * TODO:
 // *       Etwas stimmt nicht mit umgebungsdichte-berechnung....alle paar steps abrupte änderung...
 // *        --> I.was in Kommunikation etc.
+// *
+// * Seit heute git
 // ***********************************************************************************************************
 #define RHOMIN 2000
 
