@@ -176,7 +176,7 @@
 // *
 // * Seit heute git
 // ***********************************************************************************************************
-#define RHOMIN 2000
+#define RHOMIN 2001
 
 
 #define ADVMODE 2  // 0=NO ADVECTION, 1=GODUNOV SOLVER VIA VCOM, 2=DISCRETE FLUX SOLVER (PREDICT ATOMIC FLUXES)
