@@ -1,6 +1,6 @@
 #include "imd.h"
 
-
+// nur zum test
 //#define MAXLINE 255
 #define Ith(v,i)    NV_Ith_S(v,i)       /* Ith numbers components 1..NEQ */
 #define IJth(B,i,j) SM_ELEMENT_D(B,i,j)  //DENSE_ELEM(A,i,j) /* IJth numbers rows,cols 1..NEQ */
