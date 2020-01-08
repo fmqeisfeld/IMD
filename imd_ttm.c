@@ -1853,6 +1853,7 @@ void do_DIFF(double tau)
 // }  
 
 //ERSTMAL OHNE 
+//TEST
         l1[i][j][k].xi += (l2[i][j][k].temp-l1[i][j][k].md_temp)*xi_fac*l1[i][j][k].fd_g/l1[i][j][k].md_temp/((double) l1[i][j][k].natoms);//Original
         //l1[i][j][k].xi += (l2[i][j][k].temp - l1[i][j][k].md_temp) * xi_fac * l1[i][j][k].fd_g / l1[i][j][k].md_temp / l1[i][j][k].dens; // NEU
         l2[i][j][k].xi = l1[i][j][k].xi;
