@@ -1149,6 +1149,11 @@ EXTERN real tot_kin_energy_local INIT(0.0); //ionic
 EXTERN real tot_kin_energy_global INIT(0.0); //ionic
 EXTERN int diff_substeps INIT(100);
 
+//For convenience 
+EXTERN real J2eV   INIT(6.2415096471204E+18);
+EXTERN real eV2J   INIT(1.602176487E-19);
+EXTERN real densSI INIT(1660.53907); //u/Angstrom^3 --> kg/m^3
+
 //Dirichlet boundary conditions
 #ifdef DIRICHLET
 EXTERN int *dirichlet_maxy_local;	   //outermost non-empty cells in +y-direction

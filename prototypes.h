@@ -144,7 +144,7 @@ void invmat(double complex *a,double complex *p);/* Inverse of 2x2 matrix*/
 void matmul(double complex *a,double complex *b,double complex *p); /*2x2 Matrix multiplication*/
 void matmul2(double complex *mat,double complex *vec,double complex *out);/* 2x2 matrix and 2x1 vector multiplication */ 
 int tmm_init(void);
-int tmm_get_epsilon(double lambda, double Te,double Ti, double Z, double Ne, real* re, real* img,int i,int j);
+int tmm_get_epsilon(double lambda, double Te,double Ti, double Z, double Ne, real* re, real* img);
 double complex epsl_bb(int bi);
 int tmm_read_arr(char* infilename,double ***arr,int cols,int *rowsout);
 double tmm_K2(double nu);

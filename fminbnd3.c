@@ -102,4 +102,5 @@ printf("myid:%d, iter>iter_max in fminbnd for rho=%.4e. Return x=%.4e \n",myid,r
 		}
 		
 	}
+	return -1;
 }
