@@ -1,4 +1,4 @@
-#define RHOMIN 2001
+#define RHOMIN 1900
 
 
 #define ADVMODE 2  // 0=NO ADVECTION, 1=GODUNOV SOLVER VIA VCOM, 2=DISCRETE FLUX SOLVER (PREDICT ATOMIC FLUXES)
@@ -210,9 +210,8 @@ void update_fd()
 {
   natoms_local = 0;
   int i, j, k, i_global, j_global, k_global;
-  int dx, dy, dz;
   //int fd_tags=(local_fd_dim.x-2)*(local_fd_dim.y-2)*(local_fd_dim.z-2)+1; //every MPI-message needs to be unique
-  int loopvar, natoms_previous, l;
+  int loopvar, l;
 
   int tot_neighs; //for density calc.
   tot_kin_energy_local = 0.0;
@@ -356,10 +355,11 @@ void update_fd()
         //COMPUTE DENSITY OF TTM-CELLS FROM NEIGHBORS PER ATOM in kg/m^3
         if (l1[i][j][k].natoms > 0)
         {
-          l1[i][j][k].dens = l2[i][j][k].dens = (double)tot_neighs / ((double)l1[i][j][k].natoms) * atomic_weight / neighvol * 1660.539; //kg/m^3
-//          if (l1[i][j][k].dens == 0) //in step 0...noch keine neigh list?
+          l1[i][j][k].dens = l2[i][j][k].dens = (double)tot_neighs / ((double)l1[i][j][k].natoms) * atomic_weight / neighvol * 1660.53907; //kg/m^3
+
+if (l1[i][j][k].dens == 0) //in step 0...noch keine neigh list?
           {
-            l1[i][j][k].dens = l2[i][j][k].dens = (double) l1[i][j][k].natoms * atomic_weight / fd_vol * 1660.539;
+            l1[i][j][k].dens = l2[i][j][k].dens = (double) l1[i][j][k].natoms * atomic_weight / fd_vol * 1660.53907;
           }
 
           l1[i][j][k].vcomx /= tot_mass;
@@ -392,11 +392,9 @@ void update_fd()
         l2[i][j][k].vcomz = l1[i][j][k].vcomz;
 
         l1[i][j][k].md_temp = l2[i][j][k].md_temp = 0;
-        // *************************************
-        // * 2nd loop over MD cells and atoms  *
-        // * For MD-temperature from kinetic   *
-        // * energies of particles         *
-        // *************************************
+        // **********************************************************************************************************
+        // * 2nd loop over MD cells and atoms For MD-temperature from kinetic energies of particles                 *        
+        // **********************************************************************************************************
         for (loopvar = 0; loopvar < n_md_cells; loopvar++) //loop over md-cells
         {
           p = l1[i][j][k].md_cellptrs[loopvar];
@@ -414,7 +412,8 @@ void update_fd()
 
         if (l1[i][j][k].natoms >= fd_min_atoms)
         {
-          l1[i][j][k].md_temp /= 3.0 * l1[i][j][k].natoms;
+          l1[i][j][k].md_temp /= 3.0 * l1[i][j][k].natoms;          
+//l1[i][j][k].md_temp/=3 * l1[i][j][k].dens*fd_vol*1e-30/26.9815/AMU;          //SMOOTH TEMP?
         }
         else l1[i][j][k].md_temp = 0.0;
         l2[i][j][k].md_temp = l1[i][j][k].md_temp;
@@ -439,6 +438,8 @@ void update_fd()
           if (l1[i][j][k].natoms >= fd_min_atoms)
           {
             l1[i][j][k].temp = l2[i][j][k].temp = l1[i][j][k].md_temp;
+//l1[i][j][k].md_temp=300.0/11604.5;            
+l1[i][j][k].temp=l2[i][j][k].temp=300.0/11604.5;            
 l1[i][j][k].U = EOS_ee_from_r_te(l1[i][j][k].dens, l1[i][j][k].temp * 11604.5) * 26.9815 * AMU * 6.2415091E18;
           }
         }
@@ -446,7 +447,6 @@ l1[i][j][k].U = EOS_ee_from_r_te(l1[i][j][k].dens, l1[i][j][k].temp * 11604.5) *
     } // for j
   } //for i
 #if DEBUG_LEVEL>1
-//  if(DEBUG_LEVEL>0)
   printf("steps:%d,proc:%d,update_fd complete\n", steps, myid);
 #endif
   
@@ -1247,7 +1247,8 @@ void do_ADV(double tau)
   //   //tot_elec_energy_local += l1[i][j][1].U * l1[i][j][k].natoms;      
   //   if(l1[i][1][1].natoms >= 1) //fd_min_atoms)
   //   {      
-  //     tot_elec_energy_local += l1[i][1][1].U * (l1[i][1][1].dens / AMU / 1e30)*fd_vol;      
+  //     //tot_elec_energy_local += l1[i][1][1].U * (l1[i][1][1].dens / AMU / 1e30)*fd_vol;      
+  //     tot_elec_energy_local += l2[i][1][1].U * l1[i][1][1].natoms;
   //   }
   // }
   // return;
@@ -1324,8 +1325,9 @@ void do_ADV(double tau)
         //tot_elec_energy_local+=l2[i][j][k].U;//*Nnew;
         //tot_elec_energy_local+=l2[i][j][k].U*Nnew*26.9815*AMU*6.2415091E18; // J/kg * #atoms * mass(atom) *J2eV --> eV
         //tot_elec_energy_local += l2[i][j][k].U * l1[i][j][k].dens * (fd_vol * 1e-30) * 6.2415091E18;
-        tot_elec_energy_local += l2[i][j][1].U * Nnew;
-        //tot_elec_energy_local += l1[i][j][1].U * (l1[i][j][1].dens / AMU / 1e30)*fd_vol;
+
+        tot_elec_energy_local += l2[i][j][1].U * Nnew;   //via Nnew
+        //tot_elec_energy_local += l1[i][j][1].U * l1[i][j][k].dens*fd_vol*1e-30/(26.9815*AMU); //via dichte <--schlechter
 
         //DEBUG: Temp. zu groß geworden? --> Kann auch passieren wenn Zelle vorher nicht aktiv war.
         //       Dann ist's ok
@@ -1507,7 +1509,6 @@ void do_ADV(double tau)
 void do_DIFF(double tau)
 {
   int i, j, k;
-  int fd_timestep;
   int xmin, xmax, /* these are neighboring indices     */      
       ymin, ymax, /* (to account for bc & deactivated cells) */
       zmin, zmax;
@@ -3220,13 +3221,13 @@ double EOS_ee_from_r_te(double r, double t)
 double EOS_cve_from_r_te(double r, double t)
 {
 
-  r = MAX(r, 2.003759398e+03);
+  r = MAX(r, RHOMIN);
   r = MIN(r, 3500); //CHEAT
 
-  double tsqrt = sqrt(t);
+  //double tsqrt = sqrt(t);
   point pout;
   pout.x = r;
-  pout.y = tsqrt;
+  pout.y = t;
   // nnhpi_interpolate(intp_e_from_r_tsqrt.interpolator, &pout); //naturla neigh, sibson-rule
   lpi_interpolate_point(intp_cve_from_r_te.interpolator, &pout); //linear
 
@@ -3240,9 +3241,7 @@ double EOS_cve_from_r_te(double r, double t)
   pout.z *= 1e-30; // --> J/eV/Angs^3
   pout.z *= 6.2415091E18; // --> eV/eV/A^3
 
-  //eV/(eV*Angs^3)
   return pout.z;
-
 }
 
 

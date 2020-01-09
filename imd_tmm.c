@@ -530,6 +530,8 @@ int tmm_read_arr(char* infilename,double ***arr,int cols,int *rowsout)
   if(myid==0)
   {
     infile = fopen(infilename, "r");
+    if(infile==NULL)      
+      error_str("Cannot open file:%s\n", infilename);
     do
     {
        ch = fgetc(infile);
