@@ -361,6 +361,8 @@ if (l1[i][j][k].dens == 0) //in step 0...noch keine neigh list?
           {
             l1[i][j][k].dens = l2[i][j][k].dens = (double) l1[i][j][k].natoms * atomic_weight / fd_vol * 1660.53907;
           }
+//l1[i][j][k].dens=l2[i][j][k].dens=2700;
+tot_mass=l1[i][j][k].dens*fd_vol*1e-30/AMU;
 
           l1[i][j][k].vcomx /= tot_mass;
           l1[i][j][k].vcomy /= tot_mass;
@@ -412,8 +414,8 @@ if (l1[i][j][k].dens == 0) //in step 0...noch keine neigh list?
 
         if (l1[i][j][k].natoms >= fd_min_atoms)
         {
-          l1[i][j][k].md_temp /= 3.0 * l1[i][j][k].natoms;          
-//l1[i][j][k].md_temp/=3 * l1[i][j][k].dens*fd_vol*1e-30/26.9815/AMU;          //SMOOTH TEMP?
+//l1[i][j][k].md_temp /= 3.0 * l1[i][j][k].natoms;          
+l1[i][j][k].md_temp/=3 * l1[i][j][k].dens*fd_vol*1e-30/26.9815/AMU;          //SMOOTH TEMP?
         }
         else l1[i][j][k].md_temp = 0.0;
         l2[i][j][k].md_temp = l1[i][j][k].md_temp;
@@ -628,7 +630,7 @@ void do_COMMFLUX(void)
       }
     }
   }
-  
+return;
 
 
   ///////////////////////////////////////////////////////////////////////////////////////////
@@ -1227,7 +1229,6 @@ void init_ttm()
 // ******************************************************
 void do_ADV(double tau)
 {
-
   if (steps < 1) return;
   int i, j, k;
   int i_global, j_global, k_global;
@@ -1238,20 +1239,20 @@ void do_ADV(double tau)
   do_COMMFLUX();
 
   //DEBUG
-  // for (i = 1; i < local_fd_dim.x - 1; ++i)
-  // {
+  for (i = 1; i < local_fd_dim.x - 1; ++i)
+  {
     
-  //   //tot_elec_energy_local+=l1[i][j][1].U*l1[i][j][k].dens*(fd_vol*1e-30)*6.2415091E18;
-  //   //tot_elec_energy_local+=l1[i][j][k].U*l1[i][j][k].natoms*26.9815*AMU*6.2415091E18;
-  //   //if(l1[i][j][k].natoms >= fd_min_atoms)
-  //   //tot_elec_energy_local += l1[i][j][1].U * l1[i][j][k].natoms;      
-  //   if(l1[i][1][1].natoms >= 1) //fd_min_atoms)
-  //   {      
-  //     //tot_elec_energy_local += l1[i][1][1].U * (l1[i][1][1].dens / AMU / 1e30)*fd_vol;      
-  //     tot_elec_energy_local += l2[i][1][1].U * l1[i][1][1].natoms;
-  //   }
-  // }
-  // return;
+    //tot_elec_energy_local+=l1[i][j][1].U*l1[i][j][k].dens*(fd_vol*1e-30)*6.2415091E18;
+    //tot_elec_energy_local+=l1[i][j][k].U*l1[i][j][k].natoms*26.9815*AMU*6.2415091E18;
+    //if(l1[i][j][k].natoms >= fd_min_atoms)
+    //tot_elec_energy_local += l1[i][j][1].U * l1[i][j][k].natoms;      
+    if(l1[i][1][1].natoms >= 1) //fd_min_atoms)
+    {      
+      tot_elec_energy_local += l1[i][1][1].U * (l1[i][1][1].dens / 26.9815/AMU *fd_vol*1.0e-30);
+      //tot_elec_energy_local += l1[i][1][1].U * l1[i][1][1].natoms;
+    }
+  }
+  return;
   
 
 
@@ -1513,8 +1514,8 @@ void do_DIFF(double tau)
       ymin, ymax, /* (to account for bc & deactivated cells) */
       zmin, zmax;
 
-  double xi_fac=fd_vol/3.0/((double) diff_substeps);///((double) l1[i][j][k].natoms); //ORIGINAL
-  //double xi_fac = 26.9815 * AMU / 3.0 * 1e30 / ((double) diff_substeps); //NEU
+  //double xi_fac=fd_vol/3.0/((double) diff_substeps);///((double) l1[i][j][k].natoms); //ORIGINAL
+  double xi_fac = 26.9815 * AMU / 3.0 * 1e30 / ((double) diff_substeps); //NEU
 
   //xi=1/fdsteps * sum_(n=1)^(fdsteps) {m*fd_g/(3*rho*k_b)*(Te-Ti)/Ti }
   // (k_B weglassen --> imd-units fuer temp., AMU muss rein, weil ich rho in kg/m^3 messe,
@@ -1673,8 +1674,8 @@ void do_DIFF(double tau)
 
 //ERSTMAL OHNE 
 //TEST
-        l1[i][j][k].xi += (l2[i][j][k].temp-l1[i][j][k].md_temp)*xi_fac*l1[i][j][k].fd_g/l1[i][j][k].md_temp/((double) l1[i][j][k].natoms);//Original
-        //l1[i][j][k].xi += (l2[i][j][k].temp - l1[i][j][k].md_temp) * xi_fac * l1[i][j][k].fd_g / l1[i][j][k].md_temp / l1[i][j][k].dens; // NEU
+        //l1[i][j][k].xi += (l2[i][j][k].temp-l1[i][j][k].md_temp)*xi_fac*l1[i][j][k].fd_g/l1[i][j][k].md_temp/((double) l1[i][j][k].natoms);//Original
+        l1[i][j][k].xi += (l2[i][j][k].temp - l1[i][j][k].md_temp) * xi_fac * l1[i][j][k].fd_g / l1[i][j][k].md_temp / l1[i][j][k].dens; // NEU
         l2[i][j][k].xi = l1[i][j][k].xi;
 
         /*
