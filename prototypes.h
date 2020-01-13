@@ -98,6 +98,7 @@ void do_ADV(double tau);
 void update_u(void);
 void do_DIFF(double tau);
 void factor_xi(void); //ist jetzt losgelöst von do_DIFF
+void do_cell_activation(void); // Cell activ/inactive
 
 //Interpol. tables for electronic EOS
 int read_bc_interp(struct bicubinterp *bi,const char *fname);

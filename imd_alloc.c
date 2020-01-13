@@ -641,7 +641,7 @@ void alloc_cell(cell *p, int n)
 
 //MYMOD
 #ifdef TTM
-  memalloc( &p->numneighs,    n,     sizeof(integer), al, ncopy, 1, "numneighs" );
+  memalloc( &p->numneighs, n,sizeof(integer), al, ncopy, 1, "numneighs" );
   memalloc( &p->fdi,n,sizeof(integer),al,ncopy,1,"fdi"); //global fd-cell indices for advection step
   memalloc( &p->fdj,n,sizeof(integer),al,ncopy,1,"fdj");
   memalloc( &p->fdk,n,sizeof(integer),al,ncopy,1,"fdk");
@@ -650,19 +650,6 @@ void alloc_cell(cell *p, int n)
   memalloc( &p->lod,    n,     sizeof(double complex), al, ncopy, 1, "lod" );
 #endif
 #ifdef NRB
-//2.8.19: NRBN und NRBK brauche ich nicht mehr
-/*
-  memalloc( &p->nrbi,   n*12, sizeof(integer*), al, ncopy*12, 1, "nrbi"  ); //12 neighs
-  for(i=0;i<n*12;++i)
-    p->nrbi[i]=malloc(2*sizeof(integer)); //2 spaltig weil hier muss Zellen-nummer k und i rein. wird nicht kommuniziert (nrbid schon)
-*/
-
-/* //NUR ZUM VGL
-  memalloc( &p->neigh, n, sizeof(neighptr), al, p->n_max, 0, "neigh" );
-  for (i=p->n_max; i<n; ++i) {
-    p->neigh[i] = alloc_neightab(p->neigh[i], neigh_len);
-*/
-
   memalloc( &p->nrbid,  n*12, sizeof(integer), al, ncopy*12, 1, "nrbid" ); //12 neighs
   memalloc( &p->isnrbbnd,n, sizeof(shortint), al, ncopy,    1, "isnrbbnd");
   memalloc( &p->isnrbneigh,n, sizeof(shortint), al, ncopy,    1, "isnrbneigh"); 

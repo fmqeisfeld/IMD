@@ -185,9 +185,12 @@ if(steps<2) return 0;
    } 
    //tmm_eps_real_arr_local[iglobal]=ttm_get_epsilon();
    //tmm_eps_imag_arr_local[iglobal]=i
+
+
    tmm_get_epsilon(lambda,l1[i][1][1].temp, l1[i][1][1].md_temp,
                   l1[i][1][1].Z, l1[i][1][1].ne, &tmm_eps_real_arr_local[iglobal],
                   &tmm_eps_imag_arr_local[iglobal]);
+ 
 
 /*
 printf("myid:%d,ig:%d, epsr:%.4e,epsimg:%.4e,Te:%.4e,Ti:%.4e,Ne:%.4e,Z:%.4e,atoms:%d\n",myid,iglobal,
