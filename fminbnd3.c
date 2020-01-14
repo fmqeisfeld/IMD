@@ -5,7 +5,7 @@
 // QELLE: fminbnd.m von octave
 double fminbnd(double a, double b,double (* f)(double,double,double), double tolx,double rho,double eng)
 {
-	tolx=1e-6;
+	tolx=1e-4;
 	double c=0.5*(3-sqrt(5));
 	double v=a+c*(b-a);
 	double w=v;

@@ -136,8 +136,6 @@ int estimate_nblist_size(void)
 
 void make_nblist(void)
 {
-if(myid==0)
-printf("NBL step:%d\n",steps);
   static int at_max=0, pa_max=0, ncell_max=0;
   int  c, i, k, n, tn, at, cc;
 

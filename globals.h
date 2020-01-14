@@ -1145,8 +1145,6 @@ EXTERN int fd_n_timesteps INIT(0); /* how many FD steps to a MD timestep? */
 EXTERN int fd_update_steps INIT(1);/* how often are FD cells updated */
 EXTERN real tot_elec_energy_local INIT(0.0);  //total internal energy of
 EXTERN real tot_elec_energy_global INIT(0.0); //electrons (DEBUG PURPOSE)
-EXTERN real tot_kin_energy_local INIT(0.0); //ionic
-EXTERN real tot_kin_energy_global INIT(0.0); //ionic
 EXTERN int diff_substeps INIT(100);
 
 //For convenience 

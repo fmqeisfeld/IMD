@@ -1,4 +1,4 @@
-#define RHOMIN 1205
+#define RHOMIN 51
 
 
 #define ADVMODE 2  // 0=NO ADVECTION, 1=GODUNOV SOLVER VIA VCOM, 2=DISCRETE FLUX SOLVER (PREDICT ATOMIC FLUXES)
@@ -62,7 +62,6 @@ void calc_ttm()
   do_cell_activation();
   do_FILLMESH();
   ttm_fill_ghost_layers();  
-  
 
     for (i = 0; i < diff_substeps; i++)
     {
@@ -73,7 +72,6 @@ void calc_ttm()
       do_FILLMESH();
       ttm_fill_ghost_layers();            
     }
-
 
 //Calc internal eng and updt new U after diff
 tot_elec_energy_local =0;
@@ -99,7 +97,7 @@ for (k=1; k<local_fd_dim.z-1; ++k)
 MPI_Reduce(&Eabs_local, &Eabs_global, 1, MPI_DOUBLE, MPI_SUM, 0, cpugrid);
 
 if(myid==0)
-  printf("step:%d,Finc:%.4e\n",steps,Eabs_global * eV2J / laser_spot_area);
+  printf("step:%d, Finc:%.4e, t-t0:%.4e, Refl:%.4e \n",steps,Eabs_global * eV2J / laser_spot_area,(tmm_time - laser_t_0) * 1e15,tmm_refl);
 
 
 
@@ -270,7 +268,6 @@ void update_fd()
   int loopvar, l;
 
   int tot_neighs; //for density calc.
-  tot_kin_energy_local = 0.0;
 
   loopvar = 0;
   l = 0;
@@ -469,15 +466,9 @@ l1[i][j][k].dens= l2[i][j][k].dens = (double) l1[i][j][k].natoms * atomic_weight
                                    - l1[i][j][k].vcomy);
             l1[i][j][k].md_temp += MASSE(p, l) * SQR(IMPULS(p, l, Z) / MASSE(p, l)
                                    - l1[i][j][k].vcomz);
-
-tot_kin_energy_local += MASSE(p,l) * 0.5* (
-                          SQR(IMPULS(p,l,X)/MASSE(p,l)) 
-                        + SQR(IMPULS(p,l,Y)/MASSE(p,l))
-                        + SQR(IMPULS(p,l,Z)/MASSE(p,l)));  // inkl. drift 
-
           }
         }
-//tot_kin_energy_local += l1[i][j][k].md_temp * 0.5;
+
 
         if (l1[i][j][k].natoms >= fd_min_atoms)
         {
@@ -505,7 +496,9 @@ l1[i][j][k].md_temp /= 3.0 * l1[i][j][k].natoms;
           }
         }
 #endif
-        //Keine elektronen-Temperatur? (0'th step--> aus Md-temp)
+        // ******************************************************************
+        // *  INITIALIZE ELECTRON TEMPERATURE AND CHECK EOS PLAUSIBILITY
+        // *****************************************************************
         if (steps < 1)
         {
           l1[i][j][k].natoms_old = l2[i][j][k].natoms_old = l1[i][j][k].natoms;
@@ -513,10 +506,23 @@ l1[i][j][k].md_temp /= 3.0 * l1[i][j][k].natoms;
           {
             l1[i][j][k].temp = l2[i][j][k].temp = l1[i][j][k].md_temp;
 
-//l1[i][j][k].md_temp=300.0/11604.5;            
-//l1[i][j][k].temp=l2[i][j][k].temp=300.0/11604.5;            
-l1[i][j][k].U =EOS_ee_from_r_te(l1[i][j][k].dens, l1[i][j][k].temp * 11604.5) * 26.9815 * AMU * eV2J; // eV/Atom
-l1[i][j][k].U=l2[i][j][k].U;
+l1[i][j][k].U =EOS_ee_from_r_te(l1[i][j][k].dens, l1[i][j][k].temp * 11604.5) * 26.9815 * AMU * J2eV; // eV/Atom
+l2[i][j][k].U=l1[i][j][k].U;
+
+  //PLAUSIBILITY EOS CHECK:
+  double echeck= EOS_ee_from_r_te(l1[i][j][k].dens, l1[i][j][k].temp * 11604.5)*26.9815 * AMU * J2eV;
+  double tcheck = EOS_te_from_r_ee(l1[i][j][k].dens, echeck/26.9815/AMU * eV2J) / 11604.5;
+  double tinit=l1[i][j][k].temp;
+  if(ABS(tcheck -tinit) > tinit*0.01) // 1% unterschied
+  {
+    char errstr[255];
+
+    sprintf(errstr,"ERROR: EOS Plausibility check failed, TfromU != Tinit. Tinit:%.4e, TfromU:%.4e\n"
+                    "Maybe Interpolation table too sparse or increase tolerance",tinit,tcheck); 
+    error(errstr);
+  }
+  
+
           }
         }
       } // for k
@@ -1388,6 +1394,7 @@ l2[i][j][k].U= l1[i][j][k].U * Nold / Nnew
 
         
         l2[i][j][k].temp = EOS_te_from_r_ee(l1[i][j][k].dens, l2[i][j][k].U / (26.9815 * AMU * J2eV)) / 11604.5;
+        
         //IDEE: Evtl. statt te_from_re mittels Cv und DeltaU?
 
         if(l2[i][j][k].temp<=0.0 )        
@@ -1523,7 +1530,17 @@ void do_cell_activation(void)
                 l1[i][j][k].temp = sqrt(E_el_neighbors / ((double)n_neighbors));
                 l2[i][j][k].temp = l1[i][j][k].temp;
 
-l1[i][j][k].U = l2[i][j][k].U= EOS_ee_from_r_te(l1[i][j][k].dens, l1[i][j][k].temp * 11604.5) * 26.9815 * AMU * 6.2415091E18; // eV/Atom                
+//MIT ADV Variante    
+//l1[i][j][k].U = l2[i][j][k].U= EOS_ee_from_r_te(l1[i][j][k].dens, l1[i][j][k].temp * 11604.5) * 26.9815 * AMU * J2eV; // eV/Atom                
+
+//NO-ADV Variante                
+l1[i][j][k].U = l2[i][j][k].U= l1[i+1][j][k].U;
+if(isnan(node.U)!= 0)
+{
+  printf("ERROR: U is NaN, step:%d, u+1:%.4e,i:%d\n",steps, l1[i+1][j][k].U,i);
+  error("U is Nan");
+}
+
 
                 {
 // #if DEBUG_LEVEL>0
@@ -1721,8 +1738,7 @@ void do_DIFF(double tau)
         //l1[i][j][k].xi += (l2[i][j][k].temp - l1[i][j][k].md_temp) * xi_fac * l1[i][j][k].fd_g / l1[i][j][k].md_temp / l1[i][j][k].dens; // NE
         l2[i][j][k].xi = l1[i][j][k].xi;
 
-     
-
+        
         /*
         if(l2[i][j][k].temp>l1[i][j][k].temp*10)  //kann auch passieren wenn zelle aktiviert wird
         {
