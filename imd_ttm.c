@@ -51,7 +51,6 @@ void calc_ttm()
 
   int telaps_md;     //fuer timing
   int telaps_ttm;
-
   fd_n_timesteps=100;
   diff_substeps=fd_n_timesteps;
 
@@ -60,9 +59,8 @@ void calc_ttm()
   
   update_fd();
   do_ADV(1.0);
-
-
   do_cell_activation();
+
   //FOLGENDES BRAUCHE ICH NUR ALS VGL IM FALL OHNE ADVECTION
   // for(i=1;i<local_fd_dim.x-1;i++)
   // {
@@ -70,6 +68,7 @@ void calc_ttm()
   //     if(node.natoms>=fd_min_atoms)
   //       l1[i][j][k].temp = EOS_te_from_r_ee(l1[i][j][k].dens, l1[i][j][k].U / (26.9815 * AMU * J2eV)) / 11604.5;
   // }
+
   do_FILLMESH();
   ttm_fill_ghost_layers();  
 
@@ -1500,7 +1499,9 @@ void do_cell_activation(void)
           // * ---> WENDE ALTES SCHEMA AN UND BERECHNE MITTEL    *
           // * AUS NACHBARZELLEN               *
           // *****************************************************
-          if (isnan(l1[i][j][k].temp) != 0 || l1[i][j][k].temp <= 0.003) //Temp zu klein (etwa 35K) ->wide-range props werden bullshit --> Diffusion instabil
+//BAUSTELLE          
+//FOLGENDES FUER DEN FALL MIT ADVECTION   ent-kommentieren        
+if (isnan(l1[i][j][k].temp) != 0 || l1[i][j][k].temp <= 0.003) //Temp zu klein (etwa 35K) ->wide-range props werden bullshit --> Diffusion instabil
           {
 
 // #if DEBUG_LEVEL>0
@@ -1553,14 +1554,17 @@ void do_cell_activation(void)
                 l1[i][j][k].temp = sqrt(E_el_neighbors / ((double)n_neighbors));
                 l2[i][j][k].temp = l1[i][j][k].temp;
 
-//MIT ADV Variante    
+//BAUSTELLE
+printf("ACHTUNG: MIT ADV SOLLTE HIER NICHT REINLAUFEN!!\n");
+//MIT ADV Variante : Sollte eigentlich nur bei Fehler hier reinlaufen
 //l1[i][j][k].U = l2[i][j][k].U= EOS_ee_from_r_te(l1[i][j][k].dens, l1[i][j][k].temp * 11604.5) * 26.9815 * AMU * J2eV; // eV/Atom                
 
 //NO-ADV Variante                
-l1[i][j][k].U = l2[i][j][k].U= l1[i+1][j][k].U;
+l1[i][j][k].U = l2[i][j][k].U= EOS_ee_from_r_te(l1[i][j][k].dens, l1[i][j][k].temp * 11604.5) * 26.9815 * AMU * J2eV; // eV/Atom
+
 if(isnan(node.U)!= 0)
 {
-  printf("ERROR: U is NaN, step:%d, u+1:%.4e,i:%d\n",steps, l1[i+1][j][k].U,i);
+  printf("ERROR: U is NaN, step:%d,i:%d\n",steps, i);
   error("U is Nan");
 }
 
@@ -2772,17 +2776,18 @@ double EOS_ee_from_r_te(double r, double t)
   pout.x = r;
   pout.y = tsqrt;
 
-if(tsqrt > intp_ee_from_r_tesqrt.ymax)
+if(tsqrt > intp_ee_from_r_tesqrt.ymax || tsqrt < intp_ee_from_r_tesqrt.ymin )
 {
   char errstr[255];
-  sprintf(errstr, "ERRROR in EOS_ee_from_r_te: tsqrt=%.4e exceeded ymax in EOS-table:%.4e\n",tsqrt,intp_ee_from_r_tesqrt.ymax);
+  sprintf(errstr, "ERRROR in EOS_ee_from_r_te: tsqrt=%.4e exceeded interpolation range in EOS-table. ymin=%.4e,ymax=%.4e\n",
+        tsqrt,intp_ee_from_r_tesqrt.ymin, intp_ee_from_r_tesqrt.ymax);
   error(errstr);
 }
-if(r < intp_ee_from_r_tesqrt.xmin)
+if(r < intp_ee_from_r_tesqrt.xmin || r > intp_ee_from_r_tesqrt.xmax)
 {
   char errstr[255];
-  sprintf(errstr, "ERROR in EOS_ee_from_r_te: Density=%.4e lower than minimum in interpolation table = %.4e\n",
-    r, intp_ee_from_r_tesqrt.xmin);
+  sprintf(errstr, "ERROR in EOS_ee_from_r_te: Density=%.4e exceeds interpolation range, rmin= %.4e, rmax=%.4e\n",
+    r, intp_ee_from_r_tesqrt.xmin,intp_ee_from_r_tesqrt.xmax);
   error(errstr);
 }
 
@@ -2800,8 +2805,8 @@ if(r < intp_ee_from_r_tesqrt.xmin)
 double EOS_cve_from_r_te(double r, double t)
 {
 
-  r = MAX(r, RHOMIN);
-  r = MIN(r, 3500); //CHEAT
+  //r = MAX(r, RHOMIN);
+  //r = MIN(r, 3500); //CHEAT
 
   //double tsqrt = sqrt(t);
   
@@ -2845,8 +2850,8 @@ double EOS_cve_from_r_te(double r, double t)
 double EOS_te_from_r_ee(double r, double e)
 {
   //if (r < RHOMIN) return 0;
-  r = MAX(r, RHOMIN);
-  r=MIN(r,3500);
+  //r = MAX(r, RHOMIN);
+  //r=MIN(r,3500);
 
   if(r < intp_ee_from_r_tesqrt.xmin)
   {
