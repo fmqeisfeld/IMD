@@ -70,7 +70,7 @@ void calc_ttm()
   //     if(node.natoms>=fd_min_atoms)
   //       l1[i][j][k].temp = EOS_te_from_r_ee(l1[i][j][k].dens, l1[i][j][k].U / (26.9815 * AMU * J2eV)) / 11604.5;
   // }
-  
+
 
   do_FILLMESH();
   ttm_fill_ghost_layers();  
@@ -1052,26 +1052,7 @@ void init_ttm()
 #if DEBUG_LEVEL>1
   printf("proc:%d,entered init_ttm()\n", myid);
 #endif
-  // *****************************************
-  // * READ AND BCAST INTERPOLATION TABLES
-  // ******************************************
-  // read_bc_interp(&QfromT_interp,"EOS_QfromT.txt");
-  // read_bc_interp(&CfromT_interp,"EOS_CfromT.txt"); //für CFL maxdt
 
-nn_read_table(&intp_cve_from_r_te, "EOS_cve_from_r_te.txt");
-nn_read_table(&intp_ee_from_r_tesqrt, "EOS_ee_from_r_tesqrt.txt");
-
-  //read_tricub_interp(&kappa_interp,"kappa.txt"); //Hardcoding ist schneller
-  //Lese Drude-Lorentz Interpolationstabellen
-
-
-#ifdef FDTD
-  read_tricub_interp(&Lop1i, "DL1.txt");
-  read_tricub_interp(&Lop2i, "DL2.txt");
-  read_tricub_interp(&Lop3i, "DL3.txt");
-  read_tricub_interp(&Lop4i, "DL4.txt");
-  read_tricub_interp(&Lop5i, "DL5.txt");
-#endif
 
 
   fd_vol = fd_h.x * fd_h.y * fd_h.z;
@@ -1292,6 +1273,28 @@ neighvol = pow(sqrt(pair_pot.end[0]), 3.0) * 4.0 / 3.0 * M_PI;
   {
     update_fd(); /* get md_temp and v_com etc. */
   }
+
+
+  // *****************************************
+  // * READ AND BCAST INTERPOLATION TABLES
+  // ******************************************
+  // read_bc_interp(&QfromT_interp,"EOS_QfromT.txt");
+  // read_bc_interp(&CfromT_interp,"EOS_CfromT.txt"); //für CFL maxdt
+
+nn_read_table(&intp_cve_from_r_te, "EOS_cve_from_r_te.txt");
+nn_read_table(&intp_ee_from_r_tesqrt, "EOS_ee_from_r_tesqrt.txt");
+
+  //read_tricub_interp(&kappa_interp,"kappa.txt"); //Hardcoding ist schneller
+  //Lese Drude-Lorentz Interpolationstabellen
+
+
+#ifdef FDTD
+  read_tricub_interp(&Lop1i, "DL1.txt");
+  read_tricub_interp(&Lop2i, "DL2.txt");
+  read_tricub_interp(&Lop3i, "DL3.txt");
+  read_tricub_interp(&Lop4i, "DL4.txt");
+  read_tricub_interp(&Lop5i, "DL5.txt");
+#endif
 
 //DEBUG
 //ttm_writeout(9999);
@@ -2163,8 +2166,9 @@ void ttm_read(int number)
     {
       //read data
       if (fgets (line, 400, infile) == NULL) {
-        printf("error reading ttm-input-file %s in line %d\n", fname, i);
-        error("error reading ttm input file...");
+        char errstr[255];
+        sprintf(errstr,"Error Reading ttm-input-file: %s in line %d. Maybe shiftx not deactivated?\n", fname,i);
+        error(errstr);
       }
       if (i > 0) //skip first line
       {
