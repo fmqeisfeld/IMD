@@ -57,9 +57,21 @@ void calc_ttm()
 
   tau_DIFF=(timestep)/((double) fd_n_timesteps);
 
+  
   update_fd();
-  //do_ADV(1.0);
+  do_ADV(1.0);
+
+
   do_cell_activation();
+  //FOLGENDES BRAUCHE ICH NUR ALS VGL IM FALL OHNE ADVECTION
+  // for(i=1;i<local_fd_dim.x-1;i++)
+  // {
+  //     j=k=1;
+  //     if(node.natoms>=fd_min_atoms)
+  //       l1[i][j][k].temp = EOS_te_from_r_ee(l1[i][j][k].dens, l1[i][j][k].U / (26.9815 * AMU * J2eV)) / 11604.5;
+  // }
+  
+
   do_FILLMESH();
   ttm_fill_ghost_layers();  
 
@@ -83,7 +95,7 @@ for (k=1; k<local_fd_dim.z-1; ++k)
 {
       if(l1[i][j][k].natoms>=1)
       {
-        //l1[i][j][k].U =EOS_ee_from_r_te(l1[i][j][k].dens, l1[i][j][k].temp * 11604.5) * 26.9815 * AMU * J2eV; //eV/Atom
+        //l1[i][j][k].U =EOS_ee_from_r_te(l1[i][j][k].dens, l1[i][j][k].temp * 11604.5) * 26.9815 * AMU * J2eV; //eV/Atom      
         tot_elec_energy_local += l1[i][j][k].U*((double) l1[i][j][k].natoms);
       }      
       else
@@ -513,6 +525,10 @@ l2[i][j][k].U=l1[i][j][k].U;
   double echeck= EOS_ee_from_r_te(l1[i][j][k].dens, l1[i][j][k].temp * 11604.5)*26.9815 * AMU * J2eV;
   double tcheck = EOS_te_from_r_ee(l1[i][j][k].dens, echeck/26.9815/AMU * eV2J) / 11604.5;
   double tinit=l1[i][j][k].temp;
+
+//:2.8160e+03,t:1.1200e+05
+  //double foo=EOS_ee_from_r_te(2.816e3, 1.12e5); //<--Fehler
+
   if(ABS(tcheck -tinit) > tinit*0.01) // 1% unterschied
   {
     char errstr[255];
@@ -1392,12 +1408,18 @@ l2[i][j][k].U= l1[i][j][k].U * Nold / Nnew
                         ) / Nnew;
 
 
-        
-        l2[i][j][k].temp = EOS_te_from_r_ee(l1[i][j][k].dens, l2[i][j][k].U / (26.9815 * AMU * J2eV)) / 11604.5;
-        
+        if(Nnew >= fd_min_atoms) // eigentlich auf RHOMIN testen, aber fd_min_atoms ist sogar strenger!
+          l2[i][j][k].temp = EOS_te_from_r_ee(l1[i][j][k].dens, l2[i][j][k].U / (26.9815 * AMU * J2eV)) / 11604.5;
+
+//DEBUG        
+if(l2[i][j][k].temp > node.temp + node.temp*0.1)
+{
+  printf("WARNING: temp increased a lot from t1:%.4e to t2:%.4e, r:%.4e, ig:%d\n",
+          node.temp, l2[i][j][k].temp, l1[i][j][k].dens, i_global);
+}
         //IDEE: Evtl. statt te_from_re mittels Cv und DeltaU?
 
-        if(l2[i][j][k].temp<=0.0 )        
+        if(Nnew >= fd_min_atoms && l2[i][j][k].temp<=0.0 )        
         {
           printf("\nmyid:%d,steps:%d,i:%d,j:%d Temp is <Tmin:%.4e in do_ADV, nnew:%.f,nold:%f,n"
            "dens: %.6e , dens_old: %.6e natoms:%d,  atoms_old:%d\n"
@@ -2743,9 +2765,14 @@ double EOS_ee_from_r_te(double r, double t)
   r = MIN(r, 3500); //CHEAT
 
   double tsqrt = sqrt(t);
+
   point pout;
   pout.x = r;
   pout.y = tsqrt;
+
+if(tsqrt > intp_ee_from_r_tesqrt.ymax)
+  error("Error: tsqrt exceeded interpol. table ymax");
+
   // nnhpi_interpolate(intp_e_from_r_tsqrt.interpolator, &pout); //naturla neigh, sibson-rule
   lpi_interpolate_point(intp_ee_from_r_tesqrt.interpolator, &pout); //linear
   //pout.z*=26.9815*AMU*6.2415091E18; // J/kg --> eV/Atom
