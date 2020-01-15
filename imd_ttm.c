@@ -70,8 +70,6 @@ void calc_ttm()
   //     if(node.natoms>=fd_min_atoms)
   //       l1[i][j][k].temp = EOS_te_from_r_ee(l1[i][j][k].dens, l1[i][j][k].U / (26.9815 * AMU * J2eV)) / 11604.5;
   // }
-
-
   do_FILLMESH();
   ttm_fill_ghost_layers();  
 
@@ -517,9 +515,9 @@ l1[i][j][k].md_temp /= 3.0 * l1[i][j][k].natoms;
           if (l1[i][j][k].natoms >= fd_min_atoms)
           {
             l1[i][j][k].temp = l2[i][j][k].temp = l1[i][j][k].md_temp;
-
 l1[i][j][k].U =EOS_ee_from_r_te(l1[i][j][k].dens, l1[i][j][k].temp * 11604.5) * 26.9815 * AMU * J2eV; // eV/Atom
 l2[i][j][k].U=l1[i][j][k].U;
+
 
   //PLAUSIBILITY EOS CHECK:
   double echeck= EOS_ee_from_r_te(l1[i][j][k].dens, l1[i][j][k].temp * 11604.5)*26.9815 * AMU * J2eV;
@@ -1269,15 +1267,15 @@ neighvol = pow(sqrt(pair_pot.end[0]), 3.0) * 4.0 / 3.0 * M_PI;
 #endif
 
   MPI_Bcast(&imdrestart, 1, MPI_INT, 0, cpugrid);
-  if (imdrestart == 0)
-  {
-    update_fd(); /* get md_temp and v_com etc. */
-  }
+  // if (imdrestart == 0) //WOZU? geschieht doch sowieso als erstes in calc_ttm-loop
+  // {
+  //   update_fd(); /* get md_temp and v_com etc. */
+  // }
 
 
   // *****************************************
   // * READ AND BCAST INTERPOLATION TABLES
-  // ******************************************
+  // ******************************************  
   // read_bc_interp(&QfromT_interp,"EOS_QfromT.txt");
   // read_bc_interp(&CfromT_interp,"EOS_CfromT.txt"); //für CFL maxdt
 
@@ -1493,8 +1491,8 @@ void do_cell_activation(void)
 
 // #if DEBUG_LEVEL>1
           // ZELLE AKTIVIERT
-          printf("Warning:New FD cell activated on proc %d at ig:%d,jg:%d,kg:%d with %d atoms on step:%d and T=%.4e, atoms_old:%d\n",
-                 myid, i, j, k, l1[i][j][k].natoms, steps, l1[i][j][k].temp, l1[i][j][k].natoms_old);
+          printf("Warning:New FD cell activated on proc %d at ig:%d,jg:%d,kg:%d with %d atoms on step:%d and T=%.4e, dens=%.4e, atoms_old:%d\n",
+                 myid, i, j, k, l1[i][j][k].natoms, steps, l1[i][j][k].temp, l1[i][j][k].dens, l1[i][j][k].natoms_old);
 // #endif
           // *****************************************************
           // * NEU AKTIVIERTE ZELLE MIT UNSINNIGER TEMPERATUR,   *
@@ -2765,8 +2763,8 @@ double QfromT(double T, double rho)
 double EOS_ee_from_r_te(double r, double t)
 {
   //if (r < RHOMIN) return 0;
-  r = MAX(r, RHOMIN);
-  r = MIN(r, 3500); //CHEAT
+  //r = MAX(r, RHOMIN);
+  //r = MIN(r, 3500); //CHEAT
 
   double tsqrt = sqrt(t);
 
@@ -2775,14 +2773,25 @@ double EOS_ee_from_r_te(double r, double t)
   pout.y = tsqrt;
 
 if(tsqrt > intp_ee_from_r_tesqrt.ymax)
-  error("Error: tsqrt exceeded interpol. table ymax");
+{
+  char errstr[255];
+  sprintf(errstr, "ERRROR in EOS_ee_from_r_te: tsqrt=%.4e exceeded ymax in EOS-table:%.4e\n",tsqrt,intp_ee_from_r_tesqrt.ymax);
+  error(errstr);
+}
+if(r < intp_ee_from_r_tesqrt.xmin)
+{
+  char errstr[255];
+  sprintf(errstr, "ERROR in EOS_ee_from_r_te: Density=%.4e lower than minimum in interpolation table = %.4e\n",
+    r, intp_ee_from_r_tesqrt.xmin);
+  error(errstr);
+}
 
   // nnhpi_interpolate(intp_e_from_r_tsqrt.interpolator, &pout); //naturla neigh, sibson-rule
   lpi_interpolate_point(intp_ee_from_r_tesqrt.interpolator, &pout); //linear
   //pout.z*=26.9815*AMU*6.2415091E18; // J/kg --> eV/Atom
   if(isnan(pout.z)!=0)
   { 
-    printf("ee_from_r_te retunred NaN!.r:%.4e,t:%.4e",r,t);
+    printf("ERROR in EOS_ee_from_r_te: ee_from_r_te retunred NaN!.r:%.4e,t:%.4e",r,t);
     error("ee_from_r_te retunred NaN");
   }
   return pout.z;
@@ -2799,14 +2808,22 @@ double EOS_cve_from_r_te(double r, double t)
   point pout;
   pout.x = r;
   pout.y = t;
-
+  
+  if(r < intp_cve_from_r_te.xmin)
+  {
+    char errstr[255];
+    sprintf(errstr, "ERROR: Density=%.4e lower than minimum in interpolation table for cve_from_r_te = %.4e\n",
+      r,intp_cve_from_r_te.xmin);
+    error(errstr);
+  }
   // nnhpi_interpolate(intp_e_from_r_tsqrt.interpolator, &pout); //naturla neigh, sibson-rule
   lpi_interpolate_point(intp_cve_from_r_te.interpolator, &pout); //linear
 
   if(isnan(pout.z)!=0)
   { 
-    printf("cve_from_r_te retunred NaN!.r:%.4e,t:%.4e",r,t);
-    error("cve_from_r_te retunred NaN");
+    char errstr[255];
+    sprintf(errstr, "ERROR: cve_from_r_te retunred NaN!.r:%.4e,t:%.4e",r,t);
+    error(errstr);
   }
 
   // double tupper=t+0.02*t;
@@ -2830,6 +2847,15 @@ double EOS_te_from_r_ee(double r, double e)
   //if (r < RHOMIN) return 0;
   r = MAX(r, RHOMIN);
   r=MIN(r,3500);
+
+  if(r < intp_ee_from_r_tesqrt.xmin)
+  {
+    char errstr[255];
+    sprintf(errstr, "ERROR in EOS_te_from_r_ee: Density=%.4e lower than minimum in interpolation table = %.4e\n",
+      r,intp_ee_from_r_tesqrt.xmin);
+    error(errstr);
+  }  
+
   //double eSI=e/(26.9815*AMU*6.2415091E18); // eV/Atom ---> J/kg
   double a = pow(intp_ee_from_r_tesqrt.ymin, 2.0);
   double b = pow(intp_ee_from_r_tesqrt.ymax, 2.0);
