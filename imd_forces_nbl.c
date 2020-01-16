@@ -1034,14 +1034,14 @@ if(r2 <= pair_pot.end[0])
   */
 
 #ifdef FILTER
-if(myid==0)
- printf("steps:%d\n",steps);
+
   if(steps>0)
     if(steps % filter_int ==0)
     {
       filter_atoms();
     }
   //Atome werden beim nächsten fix_cells-aufruf gelöscht 
+
 #endif 
 //ENDOF MYMOD
 

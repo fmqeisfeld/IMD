@@ -1154,6 +1154,8 @@ EXTERN real eV2J   INIT(1.602176634E-19);
 
 EXTERN real densSI INIT(1660.53907); //u/Angstrom^3 --> kg/m^3
 
+EXTERN double Temin INIT(1e-3); //MININUM aller interpol. tabellen in eV
+EXTERN double rhomin INIT(1e-3); // in SI
 //Dirichlet boundary conditions
 #ifdef DIRICHLET
 EXTERN int *dirichlet_maxy_local;	   //outermost non-empty cells in +y-direction

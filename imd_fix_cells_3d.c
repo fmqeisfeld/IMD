@@ -62,7 +62,8 @@ void fix_cells(void)
 	  lcoord = local_cell_coord( coord );
 #ifdef FILTER
 
-	  if (DELME(p,l)==1) //ORT(p,l,X) < filter_min_x || ORT(p,l,X) > filter_max_x
+	  //if (ORT(p,l,X) < filter_min_x || ORT(p,l,X) > filter_max_x)
+    if(FILTERME(p,l)==1)
 	  {
 //printf("\n WARNING myid:%d,steps:%d,deleting nr:%d, x:%f, y:%f, z:%f \n",myid,steps,NUMMER(p,l),ORT(p,l,X),ORT(p,l,Y),ORT(p,l,Z));	    
             to_cpu = cpu_coord(coord);

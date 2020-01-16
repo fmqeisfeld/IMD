@@ -1,8 +1,12 @@
-#define RHOMIN 51
+//TODO: 
+// TTM-READ UPDATEN FUER FDTD-NUTZUNG
+// 
+
+//#define RHOMIN 51
 
 
 #define ADVMODE 2  // 0=NO ADVECTION, 1=GODUNOV SOLVER VIA VCOM, 2=DISCRETE FLUX SOLVER (PREDICT ATOMIC FLUXES)
-//#define ADV2D
+//#define ADVMODE2d  // FALLS y dim offen sein soll, müssen atomic-fluxes auch über kanten kommmuniziert werden
 
 #define DEBUG_LEVEL 1
 
@@ -21,7 +25,7 @@
 #define NBUFFC 0
 #endif /*BUFCELLS*/
 
-#define TTMOUTBUFLEN 400
+#define TTMOUTBUFLEN 400  //Wird bei ttm-output im MPIIO-Modus gebraucht. Entspricht max. Zeilenlänge
 // ******************************************************************************/
 /* Macro to allow electr. heat capacity to vary
  * with electronic temperature (C_e=gamma*T_e) */
@@ -31,7 +35,8 @@
 // Hierfür gibt es weiter unten im Code die entsprechende wide-range routine
 #define FD_C ((fd_c==0)?(fd_gamma*l1[i][j][k].temp):(fd_c))
 
-#define node l1[i][j][k]  //bequemer, muss oft geschrieben werden
+#define node  l1[i][j][k]  //bequemer, muss oft geschrieben werden
+#define node2 l2[i][j][k]  //bequemer, muss oft geschrieben werden
 // ****************************************************
 // *         MAIN FUNC
 // *****************************************************
@@ -60,15 +65,6 @@ void calc_ttm()
   update_fd();
   do_ADV(1.0);
   do_cell_activation();
-
-  //FOLGENDES BRAUCHE ICH NUR ALS VGL IM FALL OHNE ADVECTION
-  // for(i=1;i<local_fd_dim.x-1;i++)
-  // {
-  //     j=k=1;
-  //     if(node.natoms>=fd_min_atoms)
-  //       l1[i][j][k].temp = EOS_te_from_r_ee(l1[i][j][k].dens, l1[i][j][k].U / (26.9815 * AMU * J2eV)) / 11604.5;
-  // }
-
   do_FILLMESH();
   ttm_fill_ghost_layers();  
 
@@ -590,14 +586,14 @@ void do_FILLMESH(void)
           l1[i][j][k].Z=MeanCharge(l1[i][j][k].temp*11604.5, l1[i][j][k].dens, atomic_charge, atomic_weight,i,j,k);
 
           // l1[i][j][k].Z=QfromT(l1[i][j][k].temp,l1[i][j][k].dens);
-
+#if DEBUG_LEVEL > 0
           if (l1[i][j][k].Z == -1.0)
           {
             printf("steps:%d,proc:%d,i:%d,j:%d,k:%d, ERROR during QfromT in FILLMESH, Te:%f (K), dens:%f (kg/m^3),atoms:%d\n",
                    steps, myid, i, j, k, l1[i][j][k].temp * 11604.5, l1[i][j][k].dens, l1[i][j][k].natoms);
             error("ERROR during QfromT in FILLMESH");
           }
-
+#endif
           l1[i][j][k].ne = l1[i][j][k].Z * l1[i][j][k].dens / (atomic_weight * AMU); //Assumption: Quasi-neutrality condition
           l2[i][j][k].ne = l1[i][j][k].ne;
 
@@ -658,8 +654,7 @@ void do_FILLMESH(void)
           //////////////////////////////////////////////////////////////          
           //        DRUDE - LORENTZ PARAMS FUER MAXWELL SOLVER
           //////////////////////////////////////////////////////////////   
-#ifdef FDTD
-          
+#ifdef FDTD         
           int fitresult = fitDL(i, j, k);
 #if DEBUG_LEVEL>0
           if (fitresult == -1.0)
@@ -704,43 +699,6 @@ void do_COMMFLUX(void)
   printf("steps:%d,proc:%d,entered do_COMMFLUX\n", steps, myid);
 #endif
 
-//   // //Ersst mal interne energie berechnen in jeder Zelle
-//   for (i=1;i<local_fd_dim.x-1;++i)
-//   {
-//     for (j=1; j<local_fd_dim.y-1; ++j)
-//     {
-//       for (k=1; k<local_fd_dim.z-1; ++k)
-//       {
-//         //if(l1[i][j][k].natoms < fd_min_atoms) continue;
-// /*        
-//         if(l1[i][j][k].dens < RHOMIN)
-//         {
-//           l1[i][j][k].U=l2[i][j][k].U=0.0;
-//           continue;
-//         } 
-// */        
-//         //Brauche nicht in eV/Atom umrechnen...
-//         //l1[i][j][k].U=EOS_ee_from_r_te(l1[i][j][k].dens, l1[i][j][k].temp*11604.5);//*26.9815*AMU*J2eV; //J/kg -> eV/Atom        
-//         //l2[i][j][k].U=l1[i][j][k].U; //wegen diff-step
-// if(l1[i][j][k].natoms >= 1)
-//         //U : temp * eV / Vol / temp ----> eV/ mass / temp *(atoms*mass(atom)) ---> eV/Atom
-//         l1[i][j][k].U=l2[i][j][k].U=l1[i][j][k].temp*0.00291669/(l1[i][j][k].dens*6.02214076e-4)*26.9815;
-//         //l1[i][j][k].U=l2[i][j][k].U=l1[i][j][k].temp*0.00291669*fd_vol/node.natoms;
-//       else
-//         l1[i][j][k].U=l2[i][j][k].U=0.0;
-
-//         // l1[i][j][k].U=EOS_ee_from_r_te(l1[i][j][k].dens, l1[i][j][k].temp*11604.5)*l1[i][j][k].dens*(fd_vol*1e-30)*J2eV;
-//         // l2[i][j][k].U=l1[i][j][k].U; //wegen diff-step
-
-//         //CHECK
-//         //double tmp=EOS_te_from_r_ee(l1[i][j][k].dens, l1[i][j][k].U/(26.9815*AMU*J2eV))/11604.5;
-//         //printf("r:%.4e,t:%.4e,ufromt:%.4e,tfromu:%.4e\n",
-//         //        l1[i][j][k].dens, l1[i][j][k].temp, l1[i][j][k].U,tmp);
-
-//       }
-//     }
-//   }
-
   ///////////////////////////////////////////////////////////////////////////////////////////
   // Kommunikation von diversen größen, die nur jeden MD-step gebraucht werden
   // statt jeden fd-step (dafür gibts ja fill_ghost_cells)
@@ -754,9 +712,6 @@ void do_COMMFLUX(void)
    * up   -> -z
    * down -> +z
    * *************/
-#if DEBUG_LEVEL>1
-  printf("proc:%d,steps:%d,entered comm loop\n", steps, myid);
-#endif
 
   //first comm. yz-plane (+x/-x)
   for (j = 1; j < local_fd_dim.y - 1; ++j)
@@ -1291,8 +1246,34 @@ nn_read_table(&intp_ee_from_r_tesqrt, "EOS_ee_from_r_tesqrt.txt");
   read_tricub_interp(&Lop3i, "DL3.txt");
   read_tricub_interp(&Lop4i, "DL4.txt");
   read_tricub_interp(&Lop5i, "DL5.txt");
+  
+  //Set Minimum allowed Te und dens according to interpolation tables
+  Temin=MAX(Temin,pow(10.0,Lop1i.ymin));
+  Temin=MAX(Temin,pow(10.0,Lop2i.ymin));
+  Temin=MAX(Temin,pow(10.0,Lop3i.ymin));
+  Temin=MAX(Temin,pow(10.0,Lop4i.ymin));
+  Temin=MAX(Temin,pow(10.0,Lop5i.ymin));
+
+  rhomin=MAX(rhomin,Lop1i.xmin);
+  rhomin=MAX(rhomin,Lop2i.xmin);
+  rhomin=MAX(rhomin,Lop3i.xmin);
+  rhomin=MAX(rhomin,Lop4i.xmin);
+  rhomin=MAX(rhomin,Lop5i.xmin);
+
 #endif
 
+//BESTIMME Temin  (in eV)
+    Temin=MAX(Temin,pow(intp_ee_from_r_tesqrt.ymin,2.0)/11604.5);
+    Temin=MAX(Temin,intp_cve_from_r_te.ymin/11604.5);
+//BESTIMME rhomin in SI
+    rhomin=MAX(rhomin,intp_ee_from_r_tesqrt.xmin);
+    rhomin=MAX(rhomin,intp_cve_from_r_te.xmin);
+//CHECKE OB FDMINATOMS AUCH STRENG GENUG
+double checkdens= (double) fd_min_atoms * atomic_weight / fd_vol * 1660.53907;  
+if(checkdens  < rhomin)
+if(myid==0)
+  printf("WARNING: Theoretical minimum density=%.4e is lower than EOS-tables minimum:%.4e. Consider increasing fd_min_atoms\n",
+        checkdens, rhomin);
 //DEBUG
 //ttm_writeout(9999);
   /***********************
@@ -1344,11 +1325,10 @@ void do_ADV(double tau)
   int i, j, k;
   int i_global, j_global, k_global;
 
-  k = 1; //erstmal nur 2D
+  k = 1; //erstmal nur 2D und 1D
 
   do_COMMFLUX();
 
-  //NOW CALC advection
   for (i = 1; i < local_fd_dim.x - 1; ++i)
   {
     for (j = 1; j < local_fd_dim.y - 1; ++j)
@@ -1377,14 +1357,14 @@ void do_ADV(double tau)
 
       if (Nnew > 0)
       {
-l2[i][j][k].U= l1[i][j][k].U * Nold / Nnew
-              + tau*(
-                          // +x/-x
-+(double) l1[i][j][k].flux[0] * l1[i + 1][j][k].U //erhalten von +x,y
-- (double) l1[i + 1][j][k].flux[1] * l1[i][j][k].U //nach +x,y abgeflossen
+                          l2[i][j][k].U= l1[i][j][k].U * Nold / Nnew
+                                        + tau*(
+                                                    // +x/-x
+                          +(double) l1[i][j][k].flux[0] * l1[i + 1][j][k].U //erhalten von +x,y
+                          - (double) l1[i + 1][j][k].flux[1] * l1[i][j][k].U //nach +x,y abgeflossen
 
-+ (double) l1[i][j][k].flux[1] * l1[i - 1][j][k].U //erhalten von -x,y
-- (double) l1[i - 1][j][k].flux[0] * l1[i][j][k].U //nach -x,y abgeflossen
+                          + (double) l1[i][j][k].flux[1] * l1[i - 1][j][k].U //erhalten von -x,y
+                          - (double) l1[i - 1][j][k].flux[0] * l1[i][j][k].U //nach -x,y abgeflossen
                           // +y/-y
 #ifdef ADV2D
                           + (double) l1[i][j][k].flux[2] * l1[i][j + 1][k].U //erhalten von x,+y
@@ -1408,17 +1388,12 @@ l2[i][j][k].U= l1[i][j][k].U * Nold / Nnew
                         ) / Nnew;
 
 
-        if(Nnew >= fd_min_atoms) // eigentlich auf RHOMIN testen, aber fd_min_atoms ist sogar strenger!
-          l2[i][j][k].temp = EOS_te_from_r_ee(l1[i][j][k].dens, l2[i][j][k].U / (26.9815 * AMU * J2eV)) / 11604.5;
+          //Temp updaten wenn zelle aktiviert
+          if(l1[i][j][k].natoms >= fd_min_atoms)
+            l2[i][j][k].temp = EOS_te_from_r_ee(l1[i][j][k].dens, l2[i][j][k].U / (26.9815 * AMU * J2eV)) / 11604.5;
 
-//DEBUG        
-if(l2[i][j][k].temp > node.temp + node.temp*0.1)
-{
-  printf("WARNING: temp increased a lot from t1:%.4e to t2:%.4e, r:%.4e, ig:%d\n",
-          node.temp, l2[i][j][k].temp, l1[i][j][k].dens, i_global);
-}
         //IDEE: Evtl. statt te_from_re mittels Cv und DeltaU?
-
+#if DEBUG_LEVEL > 0
         if(Nnew >= fd_min_atoms && l2[i][j][k].temp<=0.0 )        
         {
           printf("\nmyid:%d,steps:%d,i:%d,j:%d Temp is <Tmin:%.4e in do_ADV, nnew:%.f,nold:%f,n"
@@ -1443,6 +1418,7 @@ if(l2[i][j][k].temp > node.temp + node.temp*0.1)
            l1[i][j][k].flux[6],l2[i-1][j+1][k].natoms, l1[i-1][j+1][k].U, l1[i-1][j+1][k].flux[3],
            l1[i][j][k].flux[7],l2[i-1][j-1][k].natoms, l1[i-1][j-1][k].U, l1[i-1][j-1][k].flux[4]);
         }
+#endif        
         
       }
       else if (Nnew < 1)
@@ -1477,38 +1453,35 @@ void do_cell_activation(void)
         if (l1[i][j][k].natoms_old >= fd_min_atoms && l1[i][j][k].natoms < fd_min_atoms)
         {
           // ZELLE DEAKTIVIERT
-//#if DEBUG_LEVEL>1
+#if DEBUG_LEVEL > 0
           printf("Warning:FD cell deactivated on proc %d on step %d at i:%d,j:%d,k%d with %d atoms and temp:%.4e\n", myid, steps,
                  i_global, j_global, k_global, l1[i][j][k].natoms, l1[i][j][k].temp);
-// #endif
+#endif
           // Cell deactivated. Deduce its electronic energy from E_new_local
           l1[i][j][k].xi = 0.0;
         }
         // ZELLE AKTIVIERT
         else if (l1[i][j][k].natoms_old < fd_min_atoms && l1[i][j][k].natoms >= fd_min_atoms)
         {
-
-// #if DEBUG_LEVEL>1
-          // ZELLE AKTIVIERT
+#if DEBUG_LEVEL > 0
           printf("Warning:New FD cell activated on proc %d at ig:%d,jg:%d,kg:%d with %d atoms on step:%d and T=%.4e, dens=%.4e, atoms_old:%d\n",
                  myid, i, j, k, l1[i][j][k].natoms, steps, l1[i][j][k].temp, l1[i][j][k].dens, l1[i][j][k].natoms_old);
-// #endif
+#endif
           // *****************************************************
           // * NEU AKTIVIERTE ZELLE MIT UNSINNIGER TEMPERATUR,   *
           // * d.h. ADVECTION HAT NICHT FUNKTIONIERT             *
           // * ---> WENDE ALTES SCHEMA AN UND BERECHNE MITTEL    *
           // * AUS NACHBARZELLEN               *
           // *****************************************************
-//BAUSTELLE          
-//FOLGENDES FUER DEN FALL MIT ADVECTION   ent-kommentieren        
-if (isnan(l1[i][j][k].temp) != 0 || l1[i][j][k].temp <= 0.003) //Temp zu klein (etwa 35K) ->wide-range props werden bullshit --> Diffusion instabil
+
+          if (isnan(l1[i][j][k].temp) != 0 || l1[i][j][k].temp <= Temin) //Temp zu klein (etwa 35K) -> altes schema
           {
 
-// #if DEBUG_LEVEL>0
-            printf("proc:%d,steps:%d,ig:%d,jg:%d,kg:%d WARNING: Freshly activated cell with Te is NaN or < Tmin:%.4e,atoms:%d, dens: %.6e ,"
+#if DEBUG_LEVEL>0
+            printf("proc:%d,steps:%d,ig:%d,jg:%d,kg:%d WARNING: Freshly activated cell with Te=%.4e is NaN or < Tmin:%.4e,atoms:%d, dens: %.4e ,"
                    "using neighbor cells or mdtemp\n",
-                   myid, steps, i_global, j_global, 0, l1[i][j][k].temp, l1[i][j][k].natoms, l1[i][j][k].dens);
-// #endif
+                   myid, steps, i_global, j_global, 0, l1[i][j][k].temp, Temin,  l1[i][j][k].natoms, l1[i][j][k].dens);
+#endif
 
             // Freshly activated cell. Gets avg. electron energy of active
             // neighbor cells, the created energy is added to E_new_local
@@ -1553,51 +1526,37 @@ if (isnan(l1[i][j][k].temp) != 0 || l1[i][j][k].temp <= 0.003) //Temp zu klein (
               {
                 l1[i][j][k].temp = sqrt(E_el_neighbors / ((double)n_neighbors));
                 l2[i][j][k].temp = l1[i][j][k].temp;
-
-//BAUSTELLE
-printf("ACHTUNG: MIT ADV SOLLTE HIER NICHT REINLAUFEN!!\n");
-//MIT ADV Variante : Sollte eigentlich nur bei Fehler hier reinlaufen
-//l1[i][j][k].U = l2[i][j][k].U= EOS_ee_from_r_te(l1[i][j][k].dens, l1[i][j][k].temp * 11604.5) * 26.9815 * AMU * J2eV; // eV/Atom                
-
-//NO-ADV Variante                
-l1[i][j][k].U = l2[i][j][k].U= EOS_ee_from_r_te(l1[i][j][k].dens, l1[i][j][k].temp * 11604.5) * 26.9815 * AMU * J2eV; // eV/Atom
-
-if(isnan(node.U)!= 0)
-{
-  printf("ERROR: U is NaN, step:%d,i:%d\n",steps, i);
-  error("U is Nan");
-}
-
-
-                {
-// #if DEBUG_LEVEL>0
+                
+#if DEBUG_LEVEL>0
                   printf("proc:%d,steps:%d,i:%d,j:%d,k:%d, Te is NaN or <=0, using neighbor cells=>Te=%f\n",
                          myid, steps, i_global, j_global, 0, l1[i][j][k].temp);
-// #endif
+#endif
 //HOTFIX: still < Tmin? --> use md-temp
-                  if (l1[i][j][k].temp < 0.003)
-                  {
-// #if DEBUG_LEVEL>0
-                    printf("proc:%d,steps:%d,i:%d,j:%d,k:%d, Te still <=Tmin, using MD-temp:%.4e\n",
-                           myid, steps, i_global, j_global, k_global, l1[i][j][k].md_temp);
-// #endif
+                if (l1[i][j][k].temp < Temin)
+                {
+#if DEBUG_LEVEL > 0
+                  printf("proc:%d,steps:%d,i:%d,j:%d,k:%d, Te=%.4e still < Tmin=%.4e, using MD-temp:%.4e\n",
+                         myid, steps, i_global, j_global, k_global, l1[i][j][k].temp, Temin, l1[i][j][k].md_temp);
+#endif
 //HOTIFX: still stiil< Tmin ?!?! (wegen pdecay,z.B.)
-                    l2[i][j][k].temp = l1[i][j][k].temp = MAX(l1[i][j][k].md_temp, 0.003);
-                  }
-
+                  l2[i][j][k].temp = l1[i][j][k].temp = l1[i][j][k].md_temp;
                 }
+
+
               }
               else  // No neighbors? -> Get MD-temp
               {
                 l1[i][j][k].temp = l1[i][j][k].md_temp;
                 l2[i][j][k].temp = l1[i][j][k].temp;
-// #if DEBUG_LEVEL>0
-                printf("proc:%d,steps:%d,i:%d,j:%d,k:%d, Te is NaN or <=0, using md-temp=>Te=%f\n",
+#if DEBUG_LEVEL > 0
+                printf("proc:%d,steps:%d,i:%d,j:%d,k:%d, WARNING: No neighbors in activated cell. Using md-temp=>Te=%f\n",
                        myid, steps, i_global, j_global, k_global, l1[i][j][k].temp);
 
-// #endif
+#endif
               }
             } //isnan ....
+            //Interne Energie muss noch geupdatet werden (Falls fallback auf altes Schema)
+            l1[i][j][k].U = l2[i][j][k].U= EOS_ee_from_r_te(l1[i][j][k].dens, l1[i][j][k].temp * 11604.5) * 26.9815 * AMU * J2eV; // eV/Atom
           } // endif isnan(temp) || temp<=0
 
         } // endif ..new cell activated...
@@ -1744,21 +1703,7 @@ void do_DIFF(double tau)
         ) +l1[i][j][k].temp;
         
 
-        //via enerie statt temp und cv : Nicht vergessen W/K/m^3 in IMDU = 7.3739e-22 eV/IMDt/eV/Angstrom^3
-        //                               --> teile durch density --> eV/IMDt/eV/u
-        //                               --> mal 26.9815u ---> eV/IMDt/eV/Atom 
-        //                               --->Bekomme interne energie in eV/Atom       
-        // l2[i][j][k].U = l1[i][j][k].U + tau / (l1[i][j][k].dens*6.02214076e-4)*26.9815* // (l1[i][j][k].dens / AMU / 1e30) *
-        //                 (
-        //                   ((l1[i][j][k].fd_k + xmaxk) / 2 * (xmaxTe - l1[i][j][k].temp) * invxsq)
-        //                 - ((l1[i][j][k].fd_k + xmink) / 2 * (l1[i][j][k].temp - xminTe) * invxsq)
-                          
-        //                   - l1[i][j][k].fd_g * (l1[i][j][k].temp - l1[i][j][k].md_temp)
-        //                   + l1[i][j][k].source
-        //                 );
-                             
-        // l2[i][j][k].temp = EOS_te_from_r_ee(l1[i][j][k].dens, l2[i][j][k].U / (26.9815 * AMU * J2eV)) / 11604.5; // eV/atom -> J/kg
-
+        //Folgende Zeile setzt vorraus, dass Cve und U kompatiblen Tabllen zugrunde liegen
         l2[i][j][k].U=l1[i][j][k].U + (l2[i][j][k].temp-l1[i][j][k].temp)*Ce*fd_vol/((double) l1[i][j][k].natoms); // eV
 
         l1[i][j][k].xi += (l2[i][j][k].temp-l1[i][j][k].md_temp)*xi_fac*l1[i][j][k].fd_g/l1[i][j][k].md_temp/((double) l1[i][j][k].natoms);//Original
@@ -2124,11 +2069,12 @@ void ttm_writeout(int number)
 
 
 /************************
- * MY MOD: TTM READ for *
+ * TTM READ for         *
 *  restart              *
 *  ACHTUNG: bisher nur  *
 *  fuer MPI-nutzung     *
-*  implementiert        *
+*  implementiert,d.h.   *
+*  ohne mpi -> crash    *
 *************************/
 void ttm_read(int number)
 {
@@ -2752,7 +2698,7 @@ void CFL_maxdt(void)
 //     printf("mdstep:%d,maxdt_diffusion:%.4e,maxdt_advection:%.4e,steps:%f\n",steps,max_dt_ttm,maxdt_advect,timestep/max_dt_ttm);
 }
 
-double QfromT(double T, double rho)
+double QfromT(double T, double rho) //From bicubic interplation table
 {
 //TESTCASE
 //return 2.5;
@@ -2767,8 +2713,6 @@ double QfromT(double T, double rho)
 double EOS_ee_from_r_te(double r, double t)
 {
   //if (r < RHOMIN) return 0;
-  //r = MAX(r, RHOMIN);
-  //r = MIN(r, 3500); //CHEAT
 
   double tsqrt = sqrt(t);
 
@@ -2776,6 +2720,7 @@ double EOS_ee_from_r_te(double r, double t)
   pout.x = r;
   pout.y = tsqrt;
 
+#if DEBUG_LEVEL > 0
 if(tsqrt > intp_ee_from_r_tesqrt.ymax || tsqrt < intp_ee_from_r_tesqrt.ymin )
 {
   char errstr[255];
@@ -2790,15 +2735,20 @@ if(r < intp_ee_from_r_tesqrt.xmin || r > intp_ee_from_r_tesqrt.xmax)
     r, intp_ee_from_r_tesqrt.xmin,intp_ee_from_r_tesqrt.xmax);
   error(errstr);
 }
+#endif
 
   // nnhpi_interpolate(intp_e_from_r_tsqrt.interpolator, &pout); //naturla neigh, sibson-rule
   lpi_interpolate_point(intp_ee_from_r_tesqrt.interpolator, &pout); //linear
   //pout.z*=26.9815*AMU*6.2415091E18; // J/kg --> eV/Atom
+#if DEBUG_LEVEL > 0
   if(isnan(pout.z)!=0)
   { 
-    printf("ERROR in EOS_ee_from_r_te: ee_from_r_te retunred NaN!.r:%.4e,t:%.4e",r,t);
-    error("ee_from_r_te retunred NaN");
+    char errstr[255];
+    sprintf(errstr, "ERROR in EOS_ee_from_r_te: ee_from_r_te retunred NaN!.r:%.4e,t:%.4e",r,t);
+    error(errstr);
   }
+#endif
+
   return pout.z;
 }
 
@@ -2814,22 +2764,26 @@ double EOS_cve_from_r_te(double r, double t)
   pout.x = r;
   pout.y = t;
   
-  if(r < intp_cve_from_r_te.xmin)
+#if DEBUG_LEVEL > 0   
+  if(r < intp_cve_from_r_te.xmin || r > intp_cve_from_r_te.xmax)
   {
     char errstr[255];
-    sprintf(errstr, "ERROR: Density=%.4e lower than minimum in interpolation table for cve_from_r_te = %.4e\n",
-      r,intp_cve_from_r_te.xmin);
+    sprintf(errstr, "ERROR: Density=%.4e  exceeds interpolation range: xmin=%.4e, xmax=%.4e\n",
+      r,intp_cve_from_r_te.xmin,intp_cve_from_r_te.xmax);
     error(errstr);
   }
+#endif
+
   // nnhpi_interpolate(intp_e_from_r_tsqrt.interpolator, &pout); //naturla neigh, sibson-rule
   lpi_interpolate_point(intp_cve_from_r_te.interpolator, &pout); //linear
-
+#if DEBUG_LEVEL > 0
   if(isnan(pout.z)!=0)
   { 
     char errstr[255];
     sprintf(errstr, "ERROR: cve_from_r_te retunred NaN!.r:%.4e,t:%.4e",r,t);
     error(errstr);
   }
+  #endif
 
   // double tupper=t+0.02*t;
   // double tlower=t-0.02*t;
@@ -2852,14 +2806,15 @@ double EOS_te_from_r_ee(double r, double e)
   //if (r < RHOMIN) return 0;
   //r = MAX(r, RHOMIN);
   //r=MIN(r,3500);
-
-  if(r < intp_ee_from_r_tesqrt.xmin)
+#if DEBUG_LEVEL > 0
+  if(r < intp_ee_from_r_tesqrt.xmin || r > intp_ee_from_r_tesqrt.xmax)
   {
     char errstr[255];
-    sprintf(errstr, "ERROR in EOS_te_from_r_ee: Density=%.4e lower than minimum in interpolation table = %.4e\n",
-      r,intp_ee_from_r_tesqrt.xmin);
+    sprintf(errstr, "ERROR in EOS_te_from_r_ee: Density=%.4e exceeds interpolation range of table: xmin=%.4e, xmax=%.4e\n",
+      r,intp_ee_from_r_tesqrt.xmin, intp_ee_from_r_tesqrt.xmin);
     error(errstr);
   }  
+#endif
 
   //double eSI=e/(26.9815*AMU*6.2415091E18); // eV/Atom ---> J/kg
   double a = pow(intp_ee_from_r_tesqrt.ymin, 2.0);
@@ -2867,7 +2822,7 @@ double EOS_te_from_r_ee(double r, double e)
   double m = fminbnd(a, b, eeminfun, 1e-4, r, e);
   return m;
 }
-double eeminfun(double x, double r, double e)
+double eeminfun(double x, double r, double e) //Auxiliary function for Te_from_dens_U. This func. is minimized by brent's algo.
 {
   return ABS(EOS_ee_from_r_te(r, x) - e);
 }
