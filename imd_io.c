@@ -2338,9 +2338,7 @@ void write_eng_file(int steps)
 //MYMOD
 #ifdef TTM
   tot_elec_energy_global=0.0;
-  tot_kin_energy_global=0.0;
   MPI_Reduce(&tot_elec_energy_local,&tot_elec_energy_global,1,MPI_DOUBLE,MPI_SUM,0,cpugrid); //DEBUG PURPOSE
-  MPI_Reduce(&tot_kin_energy_local,&tot_kin_energy_global,1,MPI_DOUBLE,MPI_SUM,0,cpugrid); //DEBUG PURPOSE
 #endif
 //ENDOF MYMOD  
 
@@ -2512,9 +2510,7 @@ void write_eng_file(int steps)
   //MYMOD
 //#ifdef DEBUG
   //fprintf(eng_file, " %e", tot_elec_energy_global/natoms*26.9815*AMU*6.2415091E18); //J/kg -> eV/Atom ;
-  fprintf(eng_file, " %e %e %e ", 
-  tot_kin_energy_global,
-  tot_pot_energy,
+  fprintf(eng_file, " %e  ", 
   tot_elec_energy_global);///((double) active_cells_global));//*natoms*26.9815*AMU*6.2415091E18); //J/kg * natoms*atom_mass*J2eV -> eV;
 //#endif /*DEBUG*/
   //ENDOF MYMOD

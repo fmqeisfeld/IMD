@@ -1137,18 +1137,25 @@ EXTERN  double max_dt_ttm; //in IMD time-units
 EXTERN  ttm_Element *** l1, *** l2, *** l3;
   /* These will be used to allocate and free the nets in bulk */
 EXTERN  ttm_Element * lattice1, * lattice2;
-EXTERN real fd_k INIT(1.0); /* electronic thermal conductivity */
+EXTERN real fd_k INIT(17.33); /* electronic thermal conductivity */
 EXTERN real fd_c INIT(0.0); /* electronic thermal capacity */
-EXTERN real fd_gamma INIT(0.0); /* fd_c / T_e, proport. const. */
-EXTERN real fd_g INIT(1.0);        /* electron-phonon coupling constant */
+EXTERN real fd_gamma INIT(0.11305); /* fd_c / T_e, proport. const. */
+EXTERN real fd_g INIT(0.0004196);        /* electron-phonon coupling constant */
 EXTERN int fd_n_timesteps INIT(0); /* how many FD steps to a MD timestep? */
 EXTERN int fd_update_steps INIT(1);/* how often are FD cells updated */
 EXTERN real tot_elec_energy_local INIT(0.0);  //total internal energy of
 EXTERN real tot_elec_energy_global INIT(0.0); //electrons (DEBUG PURPOSE)
-EXTERN real tot_kin_energy_local INIT(0.0); //ionic
-EXTERN real tot_kin_energy_global INIT(0.0); //ionic
 EXTERN int diff_substeps INIT(100);
 
+//For convenience 
+EXTERN real J2eV   INIT(6.2415090744607626077762409809304458998869658961709711e18);
+
+EXTERN real eV2J   INIT(1.602176634E-19);
+
+EXTERN real densSI INIT(1660.53907); //u/Angstrom^3 --> kg/m^3
+
+EXTERN double Temin INIT(1e-3); //MININUM aller interpol. tabellen in eV
+EXTERN double rhomin INIT(1e-3); // in SI
 //Dirichlet boundary conditions
 #ifdef DIRICHLET
 EXTERN int *dirichlet_maxy_local;	   //outermost non-empty cells in +y-direction

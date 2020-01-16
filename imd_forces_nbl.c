@@ -327,6 +327,21 @@ void calc_forces(int steps)
   vir_zx = 0.0;
   nfc++;
 
+// #ifdef TTM
+//   int iglobal,ilocal,jglobal,jlocal,kglobal,klocal;
+//   int j;
+//   for(i=0;i<local_fd_dim.x-1;i++)
+//   {
+//       for(j=0;j<local_fd_dim.y-1;j++)
+//       {
+//           for(k=0;k<local_fd_dim.z-1;k++)
+//           {
+//             l1[i][j][k].natoms=l2[i][j][k].natoms=0;
+//           }
+//       }
+//   }
+// #endif
+
   /* clear per atom accumulation variables, also in buffer cells */
   for (k=0; k<nallcells; k++) 
   {
@@ -376,6 +391,25 @@ void calc_forces(int steps)
       ADP_LAMBDA(p,i,yz) = 0.0;
       ADP_LAMBDA(p,i,zx) = 0.0;
 #endif
+
+
+//MYMOD
+#ifdef TTM
+      // iglobal = (int)floor(ORT(p,i,X)/fd_h.x);
+      // ilocal  = iglobal+1-my_coord.x*(local_fd_dim.x-2);
+
+      // jglobal = (int)floor(ORT(p,i,Y)/fd_h.y);
+      // jlocal  = jglobal+1-my_coord.y*(local_fd_dim.y-2);
+
+      // kglobal = (int)floor(ORT(p,i,Z)/fd_h.z);
+      // klocal  = kglobal+1-my_coord.z*(local_fd_dim.z-2);
+
+      // l1[ilocal][jlocal][klocal].natoms++;
+      // l2[ilocal][jlocal][klocal].natoms++;
+
+      NUMNEIGHS(p,i)=0;
+#endif
+//ENDOF MYMOD      
     }
   }
 
@@ -443,8 +477,11 @@ void calc_forces(int steps)
         col2= jt * ntypes + it;
 //MYMOD
 #ifdef TTM
+if(r2 <= pair_pot.end[0])
+{        
   NUMNEIGHS(p,i)++;
   NUMNEIGHS(q,j)++;
+}
 #endif
 //ENDOF MYMOD
 
@@ -997,14 +1034,14 @@ void calc_forces(int steps)
   */
 
 #ifdef FILTER
-if(myid==0)
- printf("steps:%d\n",steps);
+
   if(steps>0)
     if(steps % filter_int ==0)
     {
       filter_atoms();
     }
   //Atome werden beim nächsten fix_cells-aufruf gelöscht 
+
 #endif 
 //ENDOF MYMOD
 

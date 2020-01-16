@@ -185,10 +185,12 @@ if(steps<2) return 0;
    } 
    //tmm_eps_real_arr_local[iglobal]=ttm_get_epsilon();
    //tmm_eps_imag_arr_local[iglobal]=i
+
+
    tmm_get_epsilon(lambda,l1[i][1][1].temp, l1[i][1][1].md_temp,
                   l1[i][1][1].Z, l1[i][1][1].ne, &tmm_eps_real_arr_local[iglobal],
-                  &tmm_eps_imag_arr_local[iglobal],
-                  i,j);
+                  &tmm_eps_imag_arr_local[iglobal]);
+
 
 /*
 printf("myid:%d,ig:%d, epsr:%.4e,epsimg:%.4e,Te:%.4e,Ti:%.4e,Ne:%.4e,Z:%.4e,atoms:%d\n",myid,iglobal,
@@ -436,7 +438,7 @@ eps_dl=-73.655835558841446 +81.545418969195765*I; // testcase, sharp, omegap_L*2
 */
 
 //int tmm_get_epsilon(double lambda, double Te,double Ti, double Z, double Ne, real* re, real* img)
-int tmm_get_epsilon(double lambda, double Te,double Ti, double Z, double Ne, real* re, real* img,int i,int j)
+int tmm_get_epsilon(double lambda, double Te,double Ti, double Z, double Ne, real* re, real* img)
 {
         Te*=11604.52500617; //ev->K
         Ti*=11604.52500617; //ev->K
@@ -531,6 +533,8 @@ int tmm_read_arr(char* infilename,double ***arr,int cols,int *rowsout)
   if(myid==0)
   {
     infile = fopen(infilename, "r");
+    if(infile==NULL)      
+      error_str("Cannot open file:%s\n", infilename);
     do
     {
        ch = fgetc(infile);
