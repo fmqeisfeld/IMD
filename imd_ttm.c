@@ -33,7 +33,7 @@
 // gut fuer den festkörper aber unbrauchbar fuer schmelze & gas
 // Hier ist sogar die Freie-Elektronen-Näherung besser (Fermi-integral berechnen)
 // Hierfür gibt es weiter unten im Code die entsprechende wide-range routine
-#define FD_C ((fd_c==0)?(fd_gamma*l1[i][j][k].temp):(fd_c))
+#define FD_C ((fd_c==0)?(fd_gamma*node.temp):(fd_c))
 
 #define node  l1[i][j][k]  //bequemer, muss oft geschrieben werden
 #define node2 l2[i][j][k]  //bequemer, muss oft geschrieben werden
@@ -63,7 +63,7 @@ void calc_ttm()
 
   
   update_fd();
-  do_ADV(1.0);
+  // do_ADV(1.0);
   do_cell_activation();
   do_FILLMESH();
   ttm_fill_ghost_layers();  
@@ -75,6 +75,7 @@ void calc_ttm()
       tmm_time += tau_DIFF * 10.18 * 1.0e-15; //in sek
       do_DIFF(tau_DIFF);
       do_FILLMESH();
+      do_colrad(tau_DIFF * 10.18 * 1.0e-15);
       ttm_fill_ghost_layers();            
     }
 
@@ -86,14 +87,14 @@ for (j=1; j<local_fd_dim.y-1; ++j)
 {
 for (k=1; k<local_fd_dim.z-1; ++k)
 {
-      if(l1[i][j][k].natoms>=1)
+      if(node.natoms >= 1)
       {
-        //l1[i][j][k].U =EOS_ee_from_r_te(l1[i][j][k].dens, l1[i][j][k].temp * 11604.5) * 26.9815 * AMU * J2eV; //eV/Atom      
-        tot_elec_energy_local += l1[i][j][k].U*((double) l1[i][j][k].natoms);
+        //node.U =EOS_ee_from_r_te(node.dens, node.temp * 11604.5) * 26.9815 * AMU * J2eV; //eV/Atom      
+        tot_elec_energy_local += node.U*((double) node.natoms);
       }      
       else
       {
-        l1[i][j][k].U=0.0; //l2[i][j][k].U=0.0;
+        node.U=0.0; //node2.U=0.0;
       }
 }
 }
@@ -326,30 +327,30 @@ void update_fd()
 
         tot_neighs = 0;
         //CLEAR ARRAYS
-        l1[i][j][k].vcomx = 0.0;
-        l1[i][j][k].vcomy = 0.0;
-        l1[i][j][k].vcomz = 0.0;
+        node.vcomx = 0.0;
+        node.vcomy = 0.0;
+        node.vcomz = 0.0;
 
-        l1[i][j][k].source = l2[i][j][k].source = 0.0;
+        node.source = node2.source = 0.0;
 #if ADVMODE==2
-        l1[i][j][k].flux[0] = l1[i][j][k].flux[1] = l1[i][j][k].flux[2] = l1[i][j][k].flux[3] = 0;
-        l1[i][j][k].flux[4] = l1[i][j][k].flux[5] = l1[i][j][k].flux[6] = l1[i][j][k].flux[7] = 0;
+        node.flux[0] = node.flux[1] = node.flux[2] = node.flux[3] = 0;
+        node.flux[4] = node.flux[5] = node.flux[6] = node.flux[7] = 0;
 #endif
 
-        l1[i][j][k].natoms_old = l2[i][j][k].natoms_old = l1[i][j][k].natoms;
-l1[i][j][k].natoms = l2[i][j][k].natoms = 0; // <-- nach imd_forces_nbl.c verschoben
+        node.natoms_old = node2.natoms_old = node.natoms;
+node.natoms = node2.natoms = 0; // <-- nach imd_forces_nbl.c verschoben
         tot_mass = 0.0;
 
-        l1[i][j][k].xi = l2[i][j][k].xi = 0.0;
-        l1[i][j][k].source = l2[i][j][k].source = 0.0;
+        node.xi = node2.xi = 0.0;
+        node.source = node2.source = 0.0;
 
         /* loop over encompassed MD cells */
         for (loopvar = 0; loopvar < n_md_cells; loopvar++)
         {
-          p = l1[i][j][k].md_cellptrs[loopvar];
+          p = node.md_cellptrs[loopvar];
 
           /* add number of atoms of this MD cell*/
-l1[i][j][k].natoms += p->n; // <-- nach imd_forces_nbl.c verschoben
+node.natoms += p->n; // <-- nach imd_forces_nbl.c verschoben
           natoms_local += p->n;
 
           for (l = 0; l < p->n; l++) //loop over atoms
@@ -358,9 +359,9 @@ l1[i][j][k].natoms += p->n; // <-- nach imd_forces_nbl.c verschoben
 
 
             //NUMNEIGHS(p, l) = 0; // nach jedem step clearen.wird in imd_forces_nbl.c wieder aufsummiert // <-- nach imd_forces_nbl.c verschoben
-            l1[i][j][k].vcomx += IMPULS(p, l, X);
-            l1[i][j][k].vcomy += IMPULS(p, l, Y);
-            l1[i][j][k].vcomz += IMPULS(p, l, Z);
+            node.vcomx += IMPULS(p, l, X);
+            node.vcomy += IMPULS(p, l, Y);
+            node.vcomz += IMPULS(p, l, Z);
             tot_mass += MASSE(p, l);
 // ***********************************************
 // ATOMIC FLUXES FOR ADVECTION, erstmal nur 2D
@@ -381,23 +382,23 @@ l1[i][j][k].natoms += p->n; // <-- nach imd_forces_nbl.c verschoben
               {
                 // +x
                 if (p->fdi[l] > i_global && p->fdj[l] > j_global)
-                  l1[i][j][k].flux[4]++; //aus +x,+y
+                  node.flux[4]++; //aus +x,+y
                 else if (p->fdi[l] > i_global && p->fdj[l] < j_global)
-                  l1[i][j][k].flux[3]++;  // aus +x,-y
+                  node.flux[3]++;  // aus +x,-y
                 else if (p->fdi[l] > i_global && p->fdj[l] == j_global)
-                  l1[i][j][k].flux[0]++; // aus +x,y=y
+                  node.flux[0]++; // aus +x,y=y
                 //-x
                 else if (p->fdi[l] < i_global && p->fdj[l] < j_global) // aus -x,-y
-                  l1[i][j][k].flux[7]++;
+                  node.flux[7]++;
                 else if (p->fdi[l] < i_global && p->fdj[l] > j_global)  // aus -x,+y
-                  l1[i][j][k].flux[6]++;
+                  node.flux[6]++;
                 else if (p->fdi[l] < i_global && p->fdj[l] == j_global) // aus -x,y=y
-                  l1[i][j][k].flux[1]++;
+                  node.flux[1]++;
                 //x=x
                 else if (p->fdi[l] == i_global && p->fdj[l] > j_global) //aus x=x,+y
-                  l1[i][j][k].flux[2]++;
+                  node.flux[2]++;
                 else if (p->fdi[l] == i_global && p->fdj[l] < j_global) //aus x=x,-y
-                  l1[i][j][k].flux[5]++;
+                  node.flux[5]++;
               }
             p->fdi[l] = i_global;
             p->fdj[l] = j_global;
@@ -408,35 +409,35 @@ l1[i][j][k].natoms += p->n; // <-- nach imd_forces_nbl.c verschoben
 
         int foo;
         for (foo = 0; foo < 8; foo++)
-          l2[i][j][k].flux[foo] = l1[i][j][k].flux[foo];
+          node2.flux[foo] = node.flux[foo];
 
-        l2[i][j][k].natoms = l1[i][j][k].natoms;
+        node2.natoms = node.natoms;
         //COMPUTE DENSITY OF TTM-CELLS FROM NEIGHBORS PER ATOM in kg/m^3
-        if (l1[i][j][k].natoms > 0)
+        if (node.natoms > 0)
         {
-          l1[i][j][k].dens = l2[i][j][k].dens = (double) tot_neighs / ((double)l1[i][j][k].natoms) * atomic_weight / neighvol * 1660.53907; //kg/m^3
+          node.dens = node2.dens = (double) tot_neighs / ((double)node.natoms) * atomic_weight / neighvol * 1660.53907; //kg/m^3
 
 
-if (l1[i][j][k].dens == 0) //in step 0...noch keine neigh list?
+if (node.dens == 0) //in step 0...noch keine neigh list?
           {
-            l1[i][j][k].dens = l2[i][j][k].dens = (double) l1[i][j][k].natoms * atomic_weight / fd_vol * 1660.53907;
+            node.dens = node2.dens = (double) node.natoms * atomic_weight / fd_vol * 1660.53907;
           }
 
 
 
-l1[i][j][k].dens= l2[i][j][k].dens = (double) l1[i][j][k].natoms * atomic_weight / fd_vol * 1660.53907;       
+node.dens= node2.dens = (double) node.natoms * atomic_weight / fd_vol * 1660.53907;       
 
 
-          l1[i][j][k].vcomx /= tot_mass;
-          l1[i][j][k].vcomy /= tot_mass;
-          l1[i][j][k].vcomz /= tot_mass;
+          node.vcomx /= tot_mass;
+          node.vcomy /= tot_mass;
+          node.vcomz /= tot_mass;
           // ****************
           // *   DIRICHLET  *
           // ****************
 #ifdef DIRICHLET
           //find outermost cells for each iglobal-row
           //es muss eine zelle sein, die auch in diff-loop als aktiv betrachtet wird!
-          if (l1[i][j][k].natoms >= fd_min_atoms)
+          if (node.natoms >= fd_min_atoms)
           {
             if (j_global > dirichlet_maxy_local[i_global]) dirichlet_maxy_local[i_global] = j_global;
             if (j_global < dirichlet_miny_local[i_global]) dirichlet_miny_local[i_global] = j_global;
@@ -446,56 +447,56 @@ l1[i][j][k].dens= l2[i][j][k].dens = (double) l1[i][j][k].natoms * atomic_weight
         } //end if natoms > 0
         else
         {
-          l1[i][j][k].dens = l2[i][j][k].dens = 0.0;
-          l1[i][j][k].vcomx = 0.0;
-          l1[i][j][k].vcomy = 0.0;
-          l1[i][j][k].vcomz = 0.0;
+          node.dens = node2.dens = 0.0;
+          node.vcomx = 0.0;
+          node.vcomy = 0.0;
+          node.vcomz = 0.0;
         }
 
-        l2[i][j][k].vcomx = l1[i][j][k].vcomx;
-        l2[i][j][k].vcomy = l1[i][j][k].vcomy;
-        l2[i][j][k].vcomz = l1[i][j][k].vcomz;
+        node2.vcomx = node.vcomx;
+        node2.vcomy = node.vcomy;
+        node2.vcomz = node.vcomz;
 
-        l1[i][j][k].md_temp = l2[i][j][k].md_temp = 0;
+        node.md_temp = node2.md_temp = 0;
         // **********************************************************************************************************
         // * 2nd loop over MD cells and atoms For MD-temperature from kinetic energies of particles                 *        
         // **********************************************************************************************************
         for (loopvar = 0; loopvar < n_md_cells; loopvar++) //loop over md-cells
         {
-          p = l1[i][j][k].md_cellptrs[loopvar];
+          p = node.md_cellptrs[loopvar];
           for (l = 0; l < p->n; l++) //loop over atoms
           {
-            l1[i][j][k].md_temp += MASSE(p, l) * SQR(IMPULS(p, l, X) / MASSE(p, l)
-                                   - l1[i][j][k].vcomx);
-            l1[i][j][k].md_temp += MASSE(p, l) * SQR(IMPULS(p, l, Y) / MASSE(p, l)
-                                   - l1[i][j][k].vcomy);
-            l1[i][j][k].md_temp += MASSE(p, l) * SQR(IMPULS(p, l, Z) / MASSE(p, l)
-                                   - l1[i][j][k].vcomz);
+            node.md_temp += MASSE(p, l) * SQR(IMPULS(p, l, X) / MASSE(p, l)
+                                   - node.vcomx);
+            node.md_temp += MASSE(p, l) * SQR(IMPULS(p, l, Y) / MASSE(p, l)
+                                   - node.vcomy);
+            node.md_temp += MASSE(p, l) * SQR(IMPULS(p, l, Z) / MASSE(p, l)
+                                   - node.vcomz);
           }
         }
 
 
-        if (l1[i][j][k].natoms >= fd_min_atoms)
+        if (node.natoms >= fd_min_atoms)
         {
 
 
-l1[i][j][k].md_temp /= 3.0 * l1[i][j][k].natoms;          
-//l1[i][j][k].md_temp/=3 * l1[i][j][k].dens*fd_vol*1e-30/26.9815/AMU;          //SMOOTH TEMP?
+node.md_temp /= 3.0 * node.natoms;          
+//node.md_temp/=3 * node.dens*fd_vol*1e-30/26.9815/AMU;          //SMOOTH TEMP?
 
 
 
         }
-        else l1[i][j][k].md_temp = 0.0;
-        l2[i][j][k].md_temp = l1[i][j][k].md_temp;
+        else node.md_temp = 0.0;
+        node2.md_temp = node.md_temp;
 
 #if DEBUG_LEVEL>0
-        if (l1[i][j][k].natoms >= fd_min_atoms)
+        if (node.natoms >= fd_min_atoms)
         {
-          if (isnan(l1[i][j][k].md_temp) != 0 || l1[i][j][k].md_temp <= 0.0) //warum steps>0? --> fuer "on the fly"-probe (imd_generate),
+          if (isnan(node.md_temp) != 0 || node.md_temp <= 0.0) //warum steps>0? --> fuer "on the fly"-probe (imd_generate),
           { //hat do_maxwell noch keine temp zugewiesen!
             if (steps > 0)
             {
-              printf("steps:%d,proc:%d,i:%d,j:%d,k:%d,mdtemp:%f,atoms:%d\n", steps, myid, i, j, k, l1[i][j][k].md_temp, l1[i][j][k].natoms);
+              printf("steps:%d,proc:%d,i:%d,j:%d,k:%d,mdtemp:%f,atoms:%d\n", steps, myid, i, j, k, node.md_temp, node.natoms);
               error("md_temp is NaN or <=0");
             }
           }
@@ -506,30 +507,28 @@ l1[i][j][k].md_temp /= 3.0 * l1[i][j][k].natoms;
         // *****************************************************************
         if (steps < 1)
         {
-          l1[i][j][k].natoms_old = l2[i][j][k].natoms_old = l1[i][j][k].natoms;
-          if (l1[i][j][k].natoms >= fd_min_atoms)
+          node.natoms_old = node2.natoms_old = node.natoms;
+          if (node.natoms >= fd_min_atoms)
           {
-            l1[i][j][k].temp = l2[i][j][k].temp = l1[i][j][k].md_temp;
-l1[i][j][k].U =EOS_ee_from_r_te(l1[i][j][k].dens, l1[i][j][k].temp * 11604.5) * 26.9815 * AMU * J2eV; // eV/Atom
-l2[i][j][k].U=l1[i][j][k].U;
+            node.temp = node2.temp = node.md_temp;
+
+// node.U =EOS_ee_from_r_te(node.dens, node.temp * 11604.5) * 26.9815 * AMU * J2eV; // eV/Atom
+// node2.U=node.U;
 
 
   //PLAUSIBILITY EOS CHECK:
-  double echeck= EOS_ee_from_r_te(l1[i][j][k].dens, l1[i][j][k].temp * 11604.5)*26.9815 * AMU * J2eV;
-  double tcheck = EOS_te_from_r_ee(l1[i][j][k].dens, echeck/26.9815/AMU * eV2J) / 11604.5;
-  double tinit=l1[i][j][k].temp;
+  // double echeck= EOS_ee_from_r_te(node.dens, node.temp * 11604.5)*26.9815 * AMU * J2eV;
+  // double tcheck = EOS_te_from_r_ee(node.dens, echeck/26.9815/AMU * eV2J) / 11604.5;
+  // double tinit=node.temp;
 
-//:2.8160e+03,t:1.1200e+05
-  //double foo=EOS_ee_from_r_te(2.816e3, 1.12e5); //<--Fehler
+  // if(ABS(tcheck -tinit) > tinit*0.01) // 1% unterschied
+  // {
+  //   char errstr[255];
 
-  if(ABS(tcheck -tinit) > tinit*0.01) // 1% unterschied
-  {
-    char errstr[255];
-
-    sprintf(errstr,"ERROR: EOS Plausibility check failed, TfromU != Tinit. Tinit:%.4e, TfromU:%.4e\n"
-                    "Maybe Interpolation table too sparse or increase tolerance",tinit,tcheck); 
-    error(errstr);
-  }
+  //   sprintf(errstr,"ERROR: EOS Plausibility check failed, TfromU != Tinit. Tinit:%.4e, TfromU:%.4e\n"
+  //                   "Maybe Interpolation table too sparse or increase tolerance",tinit,tcheck); 
+  //   error(errstr);
+  // }
   
 
           }
@@ -578,77 +577,82 @@ void do_FILLMESH(void)
         k_global =  ((k - 1) + my_coord.z * (local_fd_dim.z - 2));
 
 
-        if (l1[i][j][k].natoms >= fd_min_atoms)
+        if (node.natoms >= fd_min_atoms)
         {
           //////////////////////////////////////////////////////////////          
           //           IONISATIONSGRAD UND ELEK.DICHTE
           ////////////////////////////////////////////////////////////// 
-          l1[i][j][k].Z=MeanCharge(l1[i][j][k].temp*11604.5, l1[i][j][k].dens, atomic_charge, atomic_weight,i,j,k);
+          node.Z=MeanCharge(node.temp*11604.5, node.dens, atomic_charge, atomic_weight,i,j,k);
 
-          // l1[i][j][k].Z=QfromT(l1[i][j][k].temp,l1[i][j][k].dens);
+          // node.Z=QfromT(node.temp,node.dens);
 #if DEBUG_LEVEL > 0
-          if (l1[i][j][k].Z == -1.0)
+          if (node.Z == -1.0)
           {
             printf("steps:%d,proc:%d,i:%d,j:%d,k:%d, ERROR during QfromT in FILLMESH, Te:%f (K), dens:%f (kg/m^3),atoms:%d\n",
-                   steps, myid, i, j, k, l1[i][j][k].temp * 11604.5, l1[i][j][k].dens, l1[i][j][k].natoms);
+                   steps, myid, i, j, k, node.temp * 11604.5, node.dens, node.natoms);
             error("ERROR during QfromT in FILLMESH");
           }
 #endif
-          l1[i][j][k].ne = l1[i][j][k].Z * l1[i][j][k].dens / (atomic_weight * AMU); //Assumption: Quasi-neutrality condition
-          l2[i][j][k].ne = l1[i][j][k].ne;
+          node.ne = node.Z * node.dens / (atomic_weight * AMU); //Assumption: Quasi-neutrality condition
+          node2.ne = node.ne;
 
           //////////////////////////////////////////////////////////////          
           //                      Wärmekapazität
           //////////////////////////////////////////////////////////////      
-          l1[i][j][k].Ce = EOS_cve_from_r_te(l1[i][j][k].natoms, l1[i][j][k].temp * 11604.5); //Interpol.Tabelle          
-          l2[i][j][k].Ce=l1[i][j][k].Ce;
+          // node.Ce = EOS_cve_from_r_te(node.natoms, node.temp * 11604.5); //Interpol.Tabelle          
+          node.Ce = Cv(node.temp, node.ne);
+          node2.Ce=node.Ce;
 
 #if DEBUG_LEVEL>0
-          if (l1[i][j][k].Ce < 0)
+          if (node.Ce < 0)
           {
             printf("steps:%d,proc:%d,i:%d,j:%d,k:%d, ERROR during CfromT in FILLMESH, Ce:%.4e, Te:%f (K), dens:%f (kg/m^3)\n",
-                   steps, myid, i, j, k, l1[i][j][k].Ce, l1[i][j][k].temp * 11604.5, l1[i][j][k].dens);
+                   steps, myid, i, j, k, node.Ce, node.temp * 11604.5, node.dens);
             error("ERROR during CfromT in FILLMESH");
           }
 #endif
           //////////////////////////////////////////////////////////////          
           //                      KAPPA 
           //////////////////////////////////////////////////////////////          
-          l1[i][j][k].fd_k = getKappa(l1[i][j][k].temp, l1[i][j][k].md_temp, l1[i][j][k].ne, l1[i][j][k].Z); //Hardcoding ist faster
+          node.fd_k = getKappa(node.temp, node.md_temp, node.ne, node.Z); //Hardcoding ist faster
 // node.fd_k=fd_k;          
-          l2[i][j][k].fd_k = l1[i][j][k].fd_k;
+          node2.fd_k = node.fd_k;
 
           /* //TRIKUBISCHE INTERPOLATION AUS TABELLE // trikub. interpol ist recht langsam 
-                     l1[i][j][k].fd_k=KappaInterpol(l1[i][j][k].dens,l1[i][j][k].temp,l1[i][j][k].md_temp);
-                     if(l1[i][j][k].fd_k==-1.0)
+                     node.fd_k=KappaInterpol(node.dens,node.temp,node.md_temp);
+                     if(node.fd_k==-1.0)
                      {
                         printf("steps:%d,proc:%d,i:%d,j:%d,k:%d, ERROR during KappaInterpol in FILLMESH, Te:%f (eV), Ti:%f (eV) ,dens:%f (kg/m^3),atoms:%d\n",
-                                steps,myid,i,j,k,l1[i][j][k].temp,l1[i][j][k].md_temp,l1[i][j][k].dens,l1[i][j][k].natoms);
+                                steps,myid,i,j,k,node.temp,node.md_temp,node.dens,node.natoms);
                         error("ERROR during KappaInterpol in FILLMESH");
                      }
           */
 
 #if DEBUG_LEVEL>0  //ACHTUNG: Das ist nur bei Hardcoding noetig. Bei Interpolation, sollte die Interpol-Funktion error-check machen
           //NaN kappa
-          if (isnan(l1[i][j][k].fd_k) != 0 || l1[i][j][k].fd_k < 0) //&& steps>0 || l1[i][j][k].fd_k<0 && steps>0)
+          if (isnan(node.fd_k) != 0 || node.fd_k < 0) //&& steps>0 || node.fd_k<0 && steps>0)
           {
-            printf("proc:%d,i:%d,j:%d,k:%d,steps:%d, atoms:%d,fd_k is NaN %f\n", myid, i, j, k, steps, l1[i][j][k].natoms, l1[i][j][k].fd_k);
-            error("fd_k is NaN.");
+            char errstr[255];
+            sprintf(errstr,"proc:%d,i:%d,j:%d,k:%d,steps:%d, atoms:%d,fd_k is NaN,Te=%.4e,dens=%.4e,Ti=%.4e\n", 
+              myid, i, j, k, steps, node.natoms, node.temp, node.dens,node.md_temp);
+            error(errstr);
           }
 #endif
           //////////////////////////////////////////////////////////////   
           //                   GAMMA  (KOPPL.CONST)
           //////////////////////////////////////////////////////////////          
           
-          l1[i][j][k].fd_g = getGamma(l1[i][j][k].temp, l1[i][j][k].md_temp, l1[i][j][k].ne, l1[i][j][k].Z);
+          node.fd_g = getGamma(node.temp, node.md_temp, node.ne, node.Z);
 // node.fd_g=fd_g;          
-          l2[i][j][k].fd_g = l1[i][j][k].fd_g;
+          node2.fd_g = node.fd_g;
           //NaN gamma
 #if DEBUG_LEVEL>0
-          if (isnan(l1[i][j][k].fd_g) != 0 || l1[i][j][k].fd_g < 0)
+          if (isnan(node.fd_g) != 0 || node.fd_g < 0)
           {
-            printf("proc:%d,i:%d,j:%d,k:%d,steps:%d, fd_g is NaN %f\n", myid, i, j, k, steps, l1[i][j][k].fd_g);
-            error("fd_g is NaN.");
+            char errstr[255];
+            sprintf(errstr,"proc:%d,i:%d,j:%d,k:%d,steps:%d, atoms:%d,fd_g is NaN,Te=%.4e,dens=%.4e,Ti=%.4e\n", 
+              myid, i, j, k, steps, node.natoms, node.temp, node.dens,node.md_temp);
+            error(errstr);
           }
 #endif
           //////////////////////////////////////////////////////////////          
@@ -660,7 +664,7 @@ void do_FILLMESH(void)
           if (fitresult == -1.0)
           {
             printf("steps:%d,proc:%d,i:%d,j:%d,k:%d, ERROR during fitDL in FILLMESH, Te:%f (K), dens:%f (kg/m^3)\n",
-                   steps, myid, i, j, k, l1[i][j][k].temp * 11604.5, l1[i][j][k].dens);
+                   steps, myid, i, j, k, node.temp * 11604.5, node.dens);
             error("ERROR during fitDL in FILLMESH");
           }
 #endif //DEBUG LEVEL
@@ -669,13 +673,19 @@ void do_FILLMESH(void)
         }// if >= min_atoms ....
         else
         {
-          l1[i][j][k].fd_k = 0.0;
-          l1[i][j][k].fd_g = 0.0;
-          l1[i][j][k].Z = 0.0;
-          l1[i][j][k].ne = 0.0;
-          l1[i][j][k].Ce = 0.0;
-          //l1[i][j][k].temp=0.0;  //nicht nullen, sonst funktioniert advection nicht
+          node.fd_k = 0.0;
+          node.fd_g = 0.0;
+          node.Z = 0.0;
+          node.ne = 0.0;
+          node.Ce = 0.0;
+          //node.temp=0.0;  //nicht nullen, sonst funktioniert advection nicht
         }
+#ifdef COLRAD
+        if(steps > 0) continue;
+        colrad_Saha_init(i, j, k);
+#endif
+
+
       } // for k ....
     }   // for j
   }     // for i
@@ -1096,8 +1106,8 @@ neighvol = pow(sqrt(pair_pot.end[0]), 3.0) * 4.0 / 3.0 * M_PI;
           /* allocate MD-cell pointer arrays */
           if (i != 0 && j != 0 && i != local_fd_dim.x - 1 && j != local_fd_dim.y - 1 && k != 0 && k != local_fd_dim.z - 1)
           {
-            l1[i][j][k].md_cellptrs = (cellptr*)malloc(n_md_cells * sizeof(cellptr));
-            l2[i][j][k].md_cellptrs = (cellptr*)malloc(n_md_cells * sizeof(cellptr));
+            node.md_cellptrs = (cellptr*)malloc(n_md_cells * sizeof(cellptr));
+            node2.md_cellptrs = (cellptr*)malloc(n_md_cells * sizeof(cellptr));
 
             /* loop over encompassed MD cells */
             for (xc = (i - 1) * fd_ext.x + NBUFFC / 2; xc < i * fd_ext.x + NBUFFC / 2; xc++)
@@ -1109,8 +1119,8 @@ neighvol = pow(sqrt(pair_pot.end[0]), 3.0) * 4.0 / 3.0 * M_PI;
                   cellptr p;
 
                   /* pointer to this MD cell */
-                  p = l1[i][j][k].md_cellptrs[tmpindex] =
-                        l2[i][j][k].md_cellptrs[tmpindex] =
+                  p = node.md_cellptrs[tmpindex] =
+                        node2.md_cellptrs[tmpindex] =
                           PTR_3D_V(cell_array, xc, yc, zc, cell_dim);
 
                   /* write array indices of our FD cell to this MD cell*/
@@ -1130,27 +1140,28 @@ neighvol = pow(sqrt(pair_pot.end[0]), 3.0) * 4.0 / 3.0 * M_PI;
 #endif
 
           /* no incoming thermal power per default */
-          l2[i][j][k].source = l1[i][j][k].source = 0.0;
-          l2[i][j][k].fd_k = l1[i][j][k].fd_k = 0;
-          l1[i][j][k].fd_g = l1[i][j][k].fd_g = 0;
-          l2[i][j][k].proc = l1[i][j][k].proc = myid;
-          l2[i][j][k].xi = l1[i][j][k].xi = 0.0;
-          l2[i][j][k].ne = l1[i][j][k].ne = 0.0;
-          l2[i][j][k].temp = l1[i][j][k].temp = 0.0;
-          l2[i][j][k].dens = l1[i][j][k].dens = 0.0;
-          l2[i][j][k].natoms = l1[i][j][k].natoms = 0;
-          l2[i][j][k].natoms_old = l1[i][j][k].natoms_old = 0;
-          l2[i][j][k].U = l1[i][j][k].U = 0.0;
-          int bar;
+          node2.source = node.source = 0.0;
+          node2.fd_k = node.fd_k = 0;
+          node.fd_g = node.fd_g = 0;
+          node2.proc = node.proc = myid;
+          node2.xi = node.xi = 0.0;
+          node2.ne = node.ne = 0.0;
+          node2.temp = node.temp = 0.0;
+          node2.dens = node.dens = 0.0;
+          node2.natoms = node.natoms = 0;
+          node2.natoms_old = node.natoms_old = 0;
+          node2.U = node.U = 0.0;
+         
 #ifdef FDTD
+          int bar;
           for (bar = 0; bar < 6; bar++)
-            l2[i][j][k].DL[bar] = l1[i][j][k].DL[bar] = 0.0;
+            node2.DL[bar] = node.DL[bar] = 0.0;
 #endif
 #if ADVMODE==2
           int foo;
           for (foo = 0; foo < 8; foo++)
           {
-            l1[i][j][k].flux[foo] = l2[i][j][k].flux[foo] = 0;
+            node.flux[foo] = node2.flux[foo] = 0;
           }
 #endif
         }
@@ -1233,8 +1244,9 @@ neighvol = pow(sqrt(pair_pot.end[0]), 3.0) * 4.0 / 3.0 * M_PI;
   // read_bc_interp(&QfromT_interp,"EOS_QfromT.txt");
   // read_bc_interp(&CfromT_interp,"EOS_CfromT.txt"); //für CFL maxdt
 
-nn_read_table(&intp_cve_from_r_te, "EOS_cve_from_r_te.txt");
-nn_read_table(&intp_ee_from_r_tesqrt, "EOS_ee_from_r_tesqrt.txt");
+//ERSTMAL OHNE
+// nn_read_table(&intp_cve_from_r_te, "EOS_cve_from_r_te.txt");
+// nn_read_table(&intp_ee_from_r_tesqrt, "EOS_ee_from_r_tesqrt.txt");
 
   //read_tricub_interp(&kappa_interp,"kappa.txt"); //Hardcoding ist schneller
   //Lese Drude-Lorentz Interpolationstabellen
@@ -1262,18 +1274,19 @@ nn_read_table(&intp_ee_from_r_tesqrt, "EOS_ee_from_r_tesqrt.txt");
 
 #endif
 
-//BESTIMME Temin  (in eV)
-    Temin=MAX(Temin,pow(intp_ee_from_r_tesqrt.ymin,2.0)/11604.5);
-    Temin=MAX(Temin,intp_cve_from_r_te.ymin/11604.5);
-//BESTIMME rhomin in SI
-    rhomin=MAX(rhomin,intp_ee_from_r_tesqrt.xmin);
-    rhomin=MAX(rhomin,intp_cve_from_r_te.xmin);
-//CHECKE OB FDMINATOMS AUCH STRENG GENUG
-double checkdens= (double) fd_min_atoms * atomic_weight / fd_vol * 1660.53907;  
-if(checkdens  < rhomin)
-if(myid==0)
-  printf("WARNING: Theoretical minimum density=%.4e is lower than EOS-tables minimum:%.4e. Consider increasing fd_min_atoms\n",
-        checkdens, rhomin);
+// //BESTIMME Temin  (in eV)
+//     Temin=MAX(Temin,pow(intp_ee_from_r_tesqrt.ymin,2.0)/11604.5);
+//     Temin=MAX(Temin,intp_cve_from_r_te.ymin/11604.5);
+// //BESTIMME rhomin in SI
+//     rhomin=MAX(rhomin,intp_ee_from_r_tesqrt.xmin);
+//     rhomin=MAX(rhomin,intp_cve_from_r_te.xmin);
+// //CHECKE OB FDMINATOMS AUCH STRENG GENUG
+
+// double checkdens= (double) fd_min_atoms * atomic_weight / fd_vol * 1660.53907;  
+// if(checkdens  < rhomin)
+// if(myid==0)
+//   printf("WARNING: Theoretical minimum density=%.4e is lower than EOS-tables minimum:%.4e. Consider increasing fd_min_atoms\n",
+//         checkdens, rhomin);
 //DEBUG
 //ttm_writeout(9999);
   /***********************
@@ -1351,50 +1364,49 @@ void do_ADV(double tau)
 // flux[6] : teilchen erhalten von -x,+y
 // flux[7] : teilchen erhalten von -x,-y
 
-      double Nold = (double) l1[i][j][k].natoms_old;
-      double Nnew = (double) l1[i][j][k].natoms; //tmp;
+      double Nold = (double) node.natoms_old;
+      double Nnew = (double) node.natoms; //tmp;
 
 
       if (Nnew > 0)
       {
-                          l2[i][j][k].U= l1[i][j][k].U * Nold / Nnew
-                                        + tau*(
-                                                    // +x/-x
-                          +(double) l1[i][j][k].flux[0] * l1[i + 1][j][k].U //erhalten von +x,y
-                          - (double) l1[i + 1][j][k].flux[1] * l1[i][j][k].U //nach +x,y abgeflossen
+        node2.U= node.U * Nold / Nnew+ tau*(
+                                  // +x/-x
+        +(double) node.flux[0] * l1[i + 1][j][k].U //erhalten von +x,y
+        - (double) l1[i + 1][j][k].flux[1] * node.U //nach +x,y abgeflossen
 
-                          + (double) l1[i][j][k].flux[1] * l1[i - 1][j][k].U //erhalten von -x,y
-                          - (double) l1[i - 1][j][k].flux[0] * l1[i][j][k].U //nach -x,y abgeflossen
-                          // +y/-y
+        + (double) node.flux[1] * l1[i - 1][j][k].U //erhalten von -x,y
+        - (double) l1[i - 1][j][k].flux[0] * node.U //nach -x,y abgeflossen
+        // +y/-y
 #ifdef ADV2D
-                          + (double) l1[i][j][k].flux[2] * l1[i][j + 1][k].U //erhalten von x,+y
-                          - (double) l1[i][j + 1][k].flux[5] * l1[i][j][k].U //nach x,+y abgeflossen
+        + (double) node.flux[2] * l1[i][j + 1][k].U //erhalten von x,+y
+        - (double) l1[i][j + 1][k].flux[5] * node.U //nach x,+y abgeflossen
 
-                          + (double) l1[i][j][k].flux[5] * l1[i][j - 1][k].U //erhalten von -y,x
-                          - (double) l1[i][j - 1][k].flux[2] * l1[i][j][k].U //nach -y,x abgeflossen
-                          //aus +x, +y  und nach +x,+y
-                          + (double) l1[i][j][k].flux[4] * l1[i + 1][j + 1][k].U //erhalten von +x,+y
-                          - (double) l1[i - 1][j - 1][k].flux[7] * l1[i][j][k].U //nach +x,-y abgeflossen
-                          //aus +x, -y nach +x,-y
-                          + (double) l1[i][j][k].flux[3] * l1[i + 1][j - 1][k].U //erhalten von +x,-y
-                          - (double) l1[i - 1][j + 1][k].flux[6] * l1[i][j][k].U //nach +x,-y abgeflossen
-                          //aus -x,+y und nach -x,+y
-                          + (double) l1[i][j][k].flux[6] * l1[i - 1][j + 1][k].U //erhalten von -x,+y
-                          - (double) l1[i - 1][j + 1][k].flux[3] * l1[i][j][k].U //nach -x,+y abgeflossen
-                          //aus -x,-y nach -x,-y
-                          + (double) l1[i][j][k].flux[7] * l1[i - 1][j - 1][k].U //erhalten von -x,-y
-                          - (double) l1[i - 1][j - 1][k].flux[4] * l1[i][j][k].U //abgeflossen nach -x,-y
+        + (double) node.flux[5] * l1[i][j - 1][k].U //erhalten von -y,x
+        - (double) l1[i][j - 1][k].flux[2] * node.U //nach -y,x abgeflossen
+        //aus +x, +y  und nach +x,+y
+        + (double) node.flux[4] * l1[i + 1][j + 1][k].U //erhalten von +x,+y
+        - (double) l1[i - 1][j - 1][k].flux[7] * node.U //nach +x,-y abgeflossen
+        //aus +x, -y nach +x,-y
+        + (double) node.flux[3] * l1[i + 1][j - 1][k].U //erhalten von +x,-y
+        - (double) l1[i - 1][j + 1][k].flux[6] * node.U //nach +x,-y abgeflossen
+        //aus -x,+y und nach -x,+y
+        + (double) node.flux[6] * l1[i - 1][j + 1][k].U //erhalten von -x,+y
+        - (double) l1[i - 1][j + 1][k].flux[3] * node.U //nach -x,+y abgeflossen
+        //aus -x,-y nach -x,-y
+        + (double) node.flux[7] * l1[i - 1][j - 1][k].U //erhalten von -x,-y
+        - (double) l1[i - 1][j - 1][k].flux[4] * node.U //abgeflossen nach -x,-y
 #endif
-                        ) / Nnew;
+      ) / Nnew;
 
 
           //Temp updaten wenn zelle aktiviert
-          if(l1[i][j][k].natoms >= fd_min_atoms)
-            l2[i][j][k].temp = EOS_te_from_r_ee(l1[i][j][k].dens, l2[i][j][k].U / (26.9815 * AMU * J2eV)) / 11604.5;
+          if(node.natoms >= fd_min_atoms)
+            node2.temp = EOS_te_from_r_ee(node.dens, node2.U / (26.9815 * AMU * J2eV)) / 11604.5;
 
         //IDEE: Evtl. statt te_from_re mittels Cv und DeltaU?
 #if DEBUG_LEVEL > 0
-        if(Nnew >= fd_min_atoms && l2[i][j][k].temp<=0.0 )        
+        if(Nnew >= fd_min_atoms && node2.temp<=0.0 )        
         {
           printf("\nmyid:%d,steps:%d,i:%d,j:%d Temp is <Tmin:%.4e in do_ADV, nnew:%.f,nold:%f,n"
            "dens: %.6e , dens_old: %.6e natoms:%d,  atoms_old:%d\n"
@@ -1406,25 +1418,25 @@ void do_ADV(double tau)
            "from +x,-y: %d , atold:%d , t: %.4e , to +x,-y: %d\n"
            "from -x,+y: %d , atold:%d , t: %.4e , to -x,+y: %d\n"
            "from -x,-y: %d , atld:%d , t: %.4e , to -x,-y: %d\n\n",
-            myid,steps,i,j, l2[i][j][k].temp,
+            myid,steps,i,j, node2.temp,
             Nnew,Nold,
-           l1[i][j][k].dens, l2[i][j][k].dens, l1[i][j][k].natoms, l2[i][j][k].natoms,
-           l1[i][j][k].flux[0],l2[i+1][j][k].natoms,   l1[i+1][j][k].U,   l1[i+1][j][k].flux[1],
-           l1[i][j][k].flux[1],l2[i-1][j][k].natoms,   l1[i-1][j][k].U,   l1[i-1][j][k].flux[0],
-           l1[i][j][k].flux[2],l2[i][j+1][k].natoms,   l1[i][j+1][k].U,   l1[i][j+1][k].flux[5],
-           l1[i][j][k].flux[5],l2[i][j-1][k].natoms,   l1[i][j-1][k].U,   l1[i][j-1][k].flux[2],
-           l1[i][j][k].flux[4],l2[i+1][j+1][k].natoms, l1[i+1][j+1][k].U, l1[i-1][j-1][k].flux[7],
-           l1[i][j][k].flux[3],l2[i+1][j-1][k].natoms, l1[i+1][j-1][k].U, l1[i-1][j+1][k].flux[6],
-           l1[i][j][k].flux[6],l2[i-1][j+1][k].natoms, l1[i-1][j+1][k].U, l1[i-1][j+1][k].flux[3],
-           l1[i][j][k].flux[7],l2[i-1][j-1][k].natoms, l1[i-1][j-1][k].U, l1[i-1][j-1][k].flux[4]);
+           node.dens, node2.dens, node.natoms, node2.natoms,
+           node.flux[0],l2[i+1][j][k].natoms,   l1[i+1][j][k].U,   l1[i+1][j][k].flux[1],
+           node.flux[1],l2[i-1][j][k].natoms,   l1[i-1][j][k].U,   l1[i-1][j][k].flux[0],
+           node.flux[2],l2[i][j+1][k].natoms,   l1[i][j+1][k].U,   l1[i][j+1][k].flux[5],
+           node.flux[5],l2[i][j-1][k].natoms,   l1[i][j-1][k].U,   l1[i][j-1][k].flux[2],
+           node.flux[4],l2[i+1][j+1][k].natoms, l1[i+1][j+1][k].U, l1[i-1][j-1][k].flux[7],
+           node.flux[3],l2[i+1][j-1][k].natoms, l1[i+1][j-1][k].U, l1[i-1][j+1][k].flux[6],
+           node.flux[6],l2[i-1][j+1][k].natoms, l1[i-1][j+1][k].U, l1[i-1][j+1][k].flux[3],
+           node.flux[7],l2[i-1][j-1][k].natoms, l1[i-1][j-1][k].U, l1[i-1][j-1][k].flux[4]);
         }
 #endif        
         
       }
       else if (Nnew < 1)
       {
-        l2[i][j][k].U = 0.0;
-        l2[i][j][k].temp = 0.0;
+        node2.U = 0.0;
+        node2.temp = 0.0;
       }
     } //for j
   } //for i
@@ -1450,22 +1462,22 @@ void do_cell_activation(void)
       {        
         k_global =  ((k-1) + my_coord.z*(local_fd_dim.z-2));
 
-        if (l1[i][j][k].natoms_old >= fd_min_atoms && l1[i][j][k].natoms < fd_min_atoms)
+        if (node.natoms_old >= fd_min_atoms && node.natoms < fd_min_atoms)
         {
           // ZELLE DEAKTIVIERT
 #if DEBUG_LEVEL > 0
           printf("Warning:FD cell deactivated on proc %d on step %d at i:%d,j:%d,k%d with %d atoms and temp:%.4e\n", myid, steps,
-                 i_global, j_global, k_global, l1[i][j][k].natoms, l1[i][j][k].temp);
+                 i_global, j_global, k_global, node.natoms, node.temp);
 #endif
           // Cell deactivated. Deduce its electronic energy from E_new_local
-          l1[i][j][k].xi = 0.0;
+          node.xi = 0.0;
         }
         // ZELLE AKTIVIERT
-        else if (l1[i][j][k].natoms_old < fd_min_atoms && l1[i][j][k].natoms >= fd_min_atoms)
+        else if (node.natoms_old < fd_min_atoms && node.natoms >= fd_min_atoms)
         {
 #if DEBUG_LEVEL > 0
           printf("Warning:New FD cell activated on proc %d at ig:%d,jg:%d,kg:%d with %d atoms on step:%d and T=%.4e, dens=%.4e, atoms_old:%d\n",
-                 myid, i, j, k, l1[i][j][k].natoms, steps, l1[i][j][k].temp, l1[i][j][k].dens, l1[i][j][k].natoms_old);
+                 myid, i, j, k, node.natoms, steps, node.temp, node.dens, node.natoms_old);
 #endif
           // *****************************************************
           // * NEU AKTIVIERTE ZELLE MIT UNSINNIGER TEMPERATUR,   *
@@ -1474,13 +1486,13 @@ void do_cell_activation(void)
           // * AUS NACHBARZELLEN               *
           // *****************************************************
 
-          if (isnan(l1[i][j][k].temp) != 0 || l1[i][j][k].temp <= Temin) //Temp zu klein (etwa 35K) -> altes schema
+          if (isnan(node.temp) != 0 || node.temp <= Temin) //Temp zu klein (etwa 35K) -> altes schema
           {
 
 #if DEBUG_LEVEL>0
             printf("proc:%d,steps:%d,ig:%d,jg:%d,kg:%d WARNING: Freshly activated cell with Te=%.4e is NaN or < Tmin:%.4e,atoms:%d, dens: %.4e ,"
                    "using neighbor cells or mdtemp\n",
-                   myid, steps, i_global, j_global, 0, l1[i][j][k].temp, Temin,  l1[i][j][k].natoms, l1[i][j][k].dens);
+                   myid, steps, i_global, j_global, 0, node.temp, Temin,  node.natoms, node.dens);
 #endif
 
             // Freshly activated cell. Gets avg. electron energy of active
@@ -1524,44 +1536,45 @@ void do_cell_activation(void)
             {
               if (n_neighbors != 0)
               {
-                l1[i][j][k].temp = sqrt(E_el_neighbors / ((double)n_neighbors));
-                l2[i][j][k].temp = l1[i][j][k].temp;
+                node.temp = sqrt(E_el_neighbors / ((double)n_neighbors));
+                node2.temp = node.temp;
                 
 #if DEBUG_LEVEL>0
                   printf("proc:%d,steps:%d,i:%d,j:%d,k:%d, Te is NaN or <=0, using neighbor cells=>Te=%f\n",
-                         myid, steps, i_global, j_global, 0, l1[i][j][k].temp);
+                         myid, steps, i_global, j_global, 0, node.temp);
 #endif
 //HOTFIX: still < Tmin? --> use md-temp
-                if (l1[i][j][k].temp < Temin)
+                if (node.temp < Temin)
                 {
 #if DEBUG_LEVEL > 0
                   printf("proc:%d,steps:%d,i:%d,j:%d,k:%d, Te=%.4e still < Tmin=%.4e, using MD-temp:%.4e\n",
-                         myid, steps, i_global, j_global, k_global, l1[i][j][k].temp, Temin, l1[i][j][k].md_temp);
+                         myid, steps, i_global, j_global, k_global, node.temp, Temin, node.md_temp);
 #endif
 //HOTIFX: still stiil< Tmin ?!?! (wegen pdecay,z.B.)
-                  l2[i][j][k].temp = l1[i][j][k].temp = l1[i][j][k].md_temp;
+                  node2.temp = node.temp = node.md_temp;
                 }
 
 
               }
               else  // No neighbors? -> Get MD-temp
               {
-                l1[i][j][k].temp = l1[i][j][k].md_temp;
-                l2[i][j][k].temp = l1[i][j][k].temp;
+                node.temp = node.md_temp;
+                node2.temp = node.temp;
 #if DEBUG_LEVEL > 0
                 printf("proc:%d,steps:%d,i:%d,j:%d,k:%d, WARNING: No neighbors in activated cell. Using md-temp=>Te=%f\n",
-                       myid, steps, i_global, j_global, k_global, l1[i][j][k].temp);
+                       myid, steps, i_global, j_global, k_global, node.temp);
 
 #endif
               }
             } //isnan ....
             //Interne Energie muss noch geupdatet werden (Falls fallback auf altes Schema)
-            l1[i][j][k].U = l2[i][j][k].U= EOS_ee_from_r_te(l1[i][j][k].dens, l1[i][j][k].temp * 11604.5) * 26.9815 * AMU * J2eV; // eV/Atom
+
+//node.U = node2.U= EOS_ee_from_r_te(node.dens, node.temp * 11604.5) * 26.9815 * AMU * J2eV; // eV/Atom
           } // endif isnan(temp) || temp<=0
 
         } // endif ..new cell activated...
 
-        //l1[i][j][k].natoms_old=l2[i][j][k].natoms_old=l1[i][j][k].natoms;
+        //node.natoms_old=node2.natoms_old=node.natoms;
       } //for k
     } //for j
   } //for i
@@ -1579,7 +1592,7 @@ void do_DIFF(double tau)
       ymin, ymax, /* (to account for bc & deactivated cells) */
       zmin, zmax;
 
-  double xi_fac=fd_vol/3.0/((double) diff_substeps);///((double) l1[i][j][k].natoms); //ORIGINAL
+  double xi_fac=fd_vol/3.0/((double) diff_substeps);///((double) node.natoms); //ORIGINAL
   //double xi_fac = 26.9815 * AMU / 3.0 * 1e30 / ((double) diff_substeps); //NEU
 
   //xi=1/fdsteps * sum_(n=1)^(fdsteps) {m*fd_g/(3*rho*k_b)*(Te-Ti)/Ti }
@@ -1620,15 +1633,19 @@ void do_DIFF(double tau)
         //compute absorbed laser-energy
         if (laser_active)
         {
-          Eabs_local += l1[i][j][k].source * fd_vol * tau; //eV
+          Eabs_local += node.source * fd_vol * tau; //eV
         }
 
+
+#ifdef COLRAD
+        node2.y=node.y;
+#endif
 #ifdef FDTD
         SwapTTM(i, j, k);
 #endif
 
         /* only do calculation if cell is not deactivated */
-        if (l1[i][j][k].natoms < fd_min_atoms)   continue;
+        if (node.natoms < fd_min_atoms)   continue;
         if (l1[i - 1][j][k].natoms < fd_min_atoms)  xmin = i; else  xmin = i - 1;
         if (l1[i + 1][j][k].natoms < fd_min_atoms) xmax = i; else  xmax = i + 1;
         if (l1[i][j - 1][k].natoms < fd_min_atoms) ymin = j; else  ymin = j - 1;
@@ -1662,7 +1679,7 @@ void do_DIFF(double tau)
           if (dirichlet_maxy_global[i_global] == j_global)
           {
             ymaxTe = 0.025850926; //=RT
-            ymaxk = 1.933442e+01; //getKappa(ymaxTe, l1[i][j][k].md_temp, l1[i][j][k].ne,double Z)
+            ymaxk = 1.933442e+01; //getKappa(ymaxTe, node.md_temp, node.ne,double Z)
           }
           else if (dirichlet_miny_global[i_global] == j_global)
           {
@@ -1677,42 +1694,42 @@ void do_DIFF(double tau)
         }
 #endif
 
-         Ce = l1[i][j][k].Ce; //eV/(eV*Angs^3)
+         Ce = node.Ce; //eV/(eV*Angs^3)
 
         /***********************************************************************
               * Explicit diffusion with variable kappa   (Convervative formulation)  *
         ************************************************************************/    
-        l2[i][j][k].temp=tau/Ce*
+        node2.temp=tau/Ce*
         //first diffusion terms
         ( 
           // dK/dx * d^2 T/dx^2
-        ( ((l1[i][j][k].fd_k+xmaxk)/2 * (xmaxTe-l1[i][j][k].temp)*invxsq)
-         -((l1[i][j][k].fd_k+xmink)/2 * (l1[i][j][k].temp-xminTe)*invxsq)
+        ( ((node.fd_k+xmaxk)/2 * (xmaxTe-node.temp)*invxsq)
+         -((node.fd_k+xmink)/2 * (node.temp-xminTe)*invxsq)
          // dK/dy * d^2 T/dy^2
-         +((l1[i][j][k].fd_k+ymaxk)/2 * (ymaxTe-l1[i][j][k].temp)*invysq)
-         -((l1[i][j][k].fd_k+ymink)/2 * (l1[i][j][k].temp-yminTe)*invysq)                                 
+         +((node.fd_k+ymaxk)/2 * (ymaxTe-node.temp)*invysq)
+         -((node.fd_k+ymink)/2 * (node.temp-yminTe)*invysq)                                 
 #ifndef FDTD   //weil bisher nur 1D oder 2D
          //
-         +((l1[i][j][k].fd_k+zmaxk)/2 * (zmaxTe-l1[i][j][k].temp)*invzsq)
-         -((l1[i][j][k].fd_k+zmink)/2 * (l1[i][j][k].temp-zminTe)*invzsq)
+         +((node.fd_k+zmaxk)/2 * (zmaxTe-node.temp)*invzsq)
+         -((node.fd_k+zmink)/2 * (node.temp-zminTe)*invzsq)
 #endif
          )
               //now coupling+source term
-          -l1[i][j][k].fd_g*(l1[i][j][k].temp-l1[i][j][k].md_temp)
-          +l1[i][j][k].source
-        ) +l1[i][j][k].temp;
+          -node.fd_g*(node.temp-node.md_temp)
+          +node.source
+        ) +node.temp;
         
 
         //Folgende Zeile setzt vorraus, dass Cve und U kompatiblen Tabllen zugrunde liegen
-        l2[i][j][k].U=l1[i][j][k].U + (l2[i][j][k].temp-l1[i][j][k].temp)*Ce*fd_vol/((double) l1[i][j][k].natoms); // eV
+        node2.U=node.U + (node2.temp-node.temp)*Ce*fd_vol/((double) node.natoms); // eV
 
-        l1[i][j][k].xi += (l2[i][j][k].temp-l1[i][j][k].md_temp)*xi_fac*l1[i][j][k].fd_g/l1[i][j][k].md_temp/((double) l1[i][j][k].natoms);//Original
-        //l1[i][j][k].xi += (l2[i][j][k].temp - l1[i][j][k].md_temp) * xi_fac * l1[i][j][k].fd_g / l1[i][j][k].md_temp / l1[i][j][k].dens; // NE
-        l2[i][j][k].xi = l1[i][j][k].xi;
+        node.xi += (node2.temp-node.md_temp)*xi_fac*node.fd_g/node.md_temp/((double) node.natoms);//Original
+        //node.xi += (node2.temp - node.md_temp) * xi_fac * node.fd_g / node.md_temp / node.dens; // NE
+        node2.xi = node.xi;
 
         
         /*
-        if(l2[i][j][k].temp>l1[i][j][k].temp*10)  //kann auch passieren wenn zelle aktiviert wird
+        if(node2.temp>node.temp*10)  //kann auch passieren wenn zelle aktiviert wird
         {
         //unrealist. große Heizrate. Evtl. Cv zu klein weil Te zu klein!
           printf("DIFFPROBLEM:Heizrate viel zu groß!!:%.4e,\n"
@@ -1722,13 +1739,13 @@ void do_DIFF(double tau)
                                 "Txmax:%f,Txmin:%f,Tymax:%f,Tymin:%f,Tzmax:%f,Tzmin:%f\n"
                                 "kxmax:%f,kxmin:%f,kymax:%f,kymin:%f,kzmax:%f,kzmin:%f\n"
                                 "\n",
-              l1[i][j][k].source,
+              node.source,
               steps,
-              l1[i][j][k].natoms,
-              myid,i_global,j_global,l1[i][j][k].natoms,l1[i][j][k].dens,
-                                l2[i][j][k].temp,l1[i][j][k].temp,
-                                l1[i][j][k].fd_g,
-                                l1[i][j][k].Ce,l1[i][j][k].fd_k,l1[i][j][k].md_temp,
+              node.natoms,
+              myid,i_global,j_global,node.natoms,node.dens,
+                                node2.temp,node.temp,
+                                node.fd_g,
+                                node.Ce,node.fd_k,node.md_temp,
                                 l1[xmax][j][k].temp,l1[xmin][j][k].temp,
                                 l1[i][ymax][k].temp,l1[i][ymin][k].temp,
                                 l1[i][j][zmax].temp,l1[i][j][zmin].temp,
@@ -1742,7 +1759,7 @@ void do_DIFF(double tau)
 
 #if DEBUG_LEVEL>0
         // NaN Temp oder <0
-        if (l2[i][j][k].temp <= 0 || isnan(l2[i][j][k].temp) != 0)
+        if (node2.temp <= 0 || isnan(node2.temp) != 0)
         {
           printf("TEMP IS NAN or <0 IN DIFFLOOP!!!! steps:%d,proc:%d,i:%d,j:%d,k:%d,T:%.4e\n"
                  "dens: %.15e,atoms:%d\n"
@@ -1752,10 +1769,10 @@ void do_DIFF(double tau)
                  "fdx:%f,fdy:%f,fdz:%f\n"
                  "coupling:%.4e\n"
                  "Diffx:%.4e, Diffy:%.4e, Diffz:%.4e\n", steps,
-                 myid, i, j, k, l2[i][j][k].temp,
-                 l1[i][j][k].dens, l1[i][j][k].natoms,
-                 l1[i][j][k].source, l1[i][j][k].fd_g,
-                 l1[i][j][k].Ce, l1[i][j][k].fd_k, l1[i][j][k].temp, l1[i][j][k].md_temp,
+                 myid, i, j, k, node2.temp,
+                 node.dens, node.natoms,
+                 node.source, node.fd_g,
+                 node.Ce, node.fd_k, node.temp, node.md_temp,
                  l1[xmax][j][k].temp, l1[xmin][j][k].temp,
                  l1[i][ymax][k].temp, l1[i][ymin][k].temp,
                  l1[i][j][zmax].temp, l1[i][j][zmin].temp,
@@ -1763,15 +1780,15 @@ void do_DIFF(double tau)
                  l1[i][ymax][k].fd_k, l1[i][ymin][k].fd_k,
                  l1[i][j][zmax].fd_k, l1[i][j][zmin].fd_k,
                  fd_h.x, fd_h.y, fd_h.z,
-                 -tau / Ce * l1[i][j][k].fd_g * (l1[i][j][k].temp - l1[i][j][k].md_temp),
-                 tau / Ce * (((l1[i][j][k].fd_k + xmaxk) / 2 * (xmaxTe - l1[i][j][k].temp)*invxsq)
-                             - ((l1[i][j][k].fd_k + xmink) / 2 * (l1[i][j][k].temp - xminTe)*invxsq)),
+                 -tau / Ce * node.fd_g * (node.temp - node.md_temp),
+                 tau / Ce * (((node.fd_k + xmaxk) / 2 * (xmaxTe - node.temp)*invxsq)
+                             - ((node.fd_k + xmink) / 2 * (node.temp - xminTe)*invxsq)),
 
-                 tau / Ce * (((l1[i][j][k].fd_k + ymaxk) / 2 * (ymaxTe - l1[i][j][k].temp)*invysq)
-                             - ((l1[i][j][k].fd_k + ymink) / 2 * (l1[i][j][k].temp - yminTe)*invysq)),
+                 tau / Ce * (((node.fd_k + ymaxk) / 2 * (ymaxTe - node.temp)*invysq)
+                             - ((node.fd_k + ymink) / 2 * (node.temp - yminTe)*invysq)),
 
-                 tau / Ce * (((l1[i][j][k].fd_k + zmaxk) / 2 * (zmaxTe - l1[i][j][k].temp)*invzsq)
-                             - ((l1[i][j][k].fd_k + zmink) / 2 * (l1[i][j][k].temp - zminTe)*invzsq))
+                 tau / Ce * (((node.fd_k + zmaxk) / 2 * (zmaxTe - node.temp)*invzsq)
+                             - ((node.fd_k + zmink) / 2 * (node.temp - zminTe)*invzsq))
 
                 );
           error("Temp got NaN or <=0 in do_DIFF during fd-loop");
@@ -1845,18 +1862,18 @@ void ttm_writeout(int number)
 #else
         sprintf(outbufline, "%d %d %d %d %e %e %e %e %e %e %e %e %e %e %e %d %f %e %e %e %e %e %e %e %e %e %e",
 #endif
-                i_global, j_global, k_global, l1[i][j][k].natoms, l1[i][j][k].temp,
-                l1[i][j][k].md_temp, l1[i][j][k].xi,
-                l1[i][j][k].source, l1[i][j][k].dens,
-                l1[i][j][k].vcomx, l1[i][j][k].vcomy, l1[i][j][k].vcomz,
-                l1[i][j][k].fd_k, l1[i][j][k].fd_g,
+                i_global, j_global, k_global, node.natoms, node.temp,
+                node.md_temp, node.xi,
+                node.source, node.dens,
+                node.vcomx, node.vcomy, node.vcomz,
+                node.fd_k, node.fd_g,
 #ifndef FDTD
-                l1[i][j][k].Z, l1[i][j][k].proc, l1[i][j][k].Ce
+                node.Z, node.proc, node.Ce
 #else
-                l1[i][j][k].Z, l1[i][j][k].proc, l1[i][j][k].Ce,
-                l1[i][j][k].Ezx, l1[i][j][k].Ezy, l1[i][j][k].Hx, l1[i][j][k].Hy,
-                l1[i][j][k].sigmax, l1[i][j][k].sigmay,
-                l1[i][j][k].Hzx, l1[i][j][k].Hzy, l1[i][j][k].Ex, l1[i][j][k].Ey
+                node.Z, node.proc, node.Ce,
+                node.Ezx, node.Ezy, node.Hx, node.Hy,
+                node.sigmax, node.sigmay,
+                node.Hzx, node.Hzy, node.Ex, node.Ey
 #endif
                );
 
@@ -1955,7 +1972,7 @@ void ttm_writeout(int number)
            and don't want to waste the space in llocal */
         llocal[ (i - 1) * (local_fd_dim.y - 2) * (local_fd_dim.z - 2)
                 + (j - 1) * (local_fd_dim.z - 2)
-                + k - 1 ] = l1[i][j][k];
+                + k - 1 ] = node;
       }
     }
   }
@@ -2174,33 +2191,33 @@ void ttm_read(int number)
     //printf("l:%d,proc:%d,myid:%d,i:%d,j:%d,k:%d\n",l,buf[l].proc,myid,i,j,k);
     if (buf[l].proc == myid)
     {
-      l1[i][j][k].temp = buf[l].temp;
-      l1[i][j][k].natoms = buf[l].natoms;
-      l1[i][j][k].md_temp = buf[l].md_temp;
-      l1[i][j][k].xi = buf[l].xi;
-      l1[i][j][k].source = buf[l].source;
-      l1[i][j][k].dens = buf[l].dens;
-      l1[i][j][k].fd_k = buf[l].fd_k;
-      l1[i][j][k].fd_g = buf[l].fd_g;
-      l1[i][j][k].Z = buf[l].Z;
-      l1[i][j][k].proc = buf[l].proc;
-      l1[i][j][k].Ce = buf[l].Ce;
-      l1[i][j][k].vcomx = buf[l].vcomx;
-      l1[i][j][k].vcomy = buf[l].vcomy;
-      l1[i][j][k].vcomz = buf[l].vcomz;
+      node.temp = buf[l].temp;
+      node.natoms = buf[l].natoms;
+      node.md_temp = buf[l].md_temp;
+      node.xi = buf[l].xi;
+      node.source = buf[l].source;
+      node.dens = buf[l].dens;
+      node.fd_k = buf[l].fd_k;
+      node.fd_g = buf[l].fd_g;
+      node.Z = buf[l].Z;
+      node.proc = buf[l].proc;
+      node.Ce = buf[l].Ce;
+      node.vcomx = buf[l].vcomx;
+      node.vcomy = buf[l].vcomy;
+      node.vcomz = buf[l].vcomz;
 #ifdef FDTD
-      l1[i][j][k].Ezx = buf[l].Ezx;
-      l1[i][j][k].Ezy = buf[l].Ezy;
-      l1[i][j][k].Hx = buf[l].Hx;
-      l1[i][j][k].Hy = buf[l].Hy;
-      l1[i][j][k].eps = eps0; //buf[l].eps;
-      l1[i][j][k].mu = mu0; //buf[l].mu;
-      l1[i][j][k].sigmax = buf[l].sigmax;
-      l1[i][j][k].sigmay = buf[l].sigmay;
-      l1[i][j][k].Hzx = buf[l].Hzx;
-      l1[i][j][k].Hzy = buf[l].Hzy;
-      l1[i][j][k].Ex = buf[l].Ex;
-      l1[i][j][k].Ey = buf[l].Ey;
+      node.Ezx = buf[l].Ezx;
+      node.Ezy = buf[l].Ezy;
+      node.Hx = buf[l].Hx;
+      node.Hy = buf[l].Hy;
+      node.eps = eps0; //buf[l].eps;
+      node.mu = mu0; //buf[l].mu;
+      node.sigmax = buf[l].sigmax;
+      node.sigmay = buf[l].sigmay;
+      node.Hzx = buf[l].Hzx;
+      node.Hzy = buf[l].Hzy;
+      node.Ex = buf[l].Ex;
+      node.Ey = buf[l].Ey;
 #endif
 
       k++;
@@ -2242,7 +2259,7 @@ void ttm_read(int number)
           k_global =  ((k-1) + my_coord.z*(local_fd_dim.z-2));
           if(i_global==110 && j_global==16 && k_global==21)
           {
-            printf("DEBUG:natoms:%d\n",l1[i][j][k].natoms);
+            printf("DEBUG:natoms:%d\n",node.natoms);
           }
         }
       }
@@ -2254,17 +2271,17 @@ void ttm_read(int number)
 // *         AUXILIARY FUNCTIONS FOR WIDE-RANGE PROPERTIES    *
 // ******************************************************************************/
 
-// double Cv(double Te, double ne) //specific heat of quasi-free electrons,Te in eV, ne in m^-3 //deprecated
-// {
-//   //approximatin according to mazhukin, S. 240 (Fermi-integral analyt. genähert)
-//   //error less than 5%
-//   double EF = fermi_E(ne);
-//   //double Te_K=Te*11605; //in Kelvin
-//   double Te_J = Te * 1.6021766e-19; //in Joule
-//   //return 1.5*ne*BOLTZMAN*BOLTZMAN*Te_K/sqrt(Te_J*Te_J+pow(3*EF/M_PI/M_PI,2.0))*7.243227582e-8; //J/K/m^3 -> IMD-UNITS
-//   return 2.401087548821963e-49 * Te * ne / sqrt(Te_J * Te_J + pow(EF * 0.303963550927013, 2.0)); //alle konstanten zus.gefasst
+double Cv(double Te, double ne) //specific heat of quasi-free electrons,Te in eV, ne in m^-3 //deprecated
+{
+  //approximatin according to mazhukin, S. 240 (Fermi-integral analyt. genähert)
+  //error less than 5%
+  double EF = fermi_E(ne);
+  //double Te_K=Te*11605; //in Kelvin
+  double Te_J = Te * 1.6021766e-19; //in Joule
+  //return 1.5*ne*BOLTZMAN*BOLTZMAN*Te_K/sqrt(Te_J*Te_J+pow(3*EF/M_PI/M_PI,2.0))*7.243227582e-8; //J/K/m^3 -> IMD-UNITS
+  return 2.401087548821963e-49 * Te * ne / sqrt(Te_J * Te_J + pow(EF * 0.303963550927013, 2.0)); //alle konstanten zus.gefasst
 
-// }
+}
 
 /*
 double nu_e_e(double Te, double EF, double Ne, double Na, double valence) //collision freq.Mazkhukin  //deprecated
@@ -2659,25 +2676,25 @@ void CFL_maxdt(void)
     {
       for (k = 1; k < local_fd_dim.z - 1; ++k)
       {
-        if (l1[i][j][k].natoms > fd_min_atoms)
+        if (node.natoms > fd_min_atoms)
         {
           // ************************************************
           // * DETERMINE MAX. TIME-STEP FOR STABILITY   *
           // ************************************************
           //x-dir
           if (l1[i + 1][j][k].natoms >= fd_min_atoms) imax = i + 1; else imax = i;
-          khalf = (l1[i][j][k].fd_k + l1[imax][j][k].fd_k); //k_(i+1/2)*2
-          maxdttmp = MIN(maxdttmp, l1[i][j][k].Ce * dxsq / khalf);
+          khalf = (node.fd_k + l1[imax][j][k].fd_k); //k_(i+1/2)*2
+          maxdttmp = MIN(maxdttmp, node.Ce * dxsq / khalf);
 
           //y-dir
           if (l1[i][j + 1][k].natoms >= fd_min_atoms) jmax = j + 1; else jmax = j;
-          khalf = (l1[i][j][k].fd_k + l1[i][jmax][k].fd_k);
-          maxdttmp = MIN(maxdttmp, l1[i][j][k].Ce  * dysq / khalf);
+          khalf = (node.fd_k + l1[i][jmax][k].fd_k);
+          maxdttmp = MIN(maxdttmp, node.Ce  * dysq / khalf);
 
           //z-dir
           if (l1[i][j][k + 1].natoms >= fd_min_atoms) kmax = k + 1; else kmax = k;
-          khalf = (l1[i][j][k].fd_k + l1[i][j][kmax].fd_k);
-          maxdttmp = MIN(maxdttmp, l1[i][j][k].Ce * dzsq / khalf);
+          khalf = (node.fd_k + l1[i][j][kmax].fd_k);
+          maxdttmp = MIN(maxdttmp, node.Ce * dzsq / khalf);
         }
       }
     }
@@ -2838,97 +2855,97 @@ double eeminfun(double x, double r, double e) //Auxiliary function for Te_from_d
 void SwapTTM(int i, int j, int k)
 {
   double tmp;
-  tmp = l2[i][j][k].Ezx;
-  l2[i][j][k].Ezx = l1[i][j][k].Ezx;
-  l1[i][j][k].Ezx = tmp;
+  tmp = node2.Ezx;
+  node2.Ezx = node.Ezx;
+  node.Ezx = tmp;
 
-  tmp = l2[i][j][k].Ezy;
-  l2[i][j][k].Ezy = l1[i][j][k].Ezy;
-  l1[i][j][k].Ezy = tmp;
+  tmp = node2.Ezy;
+  node2.Ezy = node.Ezy;
+  node.Ezy = tmp;
 
-  tmp = l2[i][j][k].Ex;
-  l2[i][j][k].Ex = l1[i][j][k].Ex;
-  l1[i][j][k].Ex = tmp;
+  tmp = node2.Ex;
+  node2.Ex = node.Ex;
+  node.Ex = tmp;
 
-  tmp = l2[i][j][k].Ey;
-  l2[i][j][k].Ey = l1[i][j][k].Ey;
-  l1[i][j][k].Ey = tmp;
+  tmp = node2.Ey;
+  node2.Ey = node.Ey;
+  node.Ey = tmp;
 
-  tmp = l2[i][j][k].Hx;
-  l2[i][j][k].Hx = l1[i][j][k].Hx;
-  l1[i][j][k].Hx = tmp;
+  tmp = node2.Hx;
+  node2.Hx = node.Hx;
+  node.Hx = tmp;
 
-  tmp = l2[i][j][k].Hy;
-  l2[i][j][k].Hy = l1[i][j][k].Hy;
-  l1[i][j][k].Hy = tmp;
+  tmp = node2.Hy;
+  node2.Hy = node.Hy;
+  node.Hy = tmp;
 
-  tmp = l2[i][j][k].Hzx;
-  l2[i][j][k].Hzx = l1[i][j][k].Hzx;
-  l1[i][j][k].Hzx = tmp;
+  tmp = node2.Hzx;
+  node2.Hzx = node.Hzx;
+  node.Hzx = tmp;
 
-  tmp = l2[i][j][k].Hzy;
-  l2[i][j][k].Hzy = l1[i][j][k].Hzy;
-  l1[i][j][k].Hzy = tmp;
+  tmp = node2.Hzy;
+  node2.Hzy = node.Hzy;
+  node.Hzy = tmp;
 
-  tmp = l2[i][j][k].Jzx;
-  l2[i][j][k].Jzx = l1[i][j][k].Jzx;
-  l1[i][j][k].Jzx = tmp;
+  tmp = node2.Jzx;
+  node2.Jzx = node.Jzx;
+  node.Jzx = tmp;
 
-  tmp = l2[i][j][k].Jzy;
-  l2[i][j][k].Jzy = l1[i][j][k].Jzy;
-  l1[i][j][k].Jzy = tmp;
+  tmp = node2.Jzy;
+  node2.Jzy = node.Jzy;
+  node.Jzy = tmp;
 
-  tmp = l2[i][j][k].Jx;
-  l2[i][j][k].Jx = l1[i][j][k].Jx;
-  l1[i][j][k].Jx = tmp;
+  tmp = node2.Jx;
+  node2.Jx = node.Jx;
+  node.Jx = tmp;
 
-  tmp = l2[i][j][k].Jy;
-  l2[i][j][k].Jy = l1[i][j][k].Jy;
-  l1[i][j][k].Jy = tmp;
+  tmp = node2.Jy;
+  node2.Jy = node.Jy;
+  node.Jy = tmp;
 
 
-  l2[i][j][k].sigmax = l1[i][j][k].sigmax; //noetig?
-  l2[i][j][k].sigmay = l1[i][j][k].sigmay;
-  l2[i][j][k].mu = l1[i][j][k].mu;
-  l2[i][j][k].eps = l1[i][j][k].eps;
+  node2.sigmax = node.sigmax; //noetig?
+  node2.sigmay = node.sigmay;
+  node2.mu = node.mu;
+  node2.eps = node.eps;
 
 
   //Lorentz
-  tmp = l2[i][j][k].Pzx;
-  l2[i][j][k].Pzx = l1[i][j][k].Pzx;
-  l1[i][j][k].Pzx = tmp;
+  tmp = node2.Pzx;
+  node2.Pzx = node.Pzx;
+  node.Pzx = tmp;
 
-  tmp = l2[i][j][k].Pzy;
-  l2[i][j][k].Pzy = l1[i][j][k].Pzy;
-  l1[i][j][k].Pzy = tmp;
+  tmp = node2.Pzy;
+  node2.Pzy = node.Pzy;
+  node.Pzy = tmp;
 
-  tmp = l2[i][j][k].Px;
-  l2[i][j][k].Px = l1[i][j][k].Px;
-  l1[i][j][k].Px = tmp;
+  tmp = node2.Px;
+  node2.Px = node.Px;
+  node.Px = tmp;
 
-  tmp = l2[i][j][k].Py;
-  l2[i][j][k].Py = l1[i][j][k].Py;
-  l1[i][j][k].Py = tmp;
+  tmp = node2.Py;
+  node2.Py = node.Py;
+  node.Py = tmp;
 
-  tmp = l2[i][j][k].Pzx;
-  l2[i][j][k].Jlzx = l1[i][j][k].Jlzx;
-  l1[i][j][k].Jlzx = tmp;
+  tmp = node2.Pzx;
+  node2.Jlzx = node.Jlzx;
+  node.Jlzx = tmp;
 
-  tmp = l2[i][j][k].Jlzy;
-  l2[i][j][k].Jlzy = l1[i][j][k].Jlzy;
-  l1[i][j][k].Jlzy = tmp;
+  tmp = node2.Jlzy;
+  node2.Jlzy = node.Jlzy;
+  node.Jlzy = tmp;
 
-  tmp = l2[i][j][k].Jlx;
-  l2[i][j][k].Jlx = l1[i][j][k].Jlx;
-  l1[i][j][k].Jlx = tmp;
+  tmp = node2.Jlx;
+  node2.Jlx = node.Jlx;
+  node.Jlx = tmp;
 
-  tmp = l2[i][j][k].Jly;
-  l2[i][j][k].Jly = l1[i][j][k].Jly;
-  l1[i][j][k].Jly = tmp;
+  tmp = node2.Jly;
+  node2.Jly = node.Jly;
+  node.Jly = tmp;
 
-//        int itmp=l2[i][j][k].natoms_old;
-//        l2[i][j][k].natoms_old=l1[i][j][k].natoms_old;
-//        l1[i][j][k].natoms_old=itmp;
+//        int itmp=node2.natoms_old;
+//        node2.natoms_old=node.natoms_old;
+//        node.natoms_old=itmp;
 
 
 }
@@ -2949,12 +2966,12 @@ int fitDL(int i, int j, int k)
   */
 
   /*
-    l1[i][j][k].DL[0]=2.73;
-    l1[i][j][k].DL[1]=1.1174e+15;
-    l1[i][j][k].DL[2]=7.6595e+15;
-    l1[i][j][k].DL[3]=2.4024e+15;
-    l1[i][j][k].DL[4]=4.5199e+14;
-    l1[i][j][k].DL[5]=2.2955e+16;
+    node.DL[0]=2.73;
+    node.DL[1]=1.1174e+15;
+    node.DL[2]=7.6595e+15;
+    node.DL[3]=2.4024e+15;
+    node.DL[4]=4.5199e+14;
+    node.DL[5]=2.2955e+16;
     return 0;
   */
 

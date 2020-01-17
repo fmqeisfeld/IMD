@@ -1,5 +1,11 @@
 #include "imd.h"
 
+#define OMP
+#ifdef OMP
+#include <omp.h>
+#endif
+
+
 // nur zum test
 //#define MAXLINE 255
 #define Ith(v,i)    NV_Ith_S(v,i)       /* Ith numbers components 1..NEQ */
@@ -8,9 +14,9 @@
 // *********************************************************
 // PHYSICAL CONSTANTS
 // *********************************************************
-const double eV2J=1.6021766E-19;
+// const double eV2J=1.6021766E-19;
 const double eV2H=0.03674932; //eV to Hartree
-const double J2eV=6.2415091E18;
+// const double J2eV=6.2415091E18;
 const double planck=6.62607004E-34; // J/s
 const double bohr_radius=0.52917721067E-10; // m
 const int MAXLINE = 255;
@@ -18,38 +24,83 @@ const double  pi=3.141592653589793;
 //const double  LIGHTSPEED=2.997925458e8; // m/s
 double  HBAR;
 double  LASERFREQ;
+
+int num_threads;
 //const double  EMASS=9.10938356e-31;     // kg
 //const double  ECONST=8.854187817e-12;   // As/Vm
 //const double  BOLTZMAN=1.38064852e-23;  // J/K
 //const double  ECHARGE=1.60217662e-19;  // C
 //const double  AMU=1.66053904020e-27;   // atomic mass unit
 
-// **************************************************************
-// *                FUNCTION DEFS 
-// **************************************************************
-static int ydot(double t, N_Vector u, N_Vector udot, void *user_data);
-void Saha(double Te,double totalc,double ne,N_Vector y);
-int GetCoeffs(N_Vector y,double It, void * user_data);
-double ExpInt(double x);
-double fak(double t, double x, double j,double s); //aux. function for genexpint
-double genexpint(double x,double ss,double j);
-double EscapeFactor(double w,double tau0);
-double StarkWidth(double nu,double nl,double Te,double Ti,double Tr,double Ne,double Ni);
-double EinsteinCoeff(double n1,double n2,double g2,double DeltaE);
-
-//folgende funcs sind alle für Berechnung des Transmission/Escape-Faktors!
-double Lorentzian(double w,double lambda); //both params in angs!
-double integrand(double w,double lambda,double tau,double phi0); // integrant von T=int[ exp(-tau*phi*phi0)*phi dx ]
-double trapz(double a,double b,int n,double w,double tau); //integriert die func. "integrand"
-
-
 typedef struct {
-  double IPD0,IPD1,IPD2,IPD3;
-  double It;  
-} *UserData;
+  realtype It; //Intesity
+  realtype IPD0,IPD1,IPD2,IPD3;
+} *colrad_UserData;
+colrad_UserData  cdata;
 
+// *********************************************************
+//                    MAIN
+// *********************************************************
+void do_colrad(double dt)
+{
+  int flag;
+  double t;
+  double tout=dt;
+  int i,j,k;
+  N_Vector y;
+  double Te0,Ti0,rho0,ni0,ne0;
 
+  for(i=1;i<local_fd_dim.x-1;i++)
+  {
+    for(j=1;j<local_fd_dim.y-1;j++)
+    {
+      for(k=1;k<local_fd_dim.z-1;k++)
+      {
+        if(l1[i][j][k].natoms < fd_min_atoms) continue;
+        y=l1[i][j][k].y;
 
+        Te0=4e3; //l1[i][j][k].temp*11604.5;
+        Ti0=l1[i][j][k].md_temp*11604.5;        
+        rho0=l1[i][j][k].dens/1e10;
+        ni0=rho0/AMU/26.9185; //1e28; //1e26/m^3 entspricht etwa 1e-4/Angtrom^3        
+        ne0=l1[i][j][k].ne/1e10;
+        
+        Ith(y,0)=Te0;
+        Ith(y,1)=Ti0;
+        Ith(y,2)=ne0;
+
+        flag = CVodeReInit(cvode_mem, 0.0, y);              
+
+printf("myid:%d, running cvode i:%d,j:%d,k:%d,Te0:%.4e,ne0:%.4e,dt:%.4e\n",myid,i,j,k,Te0,ne0,dt);
+
+        flag = CVode(cvode_mem, tout, y, &t, CV_NORMAL);
+        //REASSIGN NEW TE AND NE
+        l1[i][j][k].temp=Ith(y,0)/11604.5;
+        l1[i][j][k].ne=Ith(y,2);
+
+if(l1[i][j][k].temp <0 || isnan(l1[i][j][k].temp) !=0 )        
+{
+  char errstr[255];
+  sprintf(errstr,"ERROR in COLRAD: Te became Nan or <0\n");
+  error(errstr);
+}
+if(l1[i][j][k].ne <0 || isnan(l1[i][j][k].ne) !=0 )        
+{
+  char errstr[255];
+  sprintf(errstr,"ERROR in COLRAD: ne became Nan or <0\n");
+  error(errstr);
+}
+
+      }
+    } 
+  }
+
+  
+}
+
+// *********************************************************
+//                      INIT FUNC
+// *********************************************************
 void colrad_init(void)
 {
 	HBAR=planck/2.0/pi;
@@ -59,27 +110,35 @@ void colrad_init(void)
 	double reltol;
 	int i,j,k;
 	
+#ifdef OMP
+    num_threads = omp_get_max_threads();
+    printf("myid:%d, omp threads:%d\n",myid,num_threads);
+#endif 
+
 	if(myid==0)
 	{
-          printf("*****************************************\n");
-          printf("*      COLLISIONAL RADIATIVE MODEL      *\n");
-          printf("*****************************************\n");
-	  printf(" READING ENERGY LEVELS \n");
-          printf("*****************************************\n");
+    printf("*****************************************\n");
+    printf("*      COLLISIONAL RADIATIVE MODEL      *\n");
+    printf("*****************************************\n");
+    printf(" READING ENERGY LEVELS \n");
+    printf("*****************************************\n");
 		
 	}
 	colrad_read_states();
 
+  cdata=(colrad_UserData) malloc(sizeof *cdata); 
+
 	total_species=z0_len+z1_len;
 	neq=total_species+3;
 
-	for(i=1;i<local_fd_dim.x-2;i++)
+	for(i=1;i<local_fd_dim.x-1;i++)
 	{
-		for(j=1;j<local_fd_dim.y-2;j++)
+		for(j=1;j<local_fd_dim.y-1;j++)
 		{
-			for(k=1;k<local_fd_dim.z-2;k++)
+			for(k=1;k<local_fd_dim.z-1;k++)
 			{
 				l1[i][j][k].y=N_VNew_Serial(neq);
+
 				//l2... <--brauche nur 1 mal speicher alloc'en
 				//aber in DIFF-LOOP darauf achten, dass beim swappen
 				//l2.y immer auf l1.y zeigt und nicht ins Leere
@@ -88,7 +147,7 @@ void colrad_init(void)
 		}
 	}
 	abstol = N_VNew_Serial(neq);
-	N_Vector Vdummy=N_VNew_Serial(neq);
+	N_Vector Vdummy=N_VNew_Serial(neq); //wird bei re-init ersetzt
 
 	// *************************  //
 	// *   TOLERANCES          *
@@ -104,9 +163,9 @@ void colrad_init(void)
 	// *************************
     	cvode_mem=NULL;
     	cvode_mem = CVodeCreate(CV_BDF);
-    	CVodeInit(cvode_mem, ydot, 0, Vdummy);
+    	CVodeInit(cvode_mem, colrad_ydot, 0, Vdummy);
 
-    	CVodeSetUserData(cvode_mem, NULL);
+    	CVodeSetUserData(cvode_mem, cdata);
     	CVodeSVtolerances(cvode_mem, reltol, abstol);
 
    	SUNLinearSolver LS;
@@ -129,12 +188,12 @@ void colrad_init(void)
 	//CVodeSetMaxNonlinIters(cvode_mem,3); //Default=3
 	//VodeSetMaxConvFails(cvode_mem,10); //Default=10
 	//
-	CVodeSetMaxStep(cvode_mem,1e-12);
+	CVodeSetMaxStep(cvode_mem,1e-15);
 	//CVodeSetNonlinConvCoef(cvode_mem,0.01); //Default=0.1
 	//Max Steps muss sehr hoch sein bei großen steps,
 	//sonst beschwert sich newton
-	CVodeSetMaxNumSteps(cvode_mem,2e4); //Default=500
-	//CVodeSetInitStep(cvode_mem,1e-15);  //ACHTUNG:Wenn zu klein --> BS
+	CVodeSetMaxNumSteps(cvode_mem,500); //Default=500
+	//CVodeSetInitStep(cvode_mem,1e-20);  //ACHTUNG:Wenn zu klein --> BS
 	//CVodeSetEpsLin(cvode_mem,0.01); //Default=0.05;
 
 	
@@ -146,7 +205,39 @@ void colrad_init(void)
   SUNLinSolFree(LS);
   CVodeFree(&cvode_mem);	
 */
+
 }
+
+
+void colrad_Saha_init(int i,int j,int k)
+{
+  // int i,j,k;
+  // for(i=1;i<local_fd_dim.x-1;i++)
+  // {
+  //   for(j=1;i<local_fd_dim.y-1;j++)
+  //   {
+  //     for(k=1;i<local_fd_dim.z-1;k++)
+  //     {
+        double Te0,Ti0,ne0,ni0,rho0;
+        N_Vector y;
+        y=l1[i][j][k].y;
+
+        Te0=l1[i][j][k].temp*11604.5;
+        Ti0=l1[i][j][k].md_temp*11604.5;        
+        rho0=l1[i][j][k].dens/1e10;
+        ni0=rho0/AMU/26.9185; //1e28; //1e26/m^3 entspricht etwa 1e-4/Angtrom^3        
+        ne0=l1[i][j][k].ne;
+
+        Ith(y,0)=Te0;
+        Ith(y,1)=Ti0;
+        Ith(y,2)=ne0;
+
+        do_Saha(Te0,ni0,ne0,y);
+  //     }
+  //   } 
+  // }
+}
+
 void colrad_read_states(void)
 {
 // **************************************************************************
@@ -164,7 +255,9 @@ if(myid==0)
 
      if(fin==NULL)
      {
-        perror("ERROR");
+        char errstr[255];
+        sprintf(errstr,"ERROR in colrad_read_states: File %s not found\n","Al0_states.txt");
+        error(errstr);
 
      }
      while (1) {
@@ -196,34 +289,39 @@ alloc1darr(double,buf,z0_len*6);
 MPI_Barrier(cpugrid);
 if(myid==0)
 {
-for(i=0;i<z0_len;i+=6) //fill 1d buff-array
+for(i=0;i<z0_len*6;i+=6) //fill 1d buff-array
 {
-  buf[i]=   (double) STATES_z0[i][0];
-  buf[i+1]= (double) STATES_z0[i][1];
-  buf[i+2]= (double) STATES_z0[i][2];
-  buf[i+3]= (double) STATES_z0[i][3];
-  buf[i+4]= (double) STATES_z0[i][4];
-  buf[i+5]= (double) STATES_z0[i][5];
+  buf[i]=   (double) STATES_z0[i/6][0];
+  buf[i+1]= (double) STATES_z0[i/6][1];
+  buf[i+2]= (double) STATES_z0[i/6][2];
+  buf[i+3]= (double) STATES_z0[i/6][3];
+  buf[i+4]= (double) STATES_z0[i/6][4];
+  buf[i+5]= (double) STATES_z0[i/6][5];
+
+  //printf("E:%.4e,i/6:%d\n",STATES_z0[i/6][2], i/6);
 }
 }
 
 MPI_Barrier(cpugrid);
 MPI_Bcast(buf,z0_len*6,MPI_DOUBLE,0,cpugrid);
-printf("myid:%d,after bcast 2\n",myid);
+// printf("myid:%d,after bcast 2\n",myid);
 
 //NOW RECONSTRUCT on other procs
 if(myid>0)
 {
   printf("myid:%d,alloc\n",myid);
   alloc2darr(double,STATES_z0,z0_len,6);
-  for(i=0;i<z0_len;i+=6)
+  for(i=0;i<z0_len*6;i+=6)
   {
-	STATES_z0[i][0]=buf[i];
-	STATES_z0[i][1]=buf[i+1];
-	STATES_z0[i][2]=buf[i+2];
-	STATES_z0[i][3]=buf[i+3];
-	STATES_z0[i][4]=buf[i+4];
-	STATES_z0[i][5]=buf[i+5]; 
+	STATES_z0[i/6][0]=buf[i];
+	STATES_z0[i/6][1]=buf[i+1];
+	STATES_z0[i/6][2]=buf[i+2];
+	STATES_z0[i/6][3]=buf[i+3];
+	STATES_z0[i/6][4]=buf[i+4];
+	STATES_z0[i/6][5]=buf[i+5]; 
+
+// if(myid==1)
+//  printf("myid:%d, eng(%d)=%.4e,z0_len=%d\n",myid, i/6, STATES_z0[i/6][2],z0_len);  
   }
 }
 free(buf);
@@ -237,7 +335,9 @@ if(myid==0)
      fin = fopen("Al1_states.txt","r");
      if(fin==NULL)
      {
-        perror("ERROR");
+        char errstr[255];
+        sprintf(errstr,"ERROR in colrad_read_states: File %s not found\n","Al1_states.txt");
+        error(errstr);
      }
      while (1) {
       if (fgets(line,MAXLINE,fin) == NULL) break;
@@ -266,14 +366,14 @@ MPI_Bcast(&z1_len,1,MPI_INT,0,cpugrid);
 alloc1darr(double,buf,z1_len*6);
 if(myid==0)
 {	
-for(i=0;i<z1_len;i+=6) //fill 1d buff-array
+for(i=0;i<z1_len*6;i+=6) //fill 1d buff-array
 {
-  buf[i]=   (double) STATES_z1[i][0];
-  buf[i+1]= (double) STATES_z1[i][1];
-  buf[i+2]= (double) STATES_z1[i][2];
-  buf[i+3]= (double) STATES_z1[i][3];
-  buf[i+4]= (double) STATES_z1[i][4];
-  buf[i+5]= (double) STATES_z1[i][5];
+  buf[i]=   (double) STATES_z1[i/6][0];
+  buf[i+1]= (double) STATES_z1[i/6][1];
+  buf[i+2]= (double) STATES_z1[i/6][2];
+  buf[i+3]= (double) STATES_z1[i/6][3];
+  buf[i+4]= (double) STATES_z1[i/6][4];
+  buf[i+5]= (double) STATES_z1[i/6][5];
 }
 }
 
@@ -282,14 +382,17 @@ MPI_Bcast(buf,z1_len*6,MPI_DOUBLE,0,cpugrid);
 if(myid>0)
 {
   alloc2darr(double,STATES_z1,z1_len,6);
-  for(i=0;i<z0_len;i+=6)
+  for(i=0;i<z1_len*6;i+=6)
   {
-	STATES_z1[i][0]=buf[i];
-	STATES_z1[i][1]=buf[i+1];
-	STATES_z1[i][2]=buf[i+2];
-	STATES_z1[i][3]=buf[i+3];
-	STATES_z1[i][4]=buf[i+4];
-	STATES_z1[i][5]=buf[i+5]; 
+	STATES_z1[i/6][0]=buf[i];
+	STATES_z1[i/6][1]=buf[i+1];
+	STATES_z1[i/6][2]=buf[i+2];
+	STATES_z1[i/6][3]=buf[i+3];
+	STATES_z1[i/6][4]=buf[i+4];
+  STATES_z1[i/6][5]=buf[i+5];
+
+ //  if(myid==1)
+ // printf("myid:%d, eng(%d)=%.4e,z1_len=%d\n",myid, i/6, STATES_z1[i/6][2],z1_len);  
   }
 }
 free(buf);
@@ -382,13 +485,15 @@ free(buf);
      alloc3darr(double,k_MPI_z3_z4,z3_len,z4_len,2);
      alloc3darr(double,k_MPI_z4_z3,z3_len,z4_len,2);
 */
+
+     MPI_Bcast(&total_species,1,MPI_INT,0,cpugrid);
 }
 
 
 
 
 
-void Saha(double Te,double totalc,double ne,N_Vector y) //Bei init
+void do_Saha(double Te,double totalc,double ne,N_Vector y) //Bei init
 {
   double tmp;
   double Zav=ne/totalc;
@@ -427,12 +532,12 @@ void Saha(double Te,double totalc,double ne,N_Vector y) //Bei init
   for(i=0;i<z1_len;++i)
     Q_z1+=STATES_z1[i][3]*exp(-(STATES_z1[i][2]-STATES_z1[0][2])*eV2J/BOLTZMAN/Te);
 
-  for(i=0;i<z2_len;++i)
-    Q_z2+=STATES_z2[i][3]*exp(-(STATES_z2[i][2]-STATES_z2[0][2])*eV2J/BOLTZMAN/Te);
-  for(i=0;i<z3_len;++i)
-    Q_z3+=STATES_z3[i][3]*exp(-(STATES_z3[i][2]-STATES_z3[0][2])*eV2J/BOLTZMAN/Te);
-  for(i=0;i<z3_len;++i)
-    Q_z4+=STATES_z4[i][3]*exp(-(STATES_z4[i][2]-STATES_z4[0][2])*eV2J/BOLTZMAN/Te);
+  // for(i=0;i<z2_len;++i)
+  //   Q_z2+=STATES_z2[i][3]*exp(-(STATES_z2[i][2]-STATES_z2[0][2])*eV2J/BOLTZMAN/Te);
+  // for(i=0;i<z3_len;++i)
+  //   Q_z3+=STATES_z3[i][3]*exp(-(STATES_z3[i][2]-STATES_z3[0][2])*eV2J/BOLTZMAN/Te);
+  // for(i=0;i<z3_len;++i)
+  //   Q_z4+=STATES_z4[i][3]*exp(-(STATES_z4[i][2]-STATES_z4[0][2])*eV2J/BOLTZMAN/Te);
 /*
   for(int i=0;i<z5_len;++i)
     Q_z5+=STATES_z5[i][3]*exp(-(STATES_z5[i][2]-STATES_z5[0][2])*eV2J/BOLTZMAN/Te);
@@ -455,33 +560,33 @@ void Saha(double Te,double totalc,double ne,N_Vector y) //Bei init
   ////////////
   // Z=1->2 //
   ////////////
-  z=2.0;
-  IPD=3.0*z*ECHARGE*ECHARGE/2.0/r0/4.0/pi/ECONST;  //Ion-Sphere model
-  IPD=0.0;
-  DeltaE=(STATES_z2[0][2]-STATES_z1[0][2])*eV2J-IPD;
-  DeltaE=fmax(0.0,DeltaE);
-  p=exp(-DeltaE/BOLTZMAN/Te);
-  r21=2.0/ne*tmp*Q_z2/Q_z1*p;
-  ////////////
-  // Z=2->3 //
-  ////////////
-  z=3.0;
-  IPD=3.0*z*ECHARGE*ECHARGE/2.0/r0/4.0/pi/ECONST;  //Ion-Sphere model
-  IPD=0.0;
-  DeltaE=(STATES_z3[0][2]-STATES_z2[0][2])*eV2J-IPD;
-  DeltaE=fmax(0.0,DeltaE);
-  p=exp(-DeltaE/BOLTZMAN/Te);
-  r32=2.0/ne*tmp*Q_z3/Q_z2*p;
-  ////////////
-  // Z=2->3 //
-  ////////////
-  z=4.0;
-  IPD=3.0*z*ECHARGE*ECHARGE/2.0/r0/4.0/pi/ECONST;  //Ion-Sphere model
-  IPD=0.0;
-  DeltaE=(STATES_z4[0][2]-STATES_z3[0][2])*eV2J-IPD;
-  DeltaE=fmax(0.0,DeltaE);
-  p=exp(-DeltaE/BOLTZMAN/Te);
-  r43=2.0/ne*tmp*Q_z4/Q_z3*p;
+  // z=2.0;
+  // IPD=3.0*z*ECHARGE*ECHARGE/2.0/r0/4.0/pi/ECONST;  //Ion-Sphere model
+  // IPD=0.0;
+  // DeltaE=(STATES_z2[0][2]-STATES_z1[0][2])*eV2J-IPD;
+  // DeltaE=fmax(0.0,DeltaE);
+  // p=exp(-DeltaE/BOLTZMAN/Te);
+  // r21=2.0/ne*tmp*Q_z2/Q_z1*p;
+  // ////////////
+  // // Z=2->3 //
+  // ////////////
+  // z=3.0;
+  // IPD=3.0*z*ECHARGE*ECHARGE/2.0/r0/4.0/pi/ECONST;  //Ion-Sphere model
+  // IPD=0.0;
+  // DeltaE=(STATES_z3[0][2]-STATES_z2[0][2])*eV2J-IPD;
+  // DeltaE=fmax(0.0,DeltaE);
+  // p=exp(-DeltaE/BOLTZMAN/Te);
+  // r32=2.0/ne*tmp*Q_z3/Q_z2*p;
+  // ////////////
+  // // Z=2->3 //
+  // ////////////
+  // z=4.0;
+  // IPD=3.0*z*ECHARGE*ECHARGE/2.0/r0/4.0/pi/ECONST;  //Ion-Sphere model
+  // IPD=0.0;
+  // DeltaE=(STATES_z4[0][2]-STATES_z3[0][2])*eV2J-IPD;
+  // DeltaE=fmax(0.0,DeltaE);
+  // p=exp(-DeltaE/BOLTZMAN/Te);
+  // r43=2.0/ne*tmp*Q_z4/Q_z3*p;
 
   //concentrations from ratios and totalc
   n0=totalc/(r54*r43*r32*r21*r10+r43*r32*r21*r10+r32*r21*r10+r21*r10+r10+1.0);
@@ -513,10 +618,10 @@ void Saha(double Te,double totalc,double ne,N_Vector y) //Bei init
     Ith(y,i+ishift)=n0/Q_z0*STATES_z0[i][3]*exp(-STATES_z0[i][2]*eV2J/BOLTZMAN/Te);
   for(i=0;i<z1_len;++i)
     Ith(y,i+ishift+z0_len)=n1/Q_z1*STATES_z1[i][3]*exp(-(STATES_z1[i][2]-STATES_z1[0][2])*eV2J/BOLTZMAN/Te);
-  for(i=0;i<z2_len;++i)
-    Ith(y,i+ishift+z0_len+z1_len)=n2/Q_z2*STATES_z2[i][3]*exp(-(STATES_z2[i][2]-STATES_z2[0][2])*eV2J/BOLTZMAN/Te);
-  for(i=0;i<z3_len;++i)
-    Ith(y,i+ishift+z0_len+z1_len+z2_len)=n3/Q_z3*STATES_z3[i][3]*exp(-(STATES_z3[i][2]-STATES_z3[0][2])*eV2J/BOLTZMAN/Te);
+  // for(i=0;i<z2_len;++i)
+  //   Ith(y,i+ishift+z0_len+z1_len)=n2/Q_z2*STATES_z2[i][3]*exp(-(STATES_z2[i][2]-STATES_z2[0][2])*eV2J/BOLTZMAN/Te);
+  // for(i=0;i<z3_len;++i)
+  //   Ith(y,i+ishift+z0_len+z1_len+z2_len)=n3/Q_z3*STATES_z3[i][3]*exp(-(STATES_z3[i][2]-STATES_z3[0][2])*eV2J/BOLTZMAN/Te);
 }
 
 
@@ -526,7 +631,7 @@ void Saha(double Te,double totalc,double ne,N_Vector y) //Bei init
 // ************************************************************************************************************
 //                                      ACTION
 // ///////////////////////////////////////////////////////////////////////////////////////////////////////////
-static int ydot(double t, N_Vector y, N_Vector ydot, void *user_data)
+static int colrad_ydot(double t, N_Vector y, N_Vector colrad_ydot, void *user_data)
 {
 
 //#define SPONT  //<--Kaum effek
@@ -544,10 +649,12 @@ static int ydot(double t, N_Vector y, N_Vector ydot, void *user_data)
 
   //It=I0*exp(-pow((t-t0),2.0)/2.0/sigmatsq);
 
-  UserData data;
-  data = (UserData) user_data;
+  colrad_UserData data;
+  data = (colrad_UserData) user_data;
 
   double It=data->It;
+  It=0.0;
+
   double Eexc;
 
   P_E_EE=0;
@@ -562,7 +669,7 @@ static int ydot(double t, N_Vector y, N_Vector ydot, void *user_data)
 
 
   int i,j;
-  int ishift=3;  // UND NICHT =4 (ydot fängt bei 0 das zählen an!)
+  int ishift=3;  // UND NICHT =4 (colrad_ydot fängt bei 0 das zählen an!)
   int shift,shift1,shift2;
   double ne=Ith(y,2);
   double Te=Ith(y,0);
@@ -581,7 +688,7 @@ static int ydot(double t, N_Vector y, N_Vector ydot, void *user_data)
   totalc=0.0;
   for(i=0;i<neq;i++)
   {
-          Ith(ydot,i)=0.0;
+          Ith(colrad_ydot,i)=0.0;
           if(i>=3) totalc+=Ith(y,i);
   }
 
@@ -598,7 +705,7 @@ static int ydot(double t, N_Vector y, N_Vector ydot, void *user_data)
   IPD2=3.0*3.0/2.0/r0*ECHARGE*ECHARGE*(pow(1.0+pow(debye/r0,3.0),2.0/3.0)-pow(debye/r0,2.0))/4.0/pi/ECONST;
   IPD3=4.0*3.0/2.0/r0*ECHARGE*ECHARGE*(pow(1.0+pow(debye/r0,3.0),2.0/3.0)-pow(debye/r0,2.0))/4.0/pi/ECONST;
 #endif
-  int retval=GetCoeffs(y,It,data);
+  int retval=colrad_GetCoeffs(y,It,data);
   if(retval !=0 )
           return 1;
 
@@ -619,12 +726,12 @@ static int ydot(double t, N_Vector y, N_Vector ydot, void *user_data)
       krev=k_EE_z0_z0_b[i][j]*Ith(y,j+ishift)*ne;
 
       //exec. reduces conc. of i state and increases conc. of j state                     
-      Ith(ydot,i+ishift) -=kfwd;
-      Ith(ydot,j+ishift) +=kfwd;
+      Ith(colrad_ydot,i+ishift) -=kfwd;
+      Ith(colrad_ydot,j+ishift) +=kfwd;
 
       //de-excec. increases conc. of i state & decr. conc. of j state
-      Ith(ydot,i+ishift)+=krev;
-      Ith(ydot,j+ishift)-=krev;
+      Ith(colrad_ydot,i+ishift)+=krev;
+      Ith(colrad_ydot,j+ishift)-=krev;
 
 
       Eexc= (-kfwd+krev)*DeltaE;
@@ -641,8 +748,8 @@ static int ydot(double t, N_Vector y, N_Vector ydot, void *user_data)
         Ajk=EinsteinCoeff(STATES_z0[i][5],STATES_z0[j][5],STATES_z0[j][3],DeltaE);
 
         krev=Ith(y,ishift+j)*Ajk; //neues krev
-        Ith(ydot,ishift+j) -= krev;
-        Ith(ydot,ishift+i) += krev;
+        Ith(colrad_ydot,ishift+j) -= krev;
+        Ith(colrad_ydot,ishift+i) += krev;
         //P_A_SE+=krev*DeltaE; ??               
       }
 #endif
@@ -667,12 +774,12 @@ static int ydot(double t, N_Vector y, N_Vector ydot, void *user_data)
       krev=k_EE_z1_z1_b[i][j]*Ith(y,j+ishift+shift2)*ne;
 
       //exec. reduces conc. of i state and increases conc. of j state
-      Ith(ydot,i+ishift+shift2) -=kfwd;
-      Ith(ydot,j+ishift+shift2) +=kfwd;
+      Ith(colrad_ydot,i+ishift+shift2) -=kfwd;
+      Ith(colrad_ydot,j+ishift+shift2) +=kfwd;
 
       //de-excec. increases conc. of i state & decr. conc. of j state
-      Ith(ydot,i+ishift+shift2)+=krev;
-      Ith(ydot,j+ishift+shift2)-=krev;
+      Ith(colrad_ydot,i+ishift+shift2)+=krev;
+      Ith(colrad_ydot,j+ishift+shift2)-=krev;
 
 
       Eexc= (-kfwd+krev)*DeltaE;
@@ -688,148 +795,147 @@ static int ydot(double t, N_Vector y, N_Vector ydot, void *user_data)
         Ajk=EinsteinCoeff(STATES_z1[i][5],STATES_z1[j][5],STATES_z1[j][3],DeltaE);
 
         krev=Ith(y,ishift+shift2+j)*Ajk;
-        Ith(ydot,ishift+shift2+j) -= krev;
-        Ith(ydot,ishift+shift2+i) += krev;
+        Ith(colrad_ydot,ishift+shift2+j) -= krev;
+        Ith(colrad_ydot,ishift+shift2+i) += krev;
         //P_A_SE+=krev*DeltaE; ??
       }
 #endif
     }
   }
-  // *************************************
-  //Z=2, Exec/De-Exec  & SPONTANEOUS EMISSION
-  // ***************************************
-  shift2=z0_len+z1_len;
-#ifdef OMP
-  //#pragma omp parallel for schedule(dynamic,1) collapse(2) private(DeltaE,kfwd,krev,lambda0,Ajk,escape_factor,Eexc) num_threads(num_threads)
-#endif
-  for(i=0;i<z2_len;++i)
-  {
-    for(j=0;j<z2_len;++j)
-    {
-      if(j<=i) continue; // MUI IMPORTANTE
-      DeltaE=(STATES_z2[j][2]-STATES_z2[i][2])*eV2J;
-      kfwd=k_EE_z2_z2[i][j]*Ith(y,i+ishift+shift2)*ne;
-      krev=k_EE_z2_z2_b[i][j]*Ith(y,j+ishift+shift2)*ne;
+//   // *************************************
+//   //Z=2, Exec/De-Exec  & SPONTANEOUS EMISSION
+//   // ***************************************
+//   shift2=z0_len+z1_len;
+// #ifdef OMP
+//   //#pragma omp parallel for schedule(dynamic,1) collapse(2) private(DeltaE,kfwd,krev,lambda0,Ajk,escape_factor,Eexc) num_threads(num_threads)
+// #endif
+//   for(i=0;i<z2_len;++i)
+//   {
+//     for(j=0;j<z2_len;++j)
+//     {
+//       if(j<=i) continue; // MUI IMPORTANTE
+//       DeltaE=(STATES_z2[j][2]-STATES_z2[i][2])*eV2J;
+//       kfwd=k_EE_z2_z2[i][j]*Ith(y,i+ishift+shift2)*ne;
+//       krev=k_EE_z2_z2_b[i][j]*Ith(y,j+ishift+shift2)*ne;
 
-      //exec. reduces conc. of i state and increases conc. of j state
-      Ith(ydot,i+ishift+shift2) -=kfwd;
-      Ith(ydot,j+ishift+shift2) +=kfwd;
+//       //exec. reduces conc. of i state and increases conc. of j state
+//       Ith(colrad_ydot,i+ishift+shift2) -=kfwd;
+//       Ith(colrad_ydot,j+ishift+shift2) +=kfwd;
 
-      //de-excec. increases conc. of i state & decr. conc. of j state
-      Ith(ydot,i+ishift+shift2)+=krev;
-      Ith(ydot,j+ishift+shift2)-=krev;
-
-
-      Eexc= (-kfwd+krev)*DeltaE;
-      P_E_EE+=Eexc;
-
-#ifdef SPONT
-      // ********SPONT EMISSION ********* //
-      //Spont.emiss: delta-n !=>0 und delta-l=+-1 (nur opt.allowed trans.)
-      if((STATES_z2[j][5]-STATES_z2[i][5])>0 && STATES_z2[j][4]-STATES_z2[i][4]==1)
-      {
-        escape_factor=1.0;
-        lambda0=planck*LIGHTSPEED/DeltaE;
-        Ajk=EinsteinCoeff(STATES_z2[i][5],STATES_z2[j][5],STATES_z2[j][3],DeltaE);
-
-        krev=Ith(y,ishift+shift2+j)*Ajk;
-        Ith(ydot,ishift+shift2+j) -= krev;
-        Ith(ydot,ishift+shift2+i) += krev;
-        //P_A_SE+=krev*DeltaE; ??
-      }
-#endif
-    }
-  }
-  // *************************************
-  //Z=3, Exec/De-Exec  & SPONTANEOUS EMISSION
-  // ***************************************
-  shift2=z0_len+z1_len+z2_len;
-#ifdef OMP
-//  #pragma omp parallel for schedule(dynamic,1) collapse(2) private(DeltaE,kfwd,krev,lambda0,Ajk,escape_factor,Eexc) num_threads(num_threads)
-#endif
-  for(i=0;i<z2_len;++i)
-  {
-    for(j=0;j<z2_len;++j)
-    {
-      if(j<=i) continue; // MUI IMPORTANTE
-      DeltaE=(STATES_z3[j][2]-STATES_z3[i][2])*eV2J;
-      kfwd=k_EE_z3_z3[i][j]*Ith(y,i+ishift+shift2)*ne;
-      krev=k_EE_z3_z3_b[i][j]*Ith(y,j+ishift+shift2)*ne;
-
-      //exec. reduces conc. of i state and increases conc. of j state
-      Ith(ydot,i+ishift+shift2) -=kfwd;
-      Ith(ydot,j+ishift+shift2) +=kfwd;
-
-      //de-excec. increases conc. of i state & decr. conc. of j state
-      Ith(ydot,i+ishift+shift2)+=krev;
-      Ith(ydot,j+ishift+shift2)-=krev;
+//       //de-excec. increases conc. of i state & decr. conc. of j state
+//       Ith(colrad_ydot,i+ishift+shift2)+=krev;
+//       Ith(colrad_ydot,j+ishift+shift2)-=krev;
 
 
-      Eexc= (-kfwd+krev)*DeltaE;
-      P_E_EE+=Eexc;
+//       Eexc= (-kfwd+krev)*DeltaE;
+//       P_E_EE+=Eexc;
 
-#ifdef SPONT
-      // ********SPONT EMISSION ********* //
-      //Spont.emiss: delta-n !=>0 und delta-l=+-1 (nur opt.allowed trans.)
-      if((STATES_z3[j][5]-STATES_z3[i][5])>0 && STATES_z3[j][4]-STATES_z3[i][4]==1)
-      {
-        escape_factor=1.0;
-        lambda0=planck*LIGHTSPEED/DeltaE;
-        Ajk=EinsteinCoeff(STATES_z3[i][5],STATES_z3[j][5],STATES_z3[j][3],DeltaE);
+// #ifdef SPONT
+//       // ********SPONT EMISSION ********* //
+//       //Spont.emiss: delta-n !=>0 und delta-l=+-1 (nur opt.allowed trans.)
+//       if((STATES_z2[j][5]-STATES_z2[i][5])>0 && STATES_z2[j][4]-STATES_z2[i][4]==1)
+//       {
+//         escape_factor=1.0;
+//         lambda0=planck*LIGHTSPEED/DeltaE;
+//         Ajk=EinsteinCoeff(STATES_z2[i][5],STATES_z2[j][5],STATES_z2[j][3],DeltaE);
 
-        krev=Ith(y,ishift+shift2+j)*Ajk;
-        Ith(ydot,ishift+shift2+j) -= krev;
-        Ith(ydot,ishift+shift2+i) += krev;
-        //P_A_SE+=krev*DeltaE; ??
-      }
-#endif
-    }
-  }
-  // *************************************
-  //Z=4, Exec/De-Exec  & SPONTANEOUS EMISSION
-  // ***************************************
-  shift2=z0_len+z1_len+z2_len+z3_len;
-#ifdef OMP
-//  #pragma omp parallel for schedule(dynamic,1) collapse(2) private(DeltaE,kfwd,krev,lambda0,Ajk,escape_factor,Eexc) num_threads(num_threads)
-#endif
-  for(i=0;i<z3_len;++i)
-  {
-    for(j=0;j<z3_len;++j)
-    {
-      if(j<=i) continue; // MUI IMPORTANTE
-      DeltaE=(STATES_z4[j][2]-STATES_z4[i][2])*eV2J;
-      kfwd=k_EE_z4_z4[i][j]*Ith(y,i+ishift+shift2)*ne;
-      krev=k_EE_z4_z4_b[i][j]*Ith(y,j+ishift+shift2)*ne;
+//         krev=Ith(y,ishift+shift2+j)*Ajk;
+//         Ith(colrad_ydot,ishift+shift2+j) -= krev;
+//         Ith(colrad_ydot,ishift+shift2+i) += krev;
+//         //P_A_SE+=krev*DeltaE; ??
+//       }
+// #endif
+//     }
+//   }
+//   // *************************************
+//   //Z=3, Exec/De-Exec  & SPONTANEOUS EMISSION
+//   // ***************************************
+//   shift2=z0_len+z1_len+z2_len;
+// #ifdef OMP
+// //  #pragma omp parallel for schedule(dynamic,1) collapse(2) private(DeltaE,kfwd,krev,lambda0,Ajk,escape_factor,Eexc) num_threads(num_threads)
+// #endif
+//   for(i=0;i<z2_len;++i)
+//   {
+//     for(j=0;j<z2_len;++j)
+//     {
+//       if(j<=i) continue; // MUI IMPORTANTE
+//       DeltaE=(STATES_z3[j][2]-STATES_z3[i][2])*eV2J;
+//       kfwd=k_EE_z3_z3[i][j]*Ith(y,i+ishift+shift2)*ne;
+//       krev=k_EE_z3_z3_b[i][j]*Ith(y,j+ishift+shift2)*ne;
 
-      //exec. reduces conc. of i state and increases conc. of j state
-      Ith(ydot,i+ishift+shift2) -=kfwd;
-      Ith(ydot,j+ishift+shift2) +=kfwd;
+//       //exec. reduces conc. of i state and increases conc. of j state
+//       Ith(colrad_ydot,i+ishift+shift2) -=kfwd;
+//       Ith(colrad_ydot,j+ishift+shift2) +=kfwd;
 
-      //de-excec. increases conc. of i state & decr. conc. of j state
-      Ith(ydot,i+ishift+shift2)+=krev;
-      Ith(ydot,j+ishift+shift2)-=krev;
+//       //de-excec. increases conc. of i state & decr. conc. of j state
+//       Ith(colrad_ydot,i+ishift+shift2)+=krev;
+//       Ith(colrad_ydot,j+ishift+shift2)-=krev;
 
-      Eexc= (-kfwd+krev)*DeltaE;
-      P_E_EE+=Eexc;
 
-#ifdef SPONT
-      // ********SPONT EMISSION ********* //
-      //Spont.emiss: delta-n !=>0 und delta-l=+-1 (nur opt.allowed trans.)
-      if((STATES_z4[j][5]-STATES_z4[i][5])>0 && STATES_z4[j][4]-STATES_z4[i][4]==1)
-      {
-        escape_factor=1.0;
-        lambda0=planck*LIGHTSPEED/DeltaE;
-        Ajk=EinsteinCoeff(STATES_z3[i][5],STATES_z3[j][5],STATES_z3[j][3],DeltaE);
+//       Eexc= (-kfwd+krev)*DeltaE;
+//       P_E_EE+=Eexc;
 
-        krev=Ith(y,ishift+shift2+j)*Ajk;
-        Ith(ydot,ishift+shift2+j) -= krev;
-        Ith(ydot,ishift+shift2+i) += krev;
-        //P_A_SE+=krev*DeltaE; ??
-      }
-#endif
-    }
+// #ifdef SPONT
+//       // ********SPONT EMISSION ********* //
+//       //Spont.emiss: delta-n !=>0 und delta-l=+-1 (nur opt.allowed trans.)
+//       if((STATES_z3[j][5]-STATES_z3[i][5])>0 && STATES_z3[j][4]-STATES_z3[i][4]==1)
+//       {
+//         escape_factor=1.0;
+//         lambda0=planck*LIGHTSPEED/DeltaE;
+//         Ajk=EinsteinCoeff(STATES_z3[i][5],STATES_z3[j][5],STATES_z3[j][3],DeltaE);
 
-  }
+//         krev=Ith(y,ishift+shift2+j)*Ajk;
+//         Ith(colrad_ydot,ishift+shift2+j) -= krev;
+//         Ith(colrad_ydot,ishift+shift2+i) += krev;
+//         //P_A_SE+=krev*DeltaE; ??
+//       }
+// #endif
+//     }
+//   }
+//   // *************************************
+//   //Z=4, Exec/De-Exec  & SPONTANEOUS EMISSION
+//   // ***************************************
+//   shift2=z0_len+z1_len+z2_len+z3_len;
+// #ifdef OMP
+// //  #pragma omp parallel for schedule(dynamic,1) collapse(2) private(DeltaE,kfwd,krev,lambda0,Ajk,escape_factor,Eexc) num_threads(num_threads)
+// #endif
+//   for(i=0;i<z3_len;++i)
+//   {
+//     for(j=0;j<z3_len;++j)
+//     {
+//       if(j<=i) continue; // MUI IMPORTANTE
+//       DeltaE=(STATES_z4[j][2]-STATES_z4[i][2])*eV2J;
+//       kfwd=k_EE_z4_z4[i][j]*Ith(y,i+ishift+shift2)*ne;
+//       krev=k_EE_z4_z4_b[i][j]*Ith(y,j+ishift+shift2)*ne;
+
+//       //exec. reduces conc. of i state and increases conc. of j state
+//       Ith(colrad_ydot,i+ishift+shift2) -=kfwd;
+//       Ith(colrad_ydot,j+ishift+shift2) +=kfwd;
+
+//       //de-excec. increases conc. of i state & decr. conc. of j state
+//       Ith(colrad_ydot,i+ishift+shift2)+=krev;
+//       Ith(colrad_ydot,j+ishift+shift2)-=krev;
+
+//       Eexc= (-kfwd+krev)*DeltaE;
+//       P_E_EE+=Eexc;
+
+// #ifdef SPONT
+//       // ********SPONT EMISSION ********* //
+//       //Spont.emiss: delta-n !=>0 und delta-l=+-1 (nur opt.allowed trans.)
+//       if((STATES_z4[j][5]-STATES_z4[i][5])>0 && STATES_z4[j][4]-STATES_z4[i][4]==1)
+//       {
+//         escape_factor=1.0;
+//         lambda0=planck*LIGHTSPEED/DeltaE;
+//         Ajk=EinsteinCoeff(STATES_z3[i][5],STATES_z3[j][5],STATES_z3[j][3],DeltaE);
+
+//         krev=Ith(y,ishift+shift2+j)*Ajk;
+//         Ith(colrad_ydot,ishift+shift2+j) -= krev;
+//         Ith(colrad_ydot,ishift+shift2+i) += krev;
+//         //P_A_SE+=krev*DeltaE; ??
+//       }
+// #endif
+//     }
+//   }
   // ********************************************************
   //                    NOW IONIZATION RATES
   // ********************************************************
@@ -849,14 +955,14 @@ static int ydot(double t, N_Vector y, N_Vector ydot, void *user_data)
       DeltaE=(STATES_z1[j][2]-STATES_z0[i][2])*eV2J; //-IPD0;
 
       //COLL IONIZ
-      Ith(ydot,i+shift1)          -= k_EI_z0_z1[i][j]*Ith(y,i+shift1)*ne;
-      Ith(ydot,2)                 += k_EI_z0_z1[i][j]*Ith(y,i+shift1)*ne;   //Ne inc.
-      Ith(ydot,j+shift2)          += k_EI_z0_z1[i][j]*Ith(y,i+shift1)*ne;
+      Ith(colrad_ydot,i+shift1)          -= k_EI_z0_z1[i][j]*Ith(y,i+shift1)*ne;
+      Ith(colrad_ydot,2)                 += k_EI_z0_z1[i][j]*Ith(y,i+shift1)*ne;   //Ne inc.
+      Ith(colrad_ydot,j+shift2)          += k_EI_z0_z1[i][j]*Ith(y,i+shift1)*ne;
 
       //3-body recomb
-      Ith(ydot,j+shift2)         -= k_EI_z1_z0[i][j]*Ith(y,j+shift2)*ne*ne;
-      Ith(ydot,i+shift1)         += k_EI_z1_z0[i][j]*Ith(y,j+shift2)*ne*ne;
-      Ith(ydot,2)                -= k_EI_z1_z0[i][j]*Ith(y,j+shift2)*ne*ne;
+      Ith(colrad_ydot,j+shift2)         -= k_EI_z1_z0[i][j]*Ith(y,j+shift2)*ne*ne;
+      Ith(colrad_ydot,i+shift1)         += k_EI_z1_z0[i][j]*Ith(y,j+shift2)*ne*ne;
+      Ith(colrad_ydot,2)                -= k_EI_z1_z0[i][j]*Ith(y,j+shift2)*ne*ne;
 
       Eexc  = -k_EI_z0_z1[i][j]*Ith(y,i+shift1)*ne*DeltaE;
       Eexc +=  k_EI_z1_z0[i][j]*Ith(y,j+shift2)*ne*ne*DeltaE;
@@ -890,14 +996,14 @@ if(DeltaE-IPD0 >0)
       krev=k_MPI_z1_z0[i][j][0]*Ith(y,j+shift2)*ne;//*escape_factor; // *wlo;   // einheit: k_RADRECOMB= m^3/s
 
       //kfwd2=0.0; // 3-photon-ioniz. off
-      Ith(ydot,shift1+i)        -=(kfwd +kfwd2);
-      Ith(ydot,2)               +=(kfwd +kfwd2);   //Ne inc.
-      Ith(ydot,shift2+j)        +=(kfwd +kfwd2);
+      Ith(colrad_ydot,shift1+i)        -=(kfwd +kfwd2);
+      Ith(colrad_ydot,2)               +=(kfwd +kfwd2);   //Ne inc.
+      Ith(colrad_ydot,shift2+j)        +=(kfwd +kfwd2);
 
       //krev=fmin(krev,kfwd);
-      Ith(ydot,shift2+j)        -=krev;
-      Ith(ydot,shift1+i)        +=krev;
-      Ith(ydot,2)-=krev;
+      Ith(colrad_ydot,shift2+j)        -=krev;
+      Ith(colrad_ydot,shift1+i)        +=krev;
+      Ith(colrad_ydot,2)-=krev;
 
       // für 2 photonen und rad.recomb
       P_E_MPI2  += kfwd* (2.0*planck*LASERFREQ-(DeltaE-IPD0)); //kein heating durch rad.recomb->Photon verschwindert (bisher ohne self-absorption)
@@ -914,238 +1020,238 @@ if(DeltaE-IPD0 >0)
   // ***************************
   //  Z=1->Z=2, Ioniz./Recomb.
   // ***************************
-  shift1=ishift+z0_len;
-  shift2=ishift+z0_len+z1_len;
-#ifdef OMP
-  //#pragma omp parallel for schedule(dynamic,1) collapse(2) private(DeltaE,kfwd,kfwd2,krev,\
-                  escape_factor,groundstate_ioniz,sigma_PI,abs_coeff,tau,wstark_freq,lambda0,Eexc) num_threads(num_threads)
-#endif
-  for(i=0;i<z1_len;++i)
-  {
-    for(j=0;j<z2_len;++j)
-    {
-      DeltaE=(STATES_z2[j][2]-STATES_z1[i][2])*eV2J; //-IPD0;
+//   shift1=ishift+z0_len;
+//   shift2=ishift+z0_len+z1_len;
+// #ifdef OMP
+//   //#pragma omp parallel for schedule(dynamic,1) collapse(2) private(DeltaE,kfwd,kfwd2,krev,\
+//                   escape_factor,groundstate_ioniz,sigma_PI,abs_coeff,tau,wstark_freq,lambda0,Eexc) num_threads(num_threads)
+// #endif
+//   for(i=0;i<z1_len;++i)
+//   {
+//     for(j=0;j<z2_len;++j)
+//     {
+//       DeltaE=(STATES_z2[j][2]-STATES_z1[i][2])*eV2J; //-IPD0;
 
-      //COLL IONIZ
-      Ith(ydot,i+shift1)          -= k_EI_z1_z2[i][j]*Ith(y,i+shift1)*ne;
-      Ith(ydot,2)                 += k_EI_z1_z2[i][j]*Ith(y,i+shift1)*ne;   //Ne inc.
-      Ith(ydot,j+shift2)          += k_EI_z1_z2[i][j]*Ith(y,i+shift1)*ne;
+//       //COLL IONIZ
+//       Ith(colrad_ydot,i+shift1)          -= k_EI_z1_z2[i][j]*Ith(y,i+shift1)*ne;
+//       Ith(colrad_ydot,2)                 += k_EI_z1_z2[i][j]*Ith(y,i+shift1)*ne;   //Ne inc.
+//       Ith(colrad_ydot,j+shift2)          += k_EI_z1_z2[i][j]*Ith(y,i+shift1)*ne;
 
-      //3-body recomb
-      Ith(ydot,shift2+j)          -= k_EI_z2_z1[i][j]*Ith(y,j+shift2)*ne*ne;
-      Ith(ydot,shift1+i)          += k_EI_z2_z1[i][j]*Ith(y,j+shift2)*ne*ne;
-      Ith(ydot,2)                 -= k_EI_z2_z1[i][j]*Ith(y,j+shift2)*ne*ne;
+//       //3-body recomb
+//       Ith(colrad_ydot,shift2+j)          -= k_EI_z2_z1[i][j]*Ith(y,j+shift2)*ne*ne;
+//       Ith(colrad_ydot,shift1+i)          += k_EI_z2_z1[i][j]*Ith(y,j+shift2)*ne*ne;
+//       Ith(colrad_ydot,2)                 -= k_EI_z2_z1[i][j]*Ith(y,j+shift2)*ne*ne;
 
-      Eexc  = -k_EI_z1_z2[i][j]*Ith(y,i+shift1)*ne*DeltaE;
-      Eexc +=  k_EI_z2_z1[i][j]*Ith(y,j+shift2)*ne*ne*DeltaE;
-      P_E_EI += Eexc;
-      //////////
-      // MPI
-      //////////
-      escape_factor=1.0;
-#ifdef MPI
-#ifdef STARK
-      if(k_MPI_z2_z1[i][j][0]>0 && STATES_z2[j][5]>STATES_z1[i][5])
-      {
-        //außerdem geht die quasi-static. approx. nur mit nu-nl>0
-        groundstate_ioniz=(STATES_z2[0][2]-STATES_z1[0][2])*eV2J;
-        sigma_PI=sigma_tmp*pow(DeltaE,2.5)/sqrt(groundstate_ioniz);
-        abs_coeff=sigma_PI*ne; //cross-section mit Pauli-blocking-faktor korrigieren!
-        tau=abs_coeff*thickness;
-        wstark_freq=StarkWidth(STATES_z2[j][5],STATES_z1[i][5],Te/11605,Ti/11605,Ti/11605,ne,totalc);
-        lambda0=planck*LIGHTSPEED/DeltaE;
-        wstark_len=wstark_freq*lambda0*lambda0/LIGHTSPEED;
-        escape_factor=EscapeFactor(wstark_len*1e10,tau);
-      }
-#endif
+//       Eexc  = -k_EI_z1_z2[i][j]*Ith(y,i+shift1)*ne*DeltaE;
+//       Eexc +=  k_EI_z2_z1[i][j]*Ith(y,j+shift2)*ne*ne*DeltaE;
+//       P_E_EI += Eexc;
+//       //////////
+//       // MPI
+//       //////////
+//       escape_factor=1.0;
+// #ifdef MPI
+// #ifdef STARK
+//       if(k_MPI_z2_z1[i][j][0]>0 && STATES_z2[j][5]>STATES_z1[i][5])
+//       {
+//         //außerdem geht die quasi-static. approx. nur mit nu-nl>0
+//         groundstate_ioniz=(STATES_z2[0][2]-STATES_z1[0][2])*eV2J;
+//         sigma_PI=sigma_tmp*pow(DeltaE,2.5)/sqrt(groundstate_ioniz);
+//         abs_coeff=sigma_PI*ne; //cross-section mit Pauli-blocking-faktor korrigieren!
+//         tau=abs_coeff*thickness;
+//         wstark_freq=StarkWidth(STATES_z2[j][5],STATES_z1[i][5],Te/11605,Ti/11605,Ti/11605,ne,totalc);
+//         lambda0=planck*LIGHTSPEED/DeltaE;
+//         wstark_len=wstark_freq*lambda0*lambda0/LIGHTSPEED;
+//         escape_factor=EscapeFactor(wstark_len*1e10,tau);
+//       }
+// #endif
 
-if(DeltaE-IPD1 >0)
-{
-      kfwd= k_MPI_z1_z2[i][j][0]*Ith(y,i+shift1); // *wup;
-      kfwd2=k_MPI_z1_z2[i][j][1]*Ith(y,i+shift1); // *wup;   // 2 photon- and 3-photon ionization!
+// if(DeltaE-IPD1 >0)
+// {
+//       kfwd= k_MPI_z1_z2[i][j][0]*Ith(y,i+shift1); // *wup;
+//       kfwd2=k_MPI_z1_z2[i][j][1]*Ith(y,i+shift1); // *wup;   // 2 photon- and 3-photon ionization!
 
-      krev=k_MPI_z2_z1[i][j][0]*Ith(y,shift2+j)*ne; // *wlo;   //eigentlich Rad-recomb.!=k_MPI_rev, einheit von k=m^3/s
+//       krev=k_MPI_z2_z1[i][j][0]*Ith(y,shift2+j)*ne; // *wlo;   //eigentlich Rad-recomb.!=k_MPI_rev, einheit von k=m^3/s
 
-      //kfwd2=0.0; // 3-photon-ioniz. off
-      Ith(ydot,i+shift1)                -=(kfwd +kfwd2);
-      Ith(ydot,2)                       +=(kfwd +kfwd2);   //Ne inc.
-      Ith(ydot,shift2+j)                +=(kfwd +kfwd2);
+//       //kfwd2=0.0; // 3-photon-ioniz. off
+//       Ith(colrad_ydot,i+shift1)                -=(kfwd +kfwd2);
+//       Ith(colrad_ydot,2)                       +=(kfwd +kfwd2);   //Ne inc.
+//       Ith(colrad_ydot,shift2+j)                +=(kfwd +kfwd2);
 
-      //krev=fmin(krev,kfwd);
-      Ith(ydot,shift2+j)                -=krev;
-      Ith(ydot,shift1+i)                +=krev;
-      Ith(ydot,2)-=krev;
+//       //krev=fmin(krev,kfwd);
+//       Ith(colrad_ydot,shift2+j)                -=krev;
+//       Ith(colrad_ydot,shift1+i)                +=krev;
+//       Ith(colrad_ydot,2)-=krev;
 
-      // für 2 photonen und rad.recomb
-      P_E_MPI2  += kfwd* (2.0*planck*LASERFREQ-(DeltaE-IPD1)); //kein heating durch rad.recomb->Photon verschwindert (bisher ohne self-absorption)
-      //jetzt für 3 photonen
-      P_E_MPI3  += kfwd2*(3.0*planck*LASERFREQ-(DeltaE-IPD1));
-      //jetzt rad recomb
-      P_E_RAD_RECOMB  -= krev*(DeltaE-IPD1)*escape_factor;
-}
-#endif
+//       // für 2 photonen und rad.recomb
+//       P_E_MPI2  += kfwd* (2.0*planck*LASERFREQ-(DeltaE-IPD1)); //kein heating durch rad.recomb->Photon verschwindert (bisher ohne self-absorption)
+//       //jetzt für 3 photonen
+//       P_E_MPI3  += kfwd2*(3.0*planck*LASERFREQ-(DeltaE-IPD1));
+//       //jetzt rad recomb
+//       P_E_RAD_RECOMB  -= krev*(DeltaE-IPD1)*escape_factor;
+// }
+// #endif
 
-    }
-  }
+//     }
+//   }
   // ***************************
   //  Z=2->Z=3, Ioniz./Recomb.
   // ***************************
-  shift1=ishift+z0_len+z1_len;
-  shift2=ishift+z0_len+z1_len+z2_len;
-#ifdef OMP
-  //#pragma omp parallel for schedule(dynamic,1) collapse(2) private(DeltaE,kfwd,kfwd2,krev,\
-                  escape_factor,groundstate_ioniz,sigma_PI,abs_coeff,tau,wstark_freq,lambda0,Eexc) num_threads(num_threads)
-#endif
-  for(i=0;i<z2_len;++i)
-  {
-    for(j=0;j<z3_len;++j)
-    {
-      DeltaE=(STATES_z3[j][2]-STATES_z2[i][2])*eV2J; //-IPD0;
+//   shift1=ishift+z0_len+z1_len;
+//   shift2=ishift+z0_len+z1_len+z2_len;
+// #ifdef OMP
+//   //#pragma omp parallel for schedule(dynamic,1) collapse(2) private(DeltaE,kfwd,kfwd2,krev,\
+//                   escape_factor,groundstate_ioniz,sigma_PI,abs_coeff,tau,wstark_freq,lambda0,Eexc) num_threads(num_threads)
+// #endif
+//   for(i=0;i<z2_len;++i)
+//   {
+//     for(j=0;j<z3_len;++j)
+//     {
+//       DeltaE=(STATES_z3[j][2]-STATES_z2[i][2])*eV2J; //-IPD0;
 
-      //COLL IONIZ
-      Ith(ydot,i+shift1)          -= k_EI_z2_z3[i][j]*Ith(y,i+shift1)*ne;
-      Ith(ydot,2)                 += k_EI_z2_z3[i][j]*Ith(y,i+shift1)*ne;   //Ne inc.
-      Ith(ydot,j+shift2)          += k_EI_z2_z3[i][j]*Ith(y,i+shift1)*ne;
+//       //COLL IONIZ
+//       Ith(colrad_ydot,i+shift1)          -= k_EI_z2_z3[i][j]*Ith(y,i+shift1)*ne;
+//       Ith(colrad_ydot,2)                 += k_EI_z2_z3[i][j]*Ith(y,i+shift1)*ne;   //Ne inc.
+//       Ith(colrad_ydot,j+shift2)          += k_EI_z2_z3[i][j]*Ith(y,i+shift1)*ne;
 
-      //3-body recomb
-      Ith(ydot,shift2+j)          -= k_EI_z3_z2[i][j]*Ith(y,j+shift2)*ne*ne;
-      Ith(ydot,shift1+i)          += k_EI_z3_z2[i][j]*Ith(y,j+shift2)*ne*ne;
-      Ith(ydot,2)                 -= k_EI_z3_z2[i][j]*Ith(y,j+shift2)*ne*ne;
+//       //3-body recomb
+//       Ith(colrad_ydot,shift2+j)          -= k_EI_z3_z2[i][j]*Ith(y,j+shift2)*ne*ne;
+//       Ith(colrad_ydot,shift1+i)          += k_EI_z3_z2[i][j]*Ith(y,j+shift2)*ne*ne;
+//       Ith(colrad_ydot,2)                 -= k_EI_z3_z2[i][j]*Ith(y,j+shift2)*ne*ne;
 
-      Eexc  = -k_EI_z2_z3[i][j]*Ith(y,i+shift1)*ne*DeltaE;
-      Eexc +=  k_EI_z3_z2[i][j]*Ith(y,j+shift2)*ne*ne*DeltaE;
-      P_E_EI += Eexc;
-      //////////
-      // MPI
-      //////////
-      escape_factor=1.0;
-#ifdef MPI
-#ifdef STARK
-      if(k_MPI_z3_z2[i][j][0]>0 && STATES_z3[j][5]>STATES_z2[i][5])
-      {
-        //außerdem geht die quasi-static. approx. nur mit nu-nl>0
-        groundstate_ioniz=(STATES_z3[0][2]-STATES_z2[0][2])*eV2J;
-        sigma_PI=sigma_tmp*pow(DeltaE,2.5)/sqrt(groundstate_ioniz);
-        abs_coeff=sigma_PI*ne; //cross-section mit Pauli-blocking-faktor korrigieren!
-        tau=abs_coeff*thickness;
-        wstark_freq=StarkWidth(STATES_z3[j][5],STATES_z2[i][5],Te/11605,Ti/11605,Ti/11605,ne,totalc);
-        lambda0=planck*LIGHTSPEED/DeltaE;
-        wstark_len=wstark_freq*lambda0*lambda0/LIGHTSPEED;
-        escape_factor=EscapeFactor(wstark_len*1e10,tau);
-      }
-#endif
+//       Eexc  = -k_EI_z2_z3[i][j]*Ith(y,i+shift1)*ne*DeltaE;
+//       Eexc +=  k_EI_z3_z2[i][j]*Ith(y,j+shift2)*ne*ne*DeltaE;
+//       P_E_EI += Eexc;
+//       //////////
+//       // MPI
+//       //////////
+//       escape_factor=1.0;
+// #ifdef MPI
+// #ifdef STARK
+//       if(k_MPI_z3_z2[i][j][0]>0 && STATES_z3[j][5]>STATES_z2[i][5])
+//       {
+//         //außerdem geht die quasi-static. approx. nur mit nu-nl>0
+//         groundstate_ioniz=(STATES_z3[0][2]-STATES_z2[0][2])*eV2J;
+//         sigma_PI=sigma_tmp*pow(DeltaE,2.5)/sqrt(groundstate_ioniz);
+//         abs_coeff=sigma_PI*ne; //cross-section mit Pauli-blocking-faktor korrigieren!
+//         tau=abs_coeff*thickness;
+//         wstark_freq=StarkWidth(STATES_z3[j][5],STATES_z2[i][5],Te/11605,Ti/11605,Ti/11605,ne,totalc);
+//         lambda0=planck*LIGHTSPEED/DeltaE;
+//         wstark_len=wstark_freq*lambda0*lambda0/LIGHTSPEED;
+//         escape_factor=EscapeFactor(wstark_len*1e10,tau);
+//       }
+// #endif
 
-if(DeltaE-IPD2 >0)
-{
-      kfwd= k_MPI_z2_z3[i][j][0]*Ith(y,i+shift1); // *wup;
-      kfwd2=k_MPI_z3_z2[i][j][1]*Ith(y,i+shift1); // *wup;   // 2 photon- and 3-photon ionization!
+// if(DeltaE-IPD2 >0)
+// {
+//       kfwd= k_MPI_z2_z3[i][j][0]*Ith(y,i+shift1); // *wup;
+//       kfwd2=k_MPI_z3_z2[i][j][1]*Ith(y,i+shift1); // *wup;   // 2 photon- and 3-photon ionization!
 
-      krev=k_MPI_z3_z2[i][j][0]*Ith(y,shift2+j)*ne; // *wlo;   //eigentlich Rad-recomb.!=k_MPI_rev, einheit von k=m^3/s
+//       krev=k_MPI_z3_z2[i][j][0]*Ith(y,shift2+j)*ne; // *wlo;   //eigentlich Rad-recomb.!=k_MPI_rev, einheit von k=m^3/s
 
-      //kfwd2=0.0; // 3-photon-ioniz. off
-      Ith(ydot,i+shift1)                -=(kfwd +kfwd2);
-      Ith(ydot,2)                       +=(kfwd +kfwd2);   //Ne inc.
-      Ith(ydot,shift2+j)                +=(kfwd +kfwd2);
+//       //kfwd2=0.0; // 3-photon-ioniz. off
+//       Ith(colrad_ydot,i+shift1)                -=(kfwd +kfwd2);
+//       Ith(colrad_ydot,2)                       +=(kfwd +kfwd2);   //Ne inc.
+//       Ith(colrad_ydot,shift2+j)                +=(kfwd +kfwd2);
 
-      //krev=fmin(krev,kfwd);
-      Ith(ydot,shift2+j)                -=krev;
-      Ith(ydot,shift1+i)                +=krev;
-      Ith(ydot,2)-=krev;
+//       //krev=fmin(krev,kfwd);
+//       Ith(colrad_ydot,shift2+j)                -=krev;
+//       Ith(colrad_ydot,shift1+i)                +=krev;
+//       Ith(colrad_ydot,2)-=krev;
 
-      // für 2 photonen und rad.recomb
-      P_E_MPI2  += kfwd* (2.0*planck*LASERFREQ-(DeltaE-IPD1)); //kein heating durch rad.recomb->Photon verschwindert (bisher ohne self-absorption)
-      //jetzt für 3 photonen
-      P_E_MPI3  += kfwd2*(3.0*planck*LASERFREQ-(DeltaE-IPD2));
-      //jetzt rad recomb
-      P_E_RAD_RECOMB  -= krev*(DeltaE-IPD2)*escape_factor;
-}
-#endif
+//       // für 2 photonen und rad.recomb
+//       P_E_MPI2  += kfwd* (2.0*planck*LASERFREQ-(DeltaE-IPD1)); //kein heating durch rad.recomb->Photon verschwindert (bisher ohne self-absorption)
+//       //jetzt für 3 photonen
+//       P_E_MPI3  += kfwd2*(3.0*planck*LASERFREQ-(DeltaE-IPD2));
+//       //jetzt rad recomb
+//       P_E_RAD_RECOMB  -= krev*(DeltaE-IPD2)*escape_factor;
+// }
+// #endif
 
-    }
-  }
+//     }
+//   }
   // ***************************
   //  Z=3->Z=4, Ioniz./Recomb.
   // ***************************
-  shift1=ishift+z0_len+z1_len+z2_len;
-  shift2=ishift+z0_len+z1_len+z2_len+z3_len;
-#ifdef OMP
+//   shift1=ishift+z0_len+z1_len+z2_len;
+//   shift2=ishift+z0_len+z1_len+z2_len+z3_len;
+// #ifdef OMP
   //#pragma omp parallel for schedule(dynamic,1) collapse(2) private(DeltaE,kfwd,kfwd2,krev,\
                   escape_factor,groundstate_ioniz,sigma_PI,abs_coeff,tau,wstark_freq,lambda0,Eexc) num_threads(num_threads)
-#endif
-  for(i=0;i<z3_len;++i)
-  {
-    for(j=0;j<z4_len;++j)
-    {
-      DeltaE=(STATES_z4[j][2]-STATES_z3[i][2])*eV2J; //-IPD0;
+// #endif
+//   for(i=0;i<z3_len;++i)
+//   {
+//     for(j=0;j<z4_len;++j)
+//     {
+//       DeltaE=(STATES_z4[j][2]-STATES_z3[i][2])*eV2J; //-IPD0;
 
-      //COLL IONIZ
-      Ith(ydot,i+shift1)          -= k_EI_z3_z4[i][j]*Ith(y,i+shift1)*ne;
-      Ith(ydot,2)                 += k_EI_z3_z4[i][j]*Ith(y,i+shift1)*ne;   //Ne inc.
-      Ith(ydot,j+shift2)          += k_EI_z3_z4[i][j]*Ith(y,i+shift1)*ne;
+//       //COLL IONIZ
+//       Ith(colrad_ydot,i+shift1)          -= k_EI_z3_z4[i][j]*Ith(y,i+shift1)*ne;
+//       Ith(colrad_ydot,2)                 += k_EI_z3_z4[i][j]*Ith(y,i+shift1)*ne;   //Ne inc.
+//       Ith(colrad_ydot,j+shift2)          += k_EI_z3_z4[i][j]*Ith(y,i+shift1)*ne;
 
-      //3-body recomb
-      Ith(ydot,shift2+j)          -= k_EI_z4_z3[i][j]*Ith(y,j+shift2)*ne*ne;
-      Ith(ydot,shift1+i)          += k_EI_z4_z3[i][j]*Ith(y,j+shift2)*ne*ne;
-      Ith(ydot,2)                 -= k_EI_z4_z3[i][j]*Ith(y,j+shift2)*ne*ne;
+//       //3-body recomb
+//       Ith(colrad_ydot,shift2+j)          -= k_EI_z4_z3[i][j]*Ith(y,j+shift2)*ne*ne;
+//       Ith(colrad_ydot,shift1+i)          += k_EI_z4_z3[i][j]*Ith(y,j+shift2)*ne*ne;
+//       Ith(colrad_ydot,2)                 -= k_EI_z4_z3[i][j]*Ith(y,j+shift2)*ne*ne;
 
-      Eexc  = -k_EI_z3_z4[i][j]*Ith(y,i+shift1)*ne*DeltaE;
-      Eexc +=  k_EI_z4_z3[i][j]*Ith(y,j+shift2)*ne*ne*DeltaE;
-      P_E_EI += Eexc;
+//       Eexc  = -k_EI_z3_z4[i][j]*Ith(y,i+shift1)*ne*DeltaE;
+//       Eexc +=  k_EI_z4_z3[i][j]*Ith(y,j+shift2)*ne*ne*DeltaE;
+//       P_E_EI += Eexc;
 
-      //////////
-      // MPI
-      //////////
-      escape_factor=1.0;
-#ifdef MPI
-#ifdef STARK
-      if(k_MPI_z4_z3[i][j][0]>0 && STATES_z4[j][5]>STATES_z3[i][5])
-      {
-        //außerdem geht die quasi-static. approx. nur mit nu-nl>0
-        groundstate_ioniz=(STATES_z4[0][2]-STATES_z3[0][2])*eV2J;
-        sigma_PI=sigma_tmp*pow(DeltaE,2.5)/sqrt(groundstate_ioniz);
-        abs_coeff=sigma_PI*ne; //cross-section mit Pauli-blocking-faktor korrigieren!
-        tau=abs_coeff*thickness;
-        wstark_freq=StarkWidth(STATES_z4[j][5],STATES_z3[i][5],Te/11605,Ti/11605,Ti/11605,ne,totalc);
-        lambda0=planck*LIGHTSPEED/DeltaE;
-        wstark_len=wstark_freq*lambda0*lambda0/LIGHTSPEED;
-        escape_factor=EscapeFactor(wstark_len*1e10,tau);
-      }
-#endif
+//       //////////
+//       // MPI
+//       //////////
+//       escape_factor=1.0;
+// #ifdef MPI
+// #ifdef STARK
+//       if(k_MPI_z4_z3[i][j][0]>0 && STATES_z4[j][5]>STATES_z3[i][5])
+//       {
+//         //außerdem geht die quasi-static. approx. nur mit nu-nl>0
+//         groundstate_ioniz=(STATES_z4[0][2]-STATES_z3[0][2])*eV2J;
+//         sigma_PI=sigma_tmp*pow(DeltaE,2.5)/sqrt(groundstate_ioniz);
+//         abs_coeff=sigma_PI*ne; //cross-section mit Pauli-blocking-faktor korrigieren!
+//         tau=abs_coeff*thickness;
+//         wstark_freq=StarkWidth(STATES_z4[j][5],STATES_z3[i][5],Te/11605,Ti/11605,Ti/11605,ne,totalc);
+//         lambda0=planck*LIGHTSPEED/DeltaE;
+//         wstark_len=wstark_freq*lambda0*lambda0/LIGHTSPEED;
+//         escape_factor=EscapeFactor(wstark_len*1e10,tau);
+//       }
+// #endif
 
-if(DeltaE-IPD3 >0)
-{
-      kfwd= k_MPI_z3_z4[i][j][0]*Ith(y,i+shift1); // *wup;
-      kfwd2=k_MPI_z4_z3[i][j][1]*Ith(y,i+shift1); // *wup;   // 2 photon- and 3-photon ionization!
+// if(DeltaE-IPD3 >0)
+// {
+//       kfwd= k_MPI_z3_z4[i][j][0]*Ith(y,i+shift1); // *wup;
+//       kfwd2=k_MPI_z4_z3[i][j][1]*Ith(y,i+shift1); // *wup;   // 2 photon- and 3-photon ionization!
 
-      krev=k_MPI_z4_z3[i][j][0]*Ith(y,shift2+j)*ne; // *wlo;   //eigentlich Rad-recomb.!=k_MPI_rev, einheit von k=m^3/s
+//       krev=k_MPI_z4_z3[i][j][0]*Ith(y,shift2+j)*ne; // *wlo;   //eigentlich Rad-recomb.!=k_MPI_rev, einheit von k=m^3/s
 
-      //kfwd2=0.0; // 3-photon-ioniz. off
-      Ith(ydot,i+shift1)                -=(kfwd +kfwd2);
-      Ith(ydot,2)                       +=(kfwd +kfwd2);   //Ne inc.
-      Ith(ydot,shift2+j)                +=(kfwd +kfwd2);
+//       //kfwd2=0.0; // 3-photon-ioniz. off
+//       Ith(colrad_ydot,i+shift1)                -=(kfwd +kfwd2);
+//       Ith(colrad_ydot,2)                       +=(kfwd +kfwd2);   //Ne inc.
+//       Ith(colrad_ydot,shift2+j)                +=(kfwd +kfwd2);
 
-      //krev=fmin(krev,kfwd);
-      Ith(ydot,shift2+j)                -=krev;
-      Ith(ydot,shift1+i)                +=krev;
-      Ith(ydot,2)-=krev;
+//       //krev=fmin(krev,kfwd);
+//       Ith(colrad_ydot,shift2+j)                -=krev;
+//       Ith(colrad_ydot,shift1+i)                +=krev;
+//       Ith(colrad_ydot,2)-=krev;
 
-      // für 2 photonen und rad.recomb
-      P_E_MPI2  += kfwd* (2.0*planck*LASERFREQ-(DeltaE-IPD3)); //kein heating durch rad.recomb->Photon verschwindert (bisher ohne self-absorption)
-      //jetzt für 3 photonen
-      P_E_MPI3  += kfwd2*(3.0*planck*LASERFREQ-(DeltaE-IPD3));
-      //jetzt rad recomb
-      P_E_RAD_RECOMB  -= krev*(DeltaE-IPD1)*escape_factor;
-}
-#endif
+//       // für 2 photonen und rad.recomb
+//       P_E_MPI2  += kfwd* (2.0*planck*LASERFREQ-(DeltaE-IPD3)); //kein heating durch rad.recomb->Photon verschwindert (bisher ohne self-absorption)
+//       //jetzt für 3 photonen
+//       P_E_MPI3  += kfwd2*(3.0*planck*LASERFREQ-(DeltaE-IPD3));
+//       //jetzt rad recomb
+//       P_E_RAD_RECOMB  -= krev*(DeltaE-IPD1)*escape_factor;
+// }
+// #endif
 
-    }
-  }
+//     }
+//   }
   // ********************** THERMO ******************************************
 
   double cvinv=1.0/(1.5*BOLTZMAN*ne);
   double P_E_TOTAL=P_E_EI+P_E_EE+P_E_MPI2+P_E_MPI3+P_E_RAD_RECOMB;
 
-  Ith(ydot,0) =  cvinv*P_E_TOTAL;
+  Ith(colrad_ydot,0) =  cvinv*P_E_TOTAL;
   return 0;
 }
 
@@ -1153,7 +1259,7 @@ if(DeltaE-IPD3 >0)
 // ********************************************************************+
 // *    COMPUTE RATE COEFFS
 // ********************************************************************+
-int GetCoeffs(N_Vector y,double It,void *user_data)
+int colrad_GetCoeffs(N_Vector y,double It,void *user_data)
 {
   int i,j,k;
   double kronecker;
@@ -1165,7 +1271,9 @@ int GetCoeffs(N_Vector y,double It,void *user_data)
   double I_1,I_2;
 
   Te=Ith(y,0);
+  if(Te <0 || isnan(Te)!=0) return -1;
   ne=Ith(y,2);
+  if(ne <0 || isnan(ne)!=0) return -1;
 
   double v_e=sqrt(8.0*BOLTZMAN*Te/pi/EMASS);
   double E_ion_H=13.6*eV2J;
@@ -1181,8 +1289,8 @@ int GetCoeffs(N_Vector y,double It,void *user_data)
 
   double tmp0,tmp1,tmp2;
 
-  UserData data;
-  data = (UserData) user_data;
+  colrad_UserData data;
+  data = (colrad_UserData) user_data;
   double IPD0=data->IPD0;
   double IPD1=data->IPD1;
   double IPD2=data->IPD2;
@@ -1217,30 +1325,30 @@ int GetCoeffs(N_Vector y,double It,void *user_data)
                   k_EE_z1_z1_b[i][j]=0.0;
           }
   }
-  for(i=0;i<z2_len;i++)
-  {
-          for(j=0;j<z2_len;j++)
-          {
-                  k_EE_z2_z2[i][j]=0.0;
-                  k_EE_z2_z2_b[i][j]=0.0;
-          }
-  }
-  for(i=0;i<z3_len;i++)
-  {
-          for(j=0;j<z3_len;j++)
-          {
-                  k_EE_z3_z3[i][j]=0.0;
-                  k_EE_z3_z3_b[i][j]=0.0;
-          }
-  }
-  for(i=0;i<z4_len;i++)
-  {
-          for(j=0;j<z4_len;j++)
-          {
-                  k_EE_z4_z4[i][j]=0.0;
-                  k_EE_z4_z4_b[i][j]=0.0;
-          }
-  }
+  // for(i=0;i<z2_len;i++)
+  // {
+  //         for(j=0;j<z2_len;j++)
+  //         {
+  //                 k_EE_z2_z2[i][j]=0.0;
+  //                 k_EE_z2_z2_b[i][j]=0.0;
+  //         }
+  // }
+  // for(i=0;i<z3_len;i++)
+  // {
+  //         for(j=0;j<z3_len;j++)
+  //         {
+  //                 k_EE_z3_z3[i][j]=0.0;
+  //                 k_EE_z3_z3_b[i][j]=0.0;
+  //         }
+  // }
+  // for(i=0;i<z4_len;i++)
+  // {
+  //         for(j=0;j<z4_len;j++)
+  //         {
+  //                 k_EE_z4_z4[i][j]=0.0;
+  //                 k_EE_z4_z4_b[i][j]=0.0;
+  //         }
+  // }
 
 
 
@@ -1259,45 +1367,45 @@ int GetCoeffs(N_Vector y,double It,void *user_data)
           }
   }
 
-  for(i=0;i<z1_len;i++)
-  {
-          for(j=0;j<z2_len;j++)
-          {
-                  k_EI_z1_z2[i][j]=0.0;
-                  k_EI_z2_z1[i][j]=0.0;
-                  for(k=0;k<2;k++)
-                  {
-                    k_MPI_z1_z2[i][j][k]=0.0;
-                    k_MPI_z2_z1[i][j][k]=0.0;
-                  }
-          }
-  }
-   for(i=0;i<z2_len;i++)
-  {
-          for(j=0;j<z3_len;j++)
-          {
-                  k_EI_z2_z3[i][j]=0.0;
-                  k_EI_z3_z2[i][j]=0.0;
-                  for(k=0;k<2;k++)
-                  {
-                    k_MPI_z2_z3[i][j][k]=0.0;
-                    k_MPI_z3_z2[i][j][k]=0.0;
-                  }
-          }
-  }
-  for(i=0;i<z3_len;i++)
-  {
-          for(j=0;j<z4_len;j++)
-          {
-                  k_EI_z3_z4[i][j]=0.0;
-                  k_EI_z4_z3[i][j]=0.0;
-                  for(k=0;k<2;k++)
-                  {
-                    k_MPI_z3_z4[i][j][k]=0.0;
-                    k_MPI_z4_z3[i][j][k]=0.0;
-                  }
-          }
-  }
+  // for(i=0;i<z1_len;i++)
+  // {
+  //         for(j=0;j<z2_len;j++)
+  //         {
+  //                 k_EI_z1_z2[i][j]=0.0;
+  //                 k_EI_z2_z1[i][j]=0.0;
+  //                 for(k=0;k<2;k++)
+  //                 {
+  //                   k_MPI_z1_z2[i][j][k]=0.0;
+  //                   k_MPI_z2_z1[i][j][k]=0.0;
+  //                 }
+  //         }
+  // }
+  //  for(i=0;i<z2_len;i++)
+  // {
+  //         for(j=0;j<z3_len;j++)
+  //         {
+  //                 k_EI_z2_z3[i][j]=0.0;
+  //                 k_EI_z3_z2[i][j]=0.0;
+  //                 for(k=0;k<2;k++)
+  //                 {
+  //                   k_MPI_z2_z3[i][j][k]=0.0;
+  //                   k_MPI_z3_z2[i][j][k]=0.0;
+  //                 }
+  //         }
+  // }
+  // for(i=0;i<z3_len;i++)
+  // {
+  //         for(j=0;j<z4_len;j++)
+  //         {
+  //                 k_EI_z3_z4[i][j]=0.0;
+  //                 k_EI_z4_z3[i][j]=0.0;
+  //                 for(k=0;k<2;k++)
+  //                 {
+  //                   k_MPI_z3_z4[i][j][k]=0.0;
+  //                   k_MPI_z4_z3[i][j][k]=0.0;
+  //                 }
+  //         }
+  // }
   ///////////////////////////////
   // Elec. excitation for Z=0
   ///////////////////////////////
@@ -1334,6 +1442,9 @@ if(expint==-1)
 
 if(fail==1)
         return -1;
+
+// printf("myid:%d,stage 1 clear\n",myid);
+
   //Now reverse rate (seperate loop because rev.rate needs koeff. of fwd. rate
   #ifdef OMP
   #pragma omp parallel for schedule(dynamic,1) collapse(2) private(kronecker,tmp0,tmp1,tmp2) num_threads(num_threads)
@@ -1376,6 +1487,9 @@ if(fail==1)
           DeltaE=(STATES_z1[j][2]-STATES_z1[i][2])*eV2J;
           a=DeltaE/(Te*BOLTZMAN);
           expint=ExpInt(a);
+
+// printf("myid:%d, a:%.4e,de:%.4e,eu:%.4e,el:%.3e\n", myid,a,DeltaE, STATES_z1[j][2],STATES_z1[i][2]);
+
 if(expint==-1)
 #ifndef OMP
         return -1;
@@ -1390,6 +1504,9 @@ if(expint==-1)
       }
     }
   if(fail==1) return -1;
+
+// printf("myid:%d,stage 2 clear\n",myid);
+
   //NOW REVERSE RATE
   #ifdef OMP
   #pragma omp parallel for schedule(dynamic,1) collapse(2) private(kronecker,tmp0,tmp1,tmp2) num_threads(num_threads)
@@ -1414,170 +1531,170 @@ if(expint==-1)
   ////////////////////////
   // Elec. exc. for Z=2
   ///////////////////////
-  fail=0;
-  #ifdef OMP
-  #pragma omp parallel for schedule(dynamic,1) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2) num_threads(num_threads)
-  #endif
-  for(i=0;i<z2_len;++i)
-  {
-    for(j=0;j<z2_len;++j)
-    {
-        if(j<=i) continue;
-        kronecker=0.0;
-        {
-          if(STATES_z2[i][4]==STATES_z2[j][4])
-            kronecker=1.0;
-          DeltaE=(STATES_z2[j][2]-STATES_z2[i][2])*eV2J;
-          a=DeltaE/(Te*BOLTZMAN);
-          expint=ExpInt(a);
+//   fail=0;
+//   #ifdef OMP
+//   #pragma omp parallel for schedule(dynamic,1) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2) num_threads(num_threads)
+//   #endif
+//   for(i=0;i<z2_len;++i)
+//   {
+//     for(j=0;j<z2_len;++j)
+//     {
+//         if(j<=i) continue;
+//         kronecker=0.0;
+//         {
+//           if(STATES_z2[i][4]==STATES_z2[j][4])
+//             kronecker=1.0;
+//           DeltaE=(STATES_z2[j][2]-STATES_z2[i][2])*eV2J;
+//           a=DeltaE/(Te*BOLTZMAN);
+//           expint=ExpInt(a);
 
-if(expint==-1)
-#ifndef OMP
-        return -1;
-#else
-        fail=1;
-#endif
-          G2=genexpint(a,1.0,1.0);
-          I_1=exp(-a)/a - expint;
-          I_2=I_1*log(5.0/4.0*beta_i)+expint/a-G2;
-          k_EE_z2_z2[i][j]=v_e*four_pi_a0_sq*(kronecker*alpha_e*a*a*I_1 +(1-kronecker)*alpha_i*E_ion_H_div_kTe_sq*I_2);
-        }
-      }
-    }
-  if(fail==1) return -1;
-    //NOW REVERSE RATE
-  #ifdef OMP
-  #pragma omp parallel for schedule(dynamic,1) collapse(2) private(kronecker,tmp0,tmp1,tmp2) num_threads(num_threads)
-  #endif
-  for(i=0;i<z2_len;++i)
-  {
-    for(j=0;j<z2_len;++j)
-    {
-        if(j<=i ) continue;
-        tmp0=STATES_z2[j][3]/STATES_z2[i][3];
+// if(expint==-1)
+// #ifndef OMP
+//         return -1;
+// #else
+//         fail=1;
+// #endif
+//           G2=genexpint(a,1.0,1.0);
+//           I_1=exp(-a)/a - expint;
+//           I_2=I_1*log(5.0/4.0*beta_i)+expint/a-G2;
+//           k_EE_z2_z2[i][j]=v_e*four_pi_a0_sq*(kronecker*alpha_e*a*a*I_1 +(1-kronecker)*alpha_i*E_ion_H_div_kTe_sq*I_2);
+//         }
+//       }
+//     }
+//   if(fail==1) return -1;
+//     //NOW REVERSE RATE
+//   #ifdef OMP
+//   #pragma omp parallel for schedule(dynamic,1) collapse(2) private(kronecker,tmp0,tmp1,tmp2) num_threads(num_threads)
+//   #endif
+//   for(i=0;i<z2_len;++i)
+//   {
+//     for(j=0;j<z2_len;++j)
+//     {
+//         if(j<=i ) continue;
+//         tmp0=STATES_z2[j][3]/STATES_z2[i][3];
 
-        //tmp1=3.0*(1.0-kronecker)/2.0;
-        tmp1=0.0; //3.0*(1.0-kronecker)/2.0;
+//         //tmp1=3.0*(1.0-kronecker)/2.0;
+//         tmp1=0.0; //3.0*(1.0-kronecker)/2.0;
 
-        tmp2=exp(-(STATES_z2[j][2]-STATES_z2[i][2])*eV2J/(BOLTZMAN*Te));
+//         tmp2=exp(-(STATES_z2[j][2]-STATES_z2[i][2])*eV2J/(BOLTZMAN*Te));
 
-        //k_EE_z0_z0_b[i][j]=k_EE_z0_z0[i][j]/tmp0/(pow(two_pi_me_kT_hsq,tmp1))/tmp2;
-        k_EE_z2_z2_b[i][j]=k_EE_z2_z2[i][j]/tmp0/tmp2;
+//         //k_EE_z0_z0_b[i][j]=k_EE_z0_z0[i][j]/tmp0/(pow(two_pi_me_kT_hsq,tmp1))/tmp2;
+//         k_EE_z2_z2_b[i][j]=k_EE_z2_z2[i][j]/tmp0/tmp2;
 
-    }
-  }
-  ////////////////////////
-  // Elec. exc. for Z=3
-  ///////////////////////
-  fail=0;
-  #ifdef OMP
-  #pragma omp parallel for schedule(dynamic,1) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2) num_threads(num_threads)
-  #endif
-  for(i=0;i<z3_len;++i)
-  {
-    for(j=0;j<z3_len;++j)
-    {
-        if(j<=i) continue;
-        kronecker=0.0;
-        {
-          if(STATES_z3[i][4]==STATES_z3[j][4])
-            kronecker=1.0;
-          DeltaE=(STATES_z3[j][2]-STATES_z3[i][2])*eV2J;
-          a=DeltaE/(Te*BOLTZMAN);
-          expint=ExpInt(a);
+//     }
+//   }
+//   ////////////////////////
+//   // Elec. exc. for Z=3
+//   ///////////////////////
+//   fail=0;
+//   #ifdef OMP
+//   #pragma omp parallel for schedule(dynamic,1) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2) num_threads(num_threads)
+//   #endif
+//   for(i=0;i<z3_len;++i)
+//   {
+//     for(j=0;j<z3_len;++j)
+//     {
+//         if(j<=i) continue;
+//         kronecker=0.0;
+//         {
+//           if(STATES_z3[i][4]==STATES_z3[j][4])
+//             kronecker=1.0;
+//           DeltaE=(STATES_z3[j][2]-STATES_z3[i][2])*eV2J;
+//           a=DeltaE/(Te*BOLTZMAN);
+//           expint=ExpInt(a);
 
-if(expint==-1)
-#ifndef OMP
-        return -1;
-#else
-        fail=1;
-#endif
+// if(expint==-1)
+// #ifndef OMP
+//         return -1;
+// #else
+//         fail=1;
+// #endif
 
-          G2=genexpint(a,1.0,1.0);
-          I_1=exp(-a)/a - expint;
-          I_2=I_1*log(5.0/4.0*beta_i)+expint/a-G2;
-          k_EE_z3_z3[i][j]=v_e*four_pi_a0_sq*(kronecker*alpha_e*a*a*I_1 +(1-kronecker)*alpha_i*E_ion_H_div_kTe_sq*I_2);
-        }
-      }
-    }
-  if(fail==1)
-          return -1;
-  //NOW REVERSE RATE
-  #ifdef OMP
-  #pragma omp parallel for schedule(dynamic,1) collapse(2) private(kronecker,tmp0,tmp1,tmp2) num_threads(num_threads)
-  #endif
-  for(i=0;i<z3_len;++i)
-  {
-    for(j=0;j<z3_len;++j)
-    {
-        if(j<=i ) continue;
-        tmp0=STATES_z3[j][3]/STATES_z3[i][3];
+//           G2=genexpint(a,1.0,1.0);
+//           I_1=exp(-a)/a - expint;
+//           I_2=I_1*log(5.0/4.0*beta_i)+expint/a-G2;
+//           k_EE_z3_z3[i][j]=v_e*four_pi_a0_sq*(kronecker*alpha_e*a*a*I_1 +(1-kronecker)*alpha_i*E_ion_H_div_kTe_sq*I_2);
+//         }
+//       }
+//     }
+//   if(fail==1)
+//           return -1;
+//   //NOW REVERSE RATE
+//   #ifdef OMP
+//   #pragma omp parallel for schedule(dynamic,1) collapse(2) private(kronecker,tmp0,tmp1,tmp2) num_threads(num_threads)
+//   #endif
+//   for(i=0;i<z3_len;++i)
+//   {
+//     for(j=0;j<z3_len;++j)
+//     {
+//         if(j<=i ) continue;
+//         tmp0=STATES_z3[j][3]/STATES_z3[i][3];
 
-        //tmp1=3.0*(1.0-kronecker)/2.0;
-        tmp1=0.0; //3.0*(1.0-kronecker)/2.0;
+//         //tmp1=3.0*(1.0-kronecker)/2.0;
+//         tmp1=0.0; //3.0*(1.0-kronecker)/2.0;
 
-        tmp2=exp(-(STATES_z3[j][2]-STATES_z3[i][2])*eV2J/(BOLTZMAN*Te));
-        //k_EE_z0_z0_b[i][j]=k_EE_z0_z0[i][j]/tmp0/(pow(two_pi_me_kT_hsq,tmp1))/tmp2;
-        k_EE_z3_z3_b[i][j]=k_EE_z3_z3[i][j]/tmp0/tmp2;
+//         tmp2=exp(-(STATES_z3[j][2]-STATES_z3[i][2])*eV2J/(BOLTZMAN*Te));
+//         //k_EE_z0_z0_b[i][j]=k_EE_z0_z0[i][j]/tmp0/(pow(two_pi_me_kT_hsq,tmp1))/tmp2;
+//         k_EE_z3_z3_b[i][j]=k_EE_z3_z3[i][j]/tmp0/tmp2;
 
-    }
-  }
-  ////////////////////////
-  // Elec. exc. for Z=4
-  ///////////////////////
-  fail=0;
-  #ifdef OMP
-  #pragma omp parallel for schedule(dynamic,1) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2) num_threads(num_threads)
-  #endif
-  for(i=0;i<z4_len;++i)
-  {
-    for(j=0;j<z4_len;++j)
-    {
-        if(j<=i) continue;
-        kronecker=0.0;
-        {
-          if(STATES_z4[i][4]==STATES_z4[j][4])
-            kronecker=1.0;
-          DeltaE=(STATES_z4[j][2]-STATES_z4[i][2])*eV2J;
-          a=DeltaE/(Te*BOLTZMAN);
-          expint=ExpInt(a);
+//     }
+//   }
+//   ////////////////////////
+//   // Elec. exc. for Z=4
+//   ///////////////////////
+//   fail=0;
+//   #ifdef OMP
+//   #pragma omp parallel for schedule(dynamic,1) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2) num_threads(num_threads)
+//   #endif
+//   for(i=0;i<z4_len;++i)
+//   {
+//     for(j=0;j<z4_len;++j)
+//     {
+//         if(j<=i) continue;
+//         kronecker=0.0;
+//         {
+//           if(STATES_z4[i][4]==STATES_z4[j][4])
+//             kronecker=1.0;
+//           DeltaE=(STATES_z4[j][2]-STATES_z4[i][2])*eV2J;
+//           a=DeltaE/(Te*BOLTZMAN);
+//           expint=ExpInt(a);
 
-if(expint==-1)
-#ifndef OMP
-        return -1;
-#else
-        fail=1;
-#endif
+// if(expint==-1)
+// #ifndef OMP
+//         return -1;
+// #else
+//         fail=1;
+// #endif
 
-          G2=genexpint(a,1.0,1.0);
-          I_1=exp(-a)/a - expint;
-          I_2=I_1*log(5.0/4.0*beta_i)+expint/a-G2;
-          k_EE_z4_z4[i][j]=v_e*four_pi_a0_sq*(kronecker*alpha_e*a*a*I_1 +(1-kronecker)*alpha_i*E_ion_H_div_kTe_sq*I_2);
-        }
-      }
-    }
-  if(fail==1)
-          return -1;
-  //NOW REVERSE RATE
-  #ifdef OMP
-  #pragma omp parallel for schedule(dynamic,1) collapse(2) private(kronecker,tmp0,tmp1,tmp2) num_threads(num_threads)
-  #endif
-  for(i=0;i<z4_len;++i)
-  {
-    for(j=0;j<z4_len;++j)
-    {
-        if(j<=i ) continue;
-        tmp0=STATES_z4[j][3]/STATES_z4[i][3];
+//           G2=genexpint(a,1.0,1.0);
+//           I_1=exp(-a)/a - expint;
+//           I_2=I_1*log(5.0/4.0*beta_i)+expint/a-G2;
+//           k_EE_z4_z4[i][j]=v_e*four_pi_a0_sq*(kronecker*alpha_e*a*a*I_1 +(1-kronecker)*alpha_i*E_ion_H_div_kTe_sq*I_2);
+//         }
+//       }
+//     }
+//   if(fail==1)
+//           return -1;
+//   //NOW REVERSE RATE
+//   #ifdef OMP
+//   #pragma omp parallel for schedule(dynamic,1) collapse(2) private(kronecker,tmp0,tmp1,tmp2) num_threads(num_threads)
+//   #endif
+//   for(i=0;i<z4_len;++i)
+//   {
+//     for(j=0;j<z4_len;++j)
+//     {
+//         if(j<=i ) continue;
+//         tmp0=STATES_z4[j][3]/STATES_z4[i][3];
 
-        //tmp1=3.0*(1.0-kronecker)/2.0;
-        tmp1=0.0; //3.0*(1.0-kronecker)/2.0;
+//         //tmp1=3.0*(1.0-kronecker)/2.0;
+//         tmp1=0.0; //3.0*(1.0-kronecker)/2.0;
 
-        tmp2=exp(-(STATES_z4[j][2]-STATES_z4[i][2])*eV2J/(BOLTZMAN*Te));
-        //k_EE_z0_z0_b[i][j]=k_EE_z0_z0[i][j]/tmp0/(pow(two_pi_me_kT_hsq,tmp1))/tmp2;
-        k_EE_z4_z4_b[i][j]=k_EE_z4_z4[i][j]/tmp0/tmp2;
+//         tmp2=exp(-(STATES_z4[j][2]-STATES_z4[i][2])*eV2J/(BOLTZMAN*Te));
+//         //k_EE_z0_z0_b[i][j]=k_EE_z0_z0[i][j]/tmp0/(pow(two_pi_me_kT_hsq,tmp1))/tmp2;
+//         k_EE_z4_z4_b[i][j]=k_EE_z4_z4[i][j]/tmp0/tmp2;
 
-    }
-  }
+//     }
+//   }
 
   // *************************************************
   // *           NOW IONIZATION COEFFS
@@ -1641,213 +1758,222 @@ if(expint==-1)
     }
   }
   if(fail==1) return -1;
+
+  // printf("myid:%d,stage 3 clear\n",myid);
    /////////////////
   // Ioniz. 1->2
   ///////////////// 
-  fail=0;
-#ifdef OMP
-  #pragma omp parallel for schedule(dynamic,1) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2,sigma1,sigma_MPI_2,sigma_MPI_3,tmp0,tmp1,tmp2) num_threads(num_threads)
-#endif
-  for(i=0;i<z1_len;++i)
-  {
-    for(j=0;j<z2_len;++j)
-    {
-      kronecker=0.0;
-      if(STATES_z1[i][4]==STATES_z2[j][4])
-        kronecker=1.0;
+//   fail=0;
+// #ifdef OMP
+//   #pragma omp parallel for schedule(dynamic,1) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2,sigma1,sigma_MPI_2,sigma_MPI_3,tmp0,tmp1,tmp2) num_threads(num_threads)
+// #endif
+//   for(i=0;i<z1_len;++i)
+//   {
+//     for(j=0;j<z2_len;++j)
+//     {
+//       kronecker=0.0;
+//       if(STATES_z1[i][4]==STATES_z2[j][4])
+//         kronecker=1.0;
 
-      DeltaE=(STATES_z2[j][2]-STATES_z1[i][2])*eV2J; //-IPD0;
+//       DeltaE=(STATES_z2[j][2]-STATES_z1[i][2])*eV2J; //-IPD0;
       
-      a=DeltaE/(Te*BOLTZMAN);
-      expint=ExpInt(a);
-if(expint==-1)
-#ifndef OMP
-        return -1;
-#else
-        fail=1;
-#endif
+//       a=DeltaE/(Te*BOLTZMAN);
+//       expint=ExpInt(a);
+// if(expint==-1)
+// #ifndef OMP
+//         return -1;
+// #else
+//         fail=1;
+// #endif
 
 
-      G2=genexpint(a,1.0,1.0);
-      I_1=exp(-a)/a - expint;
-      I_2=I_1*log(5.0/4.0*beta_i)+expint/a-G2;
-      k_EI_z1_z2[i][j]=v_e*four_pi_a0_sq*alpha_i*E_ion_H_div_kTe_sq*I_2;
+//       G2=genexpint(a,1.0,1.0);
+//       I_1=exp(-a)/a - expint;
+//       I_2=I_1*log(5.0/4.0*beta_i)+expint/a-G2;
+//       k_EI_z1_z2[i][j]=v_e*four_pi_a0_sq*alpha_i*E_ion_H_div_kTe_sq*I_2;
 
-      //MPI 2 PHOTONS
-      if(2.0*planck*LASERFREQ >= DeltaE-IPD1 && DeltaE-IPD1>0.0)
-      {
-        sigma1=sigma_tmp*pow(DeltaE,2.5)/sqrt(DeltaE-IPD1);
-        sigma_MPI_2=sigma1*sigma1/LASERFREQ/pow(planck*LASERFREQ,2.0);
-        k_MPI_z1_z2[i][j][0]=sigma_MPI_2*I_sq;
-      }
-      //MPI 3 PHOTONS
-      if(3.0*planck*LASERFREQ >=DeltaE-IPD1 && DeltaE-IPD1 >0.0)
-      {
-        sigma1=sigma_tmp*pow(DeltaE-IPD1,2.5)/sqrt(DeltaE-IPD1);
-        sigma_MPI_3=sigma1*sigma1*sigma1/2.0/LASERFREQ/LASERFREQ/pow(planck*LASERFREQ,3.0);
-        k_MPI_z1_z2[i][j][1]=sigma_MPI_3*I_cu;//*prob*beta_pi(Te,mu,DeltaE);
-      }
-      //RAD RECOMB
-      if(DeltaE-IPD1>0)
-        k_MPI_z2_z1[i][j][0]=v_e*k_RR_fact1*4.0*k_RR_fact2*pow((DeltaE-IPD1)*J2eV/STATES_z2[j][2],1.5)*expint*exp(a);
+//       //MPI 2 PHOTONS
+//       if(2.0*planck*LASERFREQ >= DeltaE-IPD1 && DeltaE-IPD1>0.0)
+//       {
+//         sigma1=sigma_tmp*pow(DeltaE,2.5)/sqrt(DeltaE-IPD1);
+//         sigma_MPI_2=sigma1*sigma1/LASERFREQ/pow(planck*LASERFREQ,2.0);
+//         k_MPI_z1_z2[i][j][0]=sigma_MPI_2*I_sq;
+//       }
+//       //MPI 3 PHOTONS
+//       if(3.0*planck*LASERFREQ >=DeltaE-IPD1 && DeltaE-IPD1 >0.0)
+//       {
+//         sigma1=sigma_tmp*pow(DeltaE-IPD1,2.5)/sqrt(DeltaE-IPD1);
+//         sigma_MPI_3=sigma1*sigma1*sigma1/2.0/LASERFREQ/LASERFREQ/pow(planck*LASERFREQ,3.0);
+//         k_MPI_z1_z2[i][j][1]=sigma_MPI_3*I_cu;//*prob*beta_pi(Te,mu,DeltaE);
+//       }
+//       //RAD RECOMB
+//       if(DeltaE-IPD1>0)
+//         k_MPI_z2_z1[i][j][0]=v_e*k_RR_fact1*4.0*k_RR_fact2*pow((DeltaE-IPD1)*J2eV/STATES_z2[j][2],1.5)*expint*exp(a);
       
-//3-body recomb
-      //if(DeltaE>0.0)
+// //3-body recomb
+//       //if(DeltaE>0.0)
       
-      kronecker=0;
-      tmp0=pow(2.0,(1.0-kronecker))*STATES_z2[j][3]/STATES_z1[i][3];
-      tmp1=3.0*(1.0-kronecker)/2.0;
-      tmp2=exp(-DeltaE/(BOLTZMAN*Te));
-      k_EI_z2_z1[i][j]=k_EI_z1_z2[i][j]/tmp0/pow(two_pi_me_kT_hsq,tmp1)/tmp2;      
-    }
-  }
-  if(fail==1) return -1;
+//       kronecker=0;
+//       tmp0=pow(2.0,(1.0-kronecker))*STATES_z2[j][3]/STATES_z1[i][3];
+//       tmp1=3.0*(1.0-kronecker)/2.0;
+//       tmp2=exp(-DeltaE/(BOLTZMAN*Te));
+//       k_EI_z2_z1[i][j]=k_EI_z1_z2[i][j]/tmp0/pow(two_pi_me_kT_hsq,tmp1)/tmp2;      
+//     }
+//   }
+//   if(fail==1) return -1;
 
-   /////////////////
-  // Ioniz. 2->3
-  ///////////////// 
-  fail=0;
-#ifdef OMP
-  #pragma omp parallel for schedule(dynamic,1) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2,sigma1,sigma_MPI_2,sigma_MPI_3,tmp0,tmp1,tmp2) num_threads(num_threads)
-#endif
-  for(i=0;i<z2_len;++i)
-  {
-    for(j=0;j<z3_len;++j)
-    {
-      kronecker=0.0;
-      if(STATES_z2[i][4]==STATES_z3[j][4])
-      kronecker=1.0;
+//    /////////////////
+//   // Ioniz. 2->3
+//   ///////////////// 
+//   fail=0;
+// #ifdef OMP
+//   #pragma omp parallel for schedule(dynamic,1) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2,sigma1,sigma_MPI_2,sigma_MPI_3,tmp0,tmp1,tmp2) num_threads(num_threads)
+// #endif
+//   for(i=0;i<z2_len;++i)
+//   {
+//     for(j=0;j<z3_len;++j)
+//     {
+//       kronecker=0.0;
+//       if(STATES_z2[i][4]==STATES_z3[j][4])
+//       kronecker=1.0;
 
-      DeltaE=(STATES_z3[j][2]-STATES_z2[i][2])*eV2J; //-IPD0;
+//       DeltaE=(STATES_z3[j][2]-STATES_z2[i][2])*eV2J; //-IPD0;
       
-      a=DeltaE/(Te*BOLTZMAN);
-         expint=ExpInt(a);
+//       a=DeltaE/(Te*BOLTZMAN);
+//          expint=ExpInt(a);
 
-if(expint==-1)
-#ifndef OMP
-        return -1;
-#else
-        fail=1;
-#endif
+// if(expint==-1)
+// #ifndef OMP
+//         return -1;
+// #else
+//         fail=1;
+// #endif
 
-      G2=genexpint(a,1.0,1.0);
-      I_1=exp(-a)/a - expint;
-      I_2=I_1*log(5.0/4.0*beta_i)+expint/a-G2;
-      k_EI_z2_z3[i][j]=v_e*four_pi_a0_sq*alpha_i*E_ion_H_div_kTe_sq*I_2;
+//       G2=genexpint(a,1.0,1.0);
+//       I_1=exp(-a)/a - expint;
+//       I_2=I_1*log(5.0/4.0*beta_i)+expint/a-G2;
+//       k_EI_z2_z3[i][j]=v_e*four_pi_a0_sq*alpha_i*E_ion_H_div_kTe_sq*I_2;
 
-      //MPI 2 PHOTONS
-      if(2.0*planck*LASERFREQ >= DeltaE-IPD2 && DeltaE-IPD2>0.0)
-      {
-        sigma1=sigma_tmp*pow(DeltaE,2.5)/sqrt(DeltaE-IPD2);
-        sigma_MPI_2=sigma1*sigma1/LASERFREQ/pow(planck*LASERFREQ,2.0);
-        k_MPI_z2_z3[i][j][0]=sigma_MPI_2*I_sq;
-      }
-      //MPI 3 PHOTONS
-      if(3.0*planck*LASERFREQ >=DeltaE-IPD2 && DeltaE-IPD2 >0.0)
-      {
-        sigma1=sigma_tmp*pow(DeltaE-IPD2,2.5)/sqrt(DeltaE-IPD2);
-        sigma_MPI_3=sigma1*sigma1*sigma1/2.0/LASERFREQ/LASERFREQ/pow(planck*LASERFREQ,3.0);
-        k_MPI_z2_z3[i][j][1]=sigma_MPI_3*I_cu;//*prob*beta_pi(Te,mu,DeltaE);
-      }
-      //RAD RECOMB
-      if(DeltaE-IPD2>0)
-        k_MPI_z3_z2[i][j][0]=v_e*k_RR_fact1*4.0*k_RR_fact2*pow((DeltaE-IPD2)*J2eV/STATES_z3[j][2],1.5)*expint*exp(a);
+//       //MPI 2 PHOTONS
+//       if(2.0*planck*LASERFREQ >= DeltaE-IPD2 && DeltaE-IPD2>0.0)
+//       {
+//         sigma1=sigma_tmp*pow(DeltaE,2.5)/sqrt(DeltaE-IPD2);
+//         sigma_MPI_2=sigma1*sigma1/LASERFREQ/pow(planck*LASERFREQ,2.0);
+//         k_MPI_z2_z3[i][j][0]=sigma_MPI_2*I_sq;
+//       }
+//       //MPI 3 PHOTONS
+//       if(3.0*planck*LASERFREQ >=DeltaE-IPD2 && DeltaE-IPD2 >0.0)
+//       {
+//         sigma1=sigma_tmp*pow(DeltaE-IPD2,2.5)/sqrt(DeltaE-IPD2);
+//         sigma_MPI_3=sigma1*sigma1*sigma1/2.0/LASERFREQ/LASERFREQ/pow(planck*LASERFREQ,3.0);
+//         k_MPI_z2_z3[i][j][1]=sigma_MPI_3*I_cu;//*prob*beta_pi(Te,mu,DeltaE);
+//       }
+//       //RAD RECOMB
+//       if(DeltaE-IPD2>0)
+//         k_MPI_z3_z2[i][j][0]=v_e*k_RR_fact1*4.0*k_RR_fact2*pow((DeltaE-IPD2)*J2eV/STATES_z3[j][2],1.5)*expint*exp(a);
       
-//3-body recomb
-      //if(DeltaE>0.0)
+// //3-body recomb
+//       //if(DeltaE>0.0)
       
-      kronecker=0;
-      tmp0=pow(2.0,(1.0-kronecker))*STATES_z3[j][3]/STATES_z2[i][3];
-      tmp1=3.0*(1.0-kronecker)/2.0;
-      tmp2=exp(-DeltaE/(BOLTZMAN*Te));
-      k_EI_z3_z2[i][j]=k_EI_z2_z3[i][j]/tmp0/pow(two_pi_me_kT_hsq,tmp1)/tmp2;
+//       kronecker=0;
+//       tmp0=pow(2.0,(1.0-kronecker))*STATES_z3[j][3]/STATES_z2[i][3];
+//       tmp1=3.0*(1.0-kronecker)/2.0;
+//       tmp2=exp(-DeltaE/(BOLTZMAN*Te));
+//       k_EI_z3_z2[i][j]=k_EI_z2_z3[i][j]/tmp0/pow(two_pi_me_kT_hsq,tmp1)/tmp2;
       
-    }
-  }
-  if(fail==1) return -1;
-   /////////////////
-  // Ioniz. 3->4
-  ///////////////// 
-  fail=0;
-#ifdef OMP
-  #pragma omp parallel for schedule(dynamic,1) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2,sigma1,sigma_MPI_2,sigma_MPI_3,tmp0,tmp1,tmp2) num_threads(num_threads)
-#endif
-  for(i=0;i<z3_len;++i)
-  {
-    for(j=0;j<z4_len;++j)
-    {
-      kronecker=0.0;
-      if(STATES_z3[i][4]==STATES_z4[j][4])
-      kronecker=1.0;
+//     }
+//   }
+//   if(fail==1) return -1;
+//    /////////////////
+//   // Ioniz. 3->4
+//   ///////////////// 
+//   fail=0;
+// #ifdef OMP
+//   #pragma omp parallel for schedule(dynamic,1) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2,sigma1,sigma_MPI_2,sigma_MPI_3,tmp0,tmp1,tmp2) num_threads(num_threads)
+// #endif
+//   for(i=0;i<z3_len;++i)
+//   {
+//     for(j=0;j<z4_len;++j)
+//     {
+//       kronecker=0.0;
+//       if(STATES_z3[i][4]==STATES_z4[j][4])
+//       kronecker=1.0;
 
-      DeltaE=(STATES_z4[j][2]-STATES_z3[i][2])*eV2J; //-IPD0;
+//       DeltaE=(STATES_z4[j][2]-STATES_z3[i][2])*eV2J; //-IPD0;
       
-      a=DeltaE/(Te*BOLTZMAN);
-         expint=ExpInt(a);
+//       a=DeltaE/(Te*BOLTZMAN);
+//          expint=ExpInt(a);
 
-if(expint==-1)
-#ifndef OMP
-        return -1;
-#else
-        fail=1;
-#endif
+// if(expint==-1)
+// #ifndef OMP
+//         return -1;
+// #else
+//         fail=1;
+// #endif
 
-      G2=genexpint(a,1.0,1.0);
-      I_1=exp(-a)/a - expint;
-      I_2=I_1*log(5.0/4.0*beta_i)+expint/a-G2;
-      k_EI_z3_z4[i][j]=v_e*four_pi_a0_sq*alpha_i*E_ion_H_div_kTe_sq*I_2;
+//       G2=genexpint(a,1.0,1.0);
+//       I_1=exp(-a)/a - expint;
+//       I_2=I_1*log(5.0/4.0*beta_i)+expint/a-G2;
+//       k_EI_z3_z4[i][j]=v_e*four_pi_a0_sq*alpha_i*E_ion_H_div_kTe_sq*I_2;
 
-      //MPI 2 PHOTONS
-      if(2.0*planck*LASERFREQ >= DeltaE-IPD3 && DeltaE-IPD3>0.0)
-      {
-        sigma1=sigma_tmp*pow(DeltaE,2.5)/sqrt(DeltaE-IPD3);
-        sigma_MPI_2=sigma1*sigma1/LASERFREQ/pow(planck*LASERFREQ,2.0);
-        k_MPI_z3_z4[i][j][0]=sigma_MPI_2*I_sq;
-      }
-      //MPI 3 PHOTONS
-      if(3.0*planck*LASERFREQ >=DeltaE-IPD3 && DeltaE-IPD3 >0.0)
-      {
-        sigma1=sigma_tmp*pow(DeltaE-IPD2,2.5)/sqrt(DeltaE-IPD2);
-        sigma_MPI_3=sigma1*sigma1*sigma1/2.0/LASERFREQ/LASERFREQ/pow(planck*LASERFREQ,3.0);
-        k_MPI_z3_z4[i][j][1]=sigma_MPI_3*I_cu;//*prob*beta_pi(Te,mu,DeltaE);
-      }
-      //RAD RECOMB
-      if(DeltaE-IPD3>0)
-        k_MPI_z4_z3[i][j][0]=v_e*k_RR_fact1*4.0*k_RR_fact2*pow((DeltaE-IPD3)*J2eV/STATES_z4[j][2],1.5)*expint*exp(a);
+//       //MPI 2 PHOTONS
+//       if(2.0*planck*LASERFREQ >= DeltaE-IPD3 && DeltaE-IPD3>0.0)
+//       {
+//         sigma1=sigma_tmp*pow(DeltaE,2.5)/sqrt(DeltaE-IPD3);
+//         sigma_MPI_2=sigma1*sigma1/LASERFREQ/pow(planck*LASERFREQ,2.0);
+//         k_MPI_z3_z4[i][j][0]=sigma_MPI_2*I_sq;
+//       }
+//       //MPI 3 PHOTONS
+//       if(3.0*planck*LASERFREQ >=DeltaE-IPD3 && DeltaE-IPD3 >0.0)
+//       {
+//         sigma1=sigma_tmp*pow(DeltaE-IPD2,2.5)/sqrt(DeltaE-IPD2);
+//         sigma_MPI_3=sigma1*sigma1*sigma1/2.0/LASERFREQ/LASERFREQ/pow(planck*LASERFREQ,3.0);
+//         k_MPI_z3_z4[i][j][1]=sigma_MPI_3*I_cu;//*prob*beta_pi(Te,mu,DeltaE);
+//       }
+//       //RAD RECOMB
+//       if(DeltaE-IPD3>0)
+//         k_MPI_z4_z3[i][j][0]=v_e*k_RR_fact1*4.0*k_RR_fact2*pow((DeltaE-IPD3)*J2eV/STATES_z4[j][2],1.5)*expint*exp(a);
       
-//3-body recomb
-      //if(DeltaE>0.0)
+// //3-body recomb
+//       //if(DeltaE>0.0)
       
-      kronecker=0;
-      tmp0=pow(2.0,(1.0-kronecker))*STATES_z4[j][3]/STATES_z3[i][3];
-      tmp1=3.0*(1.0-kronecker)/2.0;
-      tmp2=exp(-DeltaE/(BOLTZMAN*Te));
-      k_EI_z4_z3[i][j]=k_EI_z3_z4[i][j]/tmp0/pow(two_pi_me_kT_hsq,tmp1)/tmp2;
+//       kronecker=0;
+//       tmp0=pow(2.0,(1.0-kronecker))*STATES_z4[j][3]/STATES_z3[i][3];
+//       tmp1=3.0*(1.0-kronecker)/2.0;
+//       tmp2=exp(-DeltaE/(BOLTZMAN*Te));
+//       k_EI_z4_z3[i][j]=k_EI_z3_z4[i][j]/tmp0/pow(two_pi_me_kT_hsq,tmp1)/tmp2;
       
-    }
-  }
-  if(fail==1) return -1; 
+//     }
+//   }
+//   if(fail==1) return -1; 
+
+
+  // printf("MYID:%d,geschaftt!\n",myid);
     return 0;
 
-
-
- 
-    return 0;
 }
 
 // ***************************************************************************************
 double ExpInt(double x)
 {
-if(x>500)
- return -1;
+ if(x>500)
+ {
+      return 0; //sonst underflow?
+ }  
+
 /*
    if(x<1E-300)
      return 6.947249040044042E2; //Limiting case
    else if(x>87.5)
      return 0;
 */
-   return gsl_sf_expint_E1(x);
+  
+   // gsl_sf_result result;
+   // int retval=gsl_sf_expint_E1_e(x, &result);
+   // printf("retval:%d, x:%.4e result:%.4e\n",retval,x,result.val);
+   // return result.val;
    
+   return gsl_sf_expint_E1(x);
 
    //Approx by Swamee and Ohija
    double A=log((0.56146/x+0.65)*(1+x));

@@ -237,10 +237,11 @@ int main(int argc, char **argv)
 #ifdef TMM
   tmm_init();
 #endif
+
 #ifdef COLRAD
   colrad_init();
 #endif
-//#ifdef NRB
+//#ifdef NRB //ERFOLGT AN ANDERER STELLE
 //  init_nrb();
 //#endif
 
