@@ -1,6 +1,8 @@
 #include "imd.h"
 
-#define OMP
+//#define OMP
+//#define LAPACK
+
 #ifdef OMP
 #include <omp.h>
 #endif
@@ -59,11 +61,11 @@ void do_colrad(double dt)
         if(l1[i][j][k].natoms < fd_min_atoms) continue;
         y=l1[i][j][k].y;
 
-        Te0=4e3; //l1[i][j][k].temp*11604.5;
+        Te0=l1[i][j][k].temp*11604.5;
         Ti0=l1[i][j][k].md_temp*11604.5;        
-        rho0=l1[i][j][k].dens/1e10;
+        rho0=l1[i][j][k].dens;
         ni0=rho0/AMU/26.9185; //1e28; //1e26/m^3 entspricht etwa 1e-4/Angtrom^3        
-        ne0=l1[i][j][k].ne/1e10;
+        ne0=l1[i][j][k].ne;
         
         Ith(y,0)=Te0;
         Ith(y,1)=Ti0;
@@ -1250,7 +1252,13 @@ if(DeltaE-IPD0 >0)
 
   double cvinv=1.0/(1.5*BOLTZMAN*ne);
   double P_E_TOTAL=P_E_EI+P_E_EE+P_E_MPI2+P_E_MPI3+P_E_RAD_RECOMB;
-
+  printf("myid:%d, PEI:%.4e, PEE:%.4e,MPI2:%.4e, MPI3:%.4e, RADREC:%.4e\n",
+          myid,
+          P_E_EI, 
+          P_E_EE, 
+          P_E_MPI2, 
+          P_E_MPI3, 
+          P_E_RAD_RECOMB);
   Ith(colrad_ydot,0) =  cvinv*P_E_TOTAL;
   return 0;
 }
@@ -1437,6 +1445,7 @@ if(expint==-1)
           I_1=exp(-a)/a - expint;
           I_2=I_1*log(5.0/4.0*beta_i)+expint/a-G2;
           k_EE_z0_z0[i][j]=v_e*four_pi_a0_sq*(kronecker*alpha_e*a*a*I_1 +  (1.0-kronecker)*alpha_i*E_ion_H_div_kTe_sq*I_2);
+
       }
     }
 
