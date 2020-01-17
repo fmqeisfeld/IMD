@@ -76,6 +76,8 @@ void calc_ttm()
       do_DIFF(tau_DIFF);
       do_FILLMESH();
       do_colrad(tau_DIFF * 10.18 * 1.0e-15);
+if(myid==0)
+printf("isub:%d\n",i);
       ttm_fill_ghost_layers();            
     }
 

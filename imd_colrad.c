@@ -1,7 +1,8 @@
 #include "imd.h"
 
 //#define OMP
-//#define LAPACK
+#define LAPACK
+//#define MULTIPHOTON
 
 #ifdef OMP
 #include <omp.h>
@@ -73,9 +74,12 @@ void do_colrad(double dt)
 
         flag = CVodeReInit(cvode_mem, 0.0, y);              
 
-printf("myid:%d, running cvode i:%d,j:%d,k:%d,Te0:%.4e,ne0:%.4e,dt:%.4e\n",myid,i,j,k,Te0,ne0,dt);
+// printf("myid:%d, running cvode i:%d,j:%d,k:%d,Te0:%.4e,ne0:%.4e,dt:%.4e\n",myid,i,j,k,Te0,ne0,dt);
 
         flag = CVode(cvode_mem, tout, y, &t, CV_NORMAL);
+
+// printf("myid:%d, after i:%d,j:%d,k:%d,Tefin:%.4e,nefin:%.4e\n",myid,i,j,k, Ith(y,0), Ith(y,2));
+
         //REASSIGN NEW TE AND NE
         l1[i][j][k].temp=Ith(y,0)/11604.5;
         l1[i][j][k].ne=Ith(y,2);
@@ -158,7 +162,9 @@ void colrad_init(void)
      	for(i=0;i<neq;i++)
      	{
        	  Ith(abstol,i) = 10;//fmax(Ith(colrad_y,i)*1e-6,10.0);
-     	}		
+
+     	}
+      Ith(abstol,0)=2.0; //Temp
 
 	// *************************  //
 	// *   SOLVER & CVODE INIT *
@@ -974,7 +980,7 @@ static int colrad_ydot(double t, N_Vector y, N_Vector colrad_ydot, void *user_da
       // MPI
       //////////
       escape_factor=1.0;
-#ifdef MPI
+#ifdef MULTIPHOTON
 #ifdef STARK
       if(k_MPI_z1_z0[i][j][0]>0 && STATES_z1[j][5]>STATES_z0[i][5])
       {
@@ -1051,7 +1057,7 @@ if(DeltaE-IPD0 >0)
 //       // MPI
 //       //////////
 //       escape_factor=1.0;
-// #ifdef MPI
+// #ifdef MULTIPHOTON
 // #ifdef STARK
 //       if(k_MPI_z2_z1[i][j][0]>0 && STATES_z2[j][5]>STATES_z1[i][5])
 //       {
@@ -1127,7 +1133,7 @@ if(DeltaE-IPD0 >0)
 //       // MPI
 //       //////////
 //       escape_factor=1.0;
-// #ifdef MPI
+// #ifdef MULTIPHOTON
 // #ifdef STARK
 //       if(k_MPI_z3_z2[i][j][0]>0 && STATES_z3[j][5]>STATES_z2[i][5])
 //       {
@@ -1204,7 +1210,7 @@ if(DeltaE-IPD0 >0)
 //       // MPI
 //       //////////
 //       escape_factor=1.0;
-// #ifdef MPI
+// #ifdef MULTIPHOTON
 // #ifdef STARK
 //       if(k_MPI_z4_z3[i][j][0]>0 && STATES_z4[j][5]>STATES_z3[i][5])
 //       {
@@ -1252,13 +1258,13 @@ if(DeltaE-IPD0 >0)
 
   double cvinv=1.0/(1.5*BOLTZMAN*ne);
   double P_E_TOTAL=P_E_EI+P_E_EE+P_E_MPI2+P_E_MPI3+P_E_RAD_RECOMB;
-  printf("myid:%d, PEI:%.4e, PEE:%.4e,MPI2:%.4e, MPI3:%.4e, RADREC:%.4e\n",
-          myid,
-          P_E_EI, 
-          P_E_EE, 
-          P_E_MPI2, 
-          P_E_MPI3, 
-          P_E_RAD_RECOMB);
+  // printf("myid:%d, PEI:%.4e, PEE:%.4e,MPI2:%.4e, MPI3:%.4e, RADREC:%.4e\n",
+  //         myid,
+  //         P_E_EI, 
+  //         P_E_EE, 
+  //         P_E_MPI2, 
+  //         P_E_MPI3, 
+  //         P_E_RAD_RECOMB);
   Ith(colrad_ydot,0) =  cvinv*P_E_TOTAL;
   return 0;
 }
@@ -1739,7 +1745,8 @@ if(expint==-1)
       I_1=exp(-a)/a - expint;
       I_2=I_1*log(5.0/4.0*beta_i)+expint/a-G2;
       k_EI_z0_z1[i][j]=v_e*four_pi_a0_sq*alpha_i*E_ion_H_div_kTe_sq*I_2;
-
+// if(myid==1)      
+//   printf("keifwd:%.4e\n",k_EI_z0_z1[i][j]);
       //MPI 2 PHOTONS
       if(2.0*planck*LASERFREQ >= DeltaE-IPD0 && DeltaE-IPD0 > 0.0 )
       {
@@ -1764,6 +1771,13 @@ if(expint==-1)
       tmp1=3.0*(1.0-kronecker)/2.0;
       tmp2=exp(-DeltaE/(BOLTZMAN*Te));
       k_EI_z1_z0[i][j]=k_EI_z0_z1[i][j]/tmp0/pow(two_pi_me_kT_hsq,tmp1)/tmp2;
+
+      if(k_EI_z0_z1[i][j]==0)
+        k_EI_z1_z0[i][j]=0; 
+
+// if(myid==1)      
+//   printf("keirev:%.4e,keifwd:%.4e,tmp0:%.4e,tmp2:%.4e\n",k_EI_z1_z0[i][j],k_EI_z0_z1[i][j],tmp0,tmp2);
+
     }
   }
   if(fail==1) return -1;
