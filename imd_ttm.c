@@ -1,6 +1,6 @@
 //TODO: 
 // TTM-READ UPDATEN FUER FDTD-NUTZUNG
-// 
+// ADVECTION FUER COLRAD: ne und alle besetzungsdichten! in do_ADV und comm_flux!
 
 //#define RHOMIN 51
 
@@ -27,12 +27,6 @@
 
 #define TTMOUTBUFLEN 400  //Wird bei ttm-output im MPIIO-Modus gebraucht. Entspricht max. Zeilenlänge
 // ******************************************************************************/
-/* Macro to allow electr. heat capacity to vary
- * with electronic temperature (C_e=gamma*T_e) */
-// EIN RELIKT AUS DER VERGANGENHEIT
-// gut fuer den festkörper aber unbrauchbar fuer schmelze & gas
-// Hier ist sogar die Freie-Elektronen-Näherung besser (Fermi-integral berechnen)
-// Hierfür gibt es weiter unten im Code die entsprechende wide-range routine
 #define FD_C ((fd_c==0)?(fd_gamma*node.temp):(fd_c))
 
 #define node  l1[i][j][k]  //bequemer, muss oft geschrieben werden
@@ -65,6 +59,10 @@ void calc_ttm()
   update_fd();
   // do_ADV(1.0);
   do_cell_activation();
+#ifdef COLRAD
+  do_colrad(timestep*10.18*1.0e-15);
+#endif
+
   do_FILLMESH();
   ttm_fill_ghost_layers();  
 
@@ -75,9 +73,8 @@ void calc_ttm()
       tmm_time += tau_DIFF * 10.18 * 1.0e-15; //in sek
       do_DIFF(tau_DIFF);
       do_FILLMESH();
-      do_colrad(tau_DIFF * 10.18 * 1.0e-15);
-if(myid==0)
-printf("isub:%d\n",i);
+      // do_colrad(tau_DIFF * 10.18 * 1.0e-15); //dauert viiiiel zu lange
+
       ttm_fill_ghost_layers();            
     }
 
@@ -504,9 +501,9 @@ node.md_temp /= 3.0 * node.natoms;
           }
         }
 #endif
-        // ******************************************************************
-        // *  INITIALIZE ELECTRON TEMPERATURE AND CHECK EOS PLAUSIBILITY
-        // *****************************************************************
+        // ******************************************************************************
+        // *  ONLY ONCE: INITIALIZE ELECTRON TEMPERATURE AND CHECK EOS PLAUSIBILITY
+        // *****************************************************************************
         if (steps < 1)
         {
           node.natoms_old = node2.natoms_old = node.natoms;
@@ -584,6 +581,7 @@ void do_FILLMESH(void)
           //////////////////////////////////////////////////////////////          
           //           IONISATIONSGRAD UND ELEK.DICHTE
           ////////////////////////////////////////////////////////////// 
+#ifndef COLRAD          
           node.Z=MeanCharge(node.temp*11604.5, node.dens, atomic_charge, atomic_weight,i,j,k);
 
           // node.Z=QfromT(node.temp,node.dens);
@@ -597,7 +595,7 @@ void do_FILLMESH(void)
 #endif
           node.ne = node.Z * node.dens / (atomic_weight * AMU); //Assumption: Quasi-neutrality condition
           node2.ne = node.ne;
-
+#endif
           //////////////////////////////////////////////////////////////          
           //                      Wärmekapazität
           //////////////////////////////////////////////////////////////      
@@ -635,8 +633,8 @@ void do_FILLMESH(void)
           if (isnan(node.fd_k) != 0 || node.fd_k < 0) //&& steps>0 || node.fd_k<0 && steps>0)
           {
             char errstr[255];
-            sprintf(errstr,"proc:%d,i:%d,j:%d,k:%d,steps:%d, atoms:%d,fd_k is NaN,Te=%.4e,dens=%.4e,Ti=%.4e\n", 
-              myid, i, j, k, steps, node.natoms, node.temp, node.dens,node.md_temp);
+            sprintf(errstr,"proc:%d,i:%d,j:%d,k:%d,steps:%d, atoms:%d,fd_k is NaN,Te=%.4e,dens=%.4e,Ti=%.4e,Z=%.4e,ne=%.4e\n", 
+              myid, i, j, k, steps, node.natoms, node.temp, node.dens,node.md_temp,node.Z,node.ne);
             error(errstr);
           }
 #endif
@@ -682,11 +680,6 @@ void do_FILLMESH(void)
           node.Ce = 0.0;
           //node.temp=0.0;  //nicht nullen, sonst funktioniert advection nicht
         }
-#ifdef COLRAD
-        if(steps > 0) continue;
-        colrad_Saha_init(i, j, k);
-#endif
-
 
       } // for k ....
     }   // for j

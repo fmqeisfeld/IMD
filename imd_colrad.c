@@ -2,7 +2,7 @@
 
 //#define OMP
 #define LAPACK
-//#define MULTIPHOTON
+#define MULTIPHOTON
 
 #ifdef OMP
 #include <omp.h>
@@ -24,10 +24,15 @@ const double planck=6.62607004E-34; // J/s
 const double bohr_radius=0.52917721067E-10; // m
 const int MAXLINE = 255;
 const double  pi=3.141592653589793;
+
+const double colrad_tequi=1e-15;//TEST// 1e-12; //bei initial equi ohne Temperatur-variation erst einmal 
+                                //die Saha-besetzungsdichten equilibrieren
+
 //const double  LIGHTSPEED=2.997925458e8; // m/s
 double  HBAR;
 double  LASERFREQ;
 
+const int user_num_threads=2; //
 int num_threads;
 //const double  EMASS=9.10938356e-31;     // kg
 //const double  ECONST=8.854187817e-12;   // As/Vm
@@ -38,6 +43,7 @@ int num_threads;
 typedef struct {
   realtype It; //Intesity
   realtype IPD0,IPD1,IPD2,IPD3;
+  bool initial_equi;
 } *colrad_UserData;
 colrad_UserData  cdata;
 
@@ -53,6 +59,9 @@ void do_colrad(double dt)
   N_Vector y;
   double Te0,Ti0,rho0,ni0,ne0;
 
+  if(myid==0 && cdata->initial_equi)
+    printf("COLRAD performs initial equilibration for t=%.4e s...This may take some time.\n",colrad_tequi);
+
   for(i=1;i<local_fd_dim.x-1;i++)
   {
     for(j=1;j<local_fd_dim.y-1;j++)
@@ -65,24 +74,57 @@ void do_colrad(double dt)
         Te0=l1[i][j][k].temp*11604.5;
         Ti0=l1[i][j][k].md_temp*11604.5;        
         rho0=l1[i][j][k].dens;
-        ni0=rho0/AMU/26.9185; //1e28; //1e26/m^3 entspricht etwa 1e-4/Angtrom^3        
-        ne0=l1[i][j][k].ne;
+        ni0=rho0/AMU/26.9185; //1e28; //1e26/m^3 entspricht etwa 1e-4/Angtrom^3   
+
+        if(cdata->initial_equi==true)     
+        {
+          double Zmean=MeanCharge(Te0, rho0, atomic_charge, atomic_weight,i,j,k);          
+          ne0= Zmean* l1[i][j][k].dens / (atomic_weight * AMU);          
+          l1[i][j][k].ne=ne0; //Saha init greift darauf zu
+          colrad_Saha_init(i, j, k);          
+        }
+        else //NORMAL
+        {
+          ne0=l1[i][j][k].ne;
+        }
+
         
         Ith(y,0)=Te0;
         Ith(y,1)=Ti0;
         Ith(y,2)=ne0;
 
-        flag = CVodeReInit(cvode_mem, 0.0, y);              
+        flag = CVodeReInit(cvode_mem, 0.0, y);                    
 
-// printf("myid:%d, running cvode i:%d,j:%d,k:%d,Te0:%.4e,ne0:%.4e,dt:%.4e\n",myid,i,j,k,Te0,ne0,dt);
+//printf("myid:%d, running cvode i:%d,j:%d,k:%d,Te0:%.4e,ne0:%.4e,dt:%.4e\n",myid,i,j,k,Te0,ne0,dt);
 
-        flag = CVode(cvode_mem, tout, y, &t, CV_NORMAL);
+        
+        if(cdata->initial_equi==true)
+        {
+//          printf("myid:%d, RUNNNING INITIAL EQUI\n",myid);
+          flag = CVode(cvode_mem, colrad_tequi, y, &t, CV_NORMAL);          
+          int i_global,j_global,k_global;
 
-// printf("myid:%d, after i:%d,j:%d,k:%d,Tefin:%.4e,nefin:%.4e\n",myid,i,j,k, Ith(y,0), Ith(y,2));
+          i_global = ((i - 1) + my_coord.x * (local_fd_dim.x - 2));
+          j_global = ((j - 1) + my_coord.y * (local_fd_dim.y - 2));
+          k_global =  ((k-1) + my_coord.z*(local_fd_dim.z-2));          
+          printf("COLRAD Cell %d,%d,%d was equilibrated\n",i_global,j_global,k_global);
+        }
+        else //NORMAL
+        {
+          flag = CVode(cvode_mem, tout, y, &t, CV_NORMAL);
+        }
+//printf("myid:%d, after i:%d,j:%d,k:%d,Tefin:%.4e,nefin:%.4e\n",myid,i,j,k, Ith(y,0), Ith(y,2));
 
         //REASSIGN NEW TE AND NE
         l1[i][j][k].temp=Ith(y,0)/11604.5;
         l1[i][j][k].ne=Ith(y,2);
+        l1[i][j][k].Z=l1[i][j][k].ne/ni0;
+
+        l2[i][j][k].temp=l1[i][j][k].temp; //auch in l2 speichern! wichtig!
+        l2[i][j][k].ne=l1[i][j][k].ne;
+        l2[i][j][k].Z=l1[i][j][k].Z;
+
+//printf("myid:%d,COLRAD,i:%d,ne:%.4e,Z:%.4e,temp:%.4e\n", myid,i,l1[i][j][k].ne, l1[i][j][k].Z,l1[i][j][k].temp);
 
 if(l1[i][j][k].temp <0 || isnan(l1[i][j][k].temp) !=0 )        
 {
@@ -100,7 +142,10 @@ if(l1[i][j][k].ne <0 || isnan(l1[i][j][k].ne) !=0 )
       }
     } 
   }
-
+ if(cdata->initial_equi==true)
+ {
+  cdata->initial_equi=false;
+ }
   
 }
 
@@ -117,8 +162,11 @@ void colrad_init(void)
 	int i,j,k;
 	
 #ifdef OMP
-    num_threads = omp_get_max_threads();
-    printf("myid:%d, omp threads:%d\n",myid,num_threads);
+   if(user_num_threads==0) //Also nicht vom user festgelegt
+      num_threads = omp_get_max_threads();
+    else
+      num_threads=user_num_threads;
+    //printf("myid:%d, omp threads:%d\n",myid,num_threads);
 #endif 
 
 	if(myid==0)
@@ -133,6 +181,7 @@ void colrad_init(void)
 	colrad_read_states();
 
   cdata=(colrad_UserData) malloc(sizeof *cdata); 
+  cdata->initial_equi=true;
 
 	total_species=z0_len+z1_len;
 	neq=total_species+3;
@@ -200,7 +249,7 @@ void colrad_init(void)
 	//CVodeSetNonlinConvCoef(cvode_mem,0.01); //Default=0.1
 	//Max Steps muss sehr hoch sein bei großen steps,
 	//sonst beschwert sich newton
-	CVodeSetMaxNumSteps(cvode_mem,500); //Default=500
+	CVodeSetMaxNumSteps(cvode_mem,1500); //Default=500
 	//CVodeSetInitStep(cvode_mem,1e-20);  //ACHTUNG:Wenn zu klein --> BS
 	//CVodeSetEpsLin(cvode_mem,0.01); //Default=0.05;
 
@@ -218,7 +267,7 @@ void colrad_init(void)
 
 
 void colrad_Saha_init(int i,int j,int k)
-{
+{  
   // int i,j,k;
   // for(i=1;i<local_fd_dim.x-1;i++)
   // {
@@ -605,6 +654,7 @@ void do_Saha(double Te,double totalc,double ne,N_Vector y) //Bei init
   n5=r54*n4;
   Zav=(1*n1+4*n2+9*n3+16*n4+25*n5)/(1*n1+2*n2+3*n3+4*n4+5*n5);
 
+
   /*
   printf("********************************************************************************************************************** \n");
   printf(" Initial distribution of concentration according to generalized Saha-Equation\n");
@@ -662,6 +712,8 @@ static int colrad_ydot(double t, N_Vector y, N_Vector colrad_ydot, void *user_da
 
   double It=data->It;
   It=0.0;
+
+  bool initial_equi=data->initial_equi; //falls ja, wird temperatur nicht variiert.
 
   double Eexc;
 
@@ -1265,7 +1317,16 @@ if(DeltaE-IPD0 >0)
   //         P_E_MPI2, 
   //         P_E_MPI3, 
   //         P_E_RAD_RECOMB);
-  Ith(colrad_ydot,0) =  cvinv*P_E_TOTAL;
+
+  if(initial_equi==false)
+  {
+    Ith(colrad_ydot,0) =  cvinv*P_E_TOTAL;
+  }
+  else
+  {
+    Ith(colrad_ydot,0)=0.0;
+  }
+
   return 0;
 }
 
@@ -1318,8 +1379,8 @@ int colrad_GetCoeffs(N_Vector y,double It,void *user_data)
   double sigma1;
   //const. zur berechnung von sigma1
   double sigma_tmp=64.0*pow(pi,4.0)*pow(ECHARGE,10.0)*EMASS/3.0/sqrt(3.0)/pow(4.0*pi*ECONST,5.0)/pow(planck,6.0)/LIGHTSPEED/pow(LASERFREQ,3.0)/pow(13.6*eV2J,2.0);
-  double I_sq=I*I; //for 2-photon-ioniz.
-  double I_cu=I_sq*I; // for 3-photon-ioniz.
+  double I_sq=It*It; //for 2-photon-ioniz.
+  double I_cu=I_sq*It; // for 3-photon-ioniz.
   int fail=0;
 
   //pre-zero k_EE's
@@ -1763,18 +1824,34 @@ if(expint==-1)
       }
       //RAD RECOMB
       if(DeltaE-IPD0>0)
-        k_MPI_z1_z0[i][j][0]=v_e*k_RR_fact1*1.0*k_RR_fact2*pow((DeltaE-IPD0)*J2eV/STATES_z1[j][2],1.5)*expint*exp(a);
-
+      {
+        if(expint > 0 )
+        {
+          k_MPI_z1_z0[i][j][0]=v_e*k_RR_fact1*1.0*k_RR_fact2*pow((DeltaE-IPD0)*J2eV/STATES_z1[j][2],1.5)*expint*exp(a);
+        }
+        else 
+        {
+          k_MPI_z1_z0[i][j][0]=0.0; //exp(a) kann +Inf werden--> unsinnige rate coeff.. wenn einer der faktoren=0 --> rest egal
+        }
+      }
 //3-body recomb
       kronecker=0;
       tmp0=pow(2.0,(1.0-kronecker))*STATES_z1[j][3]/STATES_z0[i][3];
       tmp1=3.0*(1.0-kronecker)/2.0;
       tmp2=exp(-DeltaE/(BOLTZMAN*Te));
-      k_EI_z1_z0[i][j]=k_EI_z0_z1[i][j]/tmp0/pow(two_pi_me_kT_hsq,tmp1)/tmp2;
-
-      if(k_EI_z0_z1[i][j]==0)
+      if(k_EI_z0_z1[i][j]==0) //wohl wichtig
         k_EI_z1_z0[i][j]=0; 
+      else       
+        k_EI_z1_z0[i][j]=k_EI_z0_z1[i][j]/tmp0/pow(two_pi_me_kT_hsq,tmp1)/tmp2;
 
+//DEBUG FOR k_radrecomb
+// if(myid==1)      
+//   printf("kmpi:%.4e,krev:%.4e,Isq:%.4e,sigma:%.4e,krrfact1:%.4e,fact2:%.4e,expint:%.4e,expa:%.4e,a:%.4e\n",k_MPI_z0_z1[i][j][0], k_MPI_z1_z0[i][j][0],
+//     I_sq,sigma_MPI_2,
+//     k_RR_fact1,k_RR_fact2,expint,exp(a),a);
+    
+
+//debug for 3-body-recomb
 // if(myid==1)      
 //   printf("keirev:%.4e,keifwd:%.4e,tmp0:%.4e,tmp2:%.4e\n",k_EI_z1_z0[i][j],k_EI_z0_z1[i][j],tmp0,tmp2);
 
