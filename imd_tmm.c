@@ -32,9 +32,7 @@ double Runge5(double delta, double complex kl, double complex epsl, double compl
   const double errval = 1e-5;
   double k1, k3, k4, k5;
 
-//TESTCASE  : fd-zelle nicht aufintegrieren zwecks vergleichbarkeit mit fdtd
-//result=dx*EE(cur_xpos, delta, kl, epsl, Bplus, Bminus);
-//return result;
+
   while(cur_xpos < 1 && dx > 1e-5) {
 
         k1 = dx / 3.0 * EE(cur_xpos, delta, kl, epsl, Bplus, Bminus);

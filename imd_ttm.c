@@ -741,6 +741,17 @@ void do_COMMFLUX(void)
         MPI_Sendrecv(&l1[1][j][k].U, 1, MPI_DOUBLE, nbeast, 5402,                  //-x
                      &l1[local_fd_dim.x - 1][j][k].U, 1, MPI_DOUBLE, nbwest, 5402, //+x
                      cpugrid, &stati[1]);
+#ifdef COLRAD
+        //selbes fuer colrad
+        MPI_Sendrecv(l1[local_fd_dim.x - 2][j][k].y, colrad_neq, MPI_DOUBLE, nbwest, 4302, //+x
+                     l1[0][j][k].y, colrad_neq, MPI_DOUBLE, nbeast, 4302,                  //-x
+                     cpugrid, &stati[0]);
+
+        MPI_Sendrecv(l1[1][j][k].y, colrad_neq, MPI_DOUBLE, nbeast, 4402,                  //-x
+                     l1[local_fd_dim.x - 1][j][k].y, colrad_neq, MPI_DOUBLE, nbwest, 4402, //+x
+                     cpugrid, &stati[1]);     
+
+#endif
       }
       else if (my_coord.x == 0) //SURFACE:only comm. with nbwest
       {
@@ -752,7 +763,13 @@ void do_COMMFLUX(void)
         MPI_Sendrecv(&l1[local_fd_dim.x - 2][j][k].U, 1, MPI_DOUBLE, nbwest, 5302, //+x
                      &l1[local_fd_dim.x - 1][j][k].U, 1, MPI_DOUBLE, nbwest, 5402, //+x
                      cpugrid, &stati[1]);
+#ifdef COLRAD
+        MPI_Sendrecv(l1[local_fd_dim.x - 2][j][k].y, colrad_neq, MPI_DOUBLE, nbwest, 4302, //+x
+                     l1[local_fd_dim.x - 1][j][k].y, colrad_neq, MPI_DOUBLE, nbwest, 4402, //+x
+                     cpugrid, &stati[1]);        
+#endif        
       }
+
       else if (my_coord.x == cpu_dim.x - 1) //SURFACE:only comm with east
       {
         //flux
@@ -763,6 +780,11 @@ void do_COMMFLUX(void)
         MPI_Sendrecv(&l1[1][j][k].U, 1, MPI_DOUBLE, nbeast, 5402,         //-x
                      &l1[0][j][k].U, 1, MPI_DOUBLE, nbeast, 5302,         //-x
                      cpugrid, &stati[0]);
+#ifdef COLRAD
+        MPI_Sendrecv(l1[1][j][k].y, colrad_neq, MPI_DOUBLE, nbeast, 4402,         //-x
+                     l1[0][j][k].y, colrad_neq, MPI_DOUBLE, nbeast, 4302,         //-x
+                     cpugrid, &stati[0]);        
+#endif        
       }
     }
   }
@@ -793,6 +815,15 @@ void do_COMMFLUX(void)
         MPI_Sendrecv(&l1[i][1][k].U, 1, MPI_DOUBLE, nbnorth, 740,                  //-y
                      &l1[i][local_fd_dim.y - 1][k].U, 1, MPI_DOUBLE, nbsouth, 740, //+y
                      cpugrid, &stati[3]);
+#ifdef COLRAD
+        MPI_Sendrecv(l1[i][local_fd_dim.y - 2][k].y, colrad_neq, MPI_DOUBLE, nbsouth, 752,  //+y
+                     l1[i][0][k].y, colrad_neq, MPI_DOUBLE, nbnorth, 752,                  //-y
+                     cpugrid, &stati[2]);
+
+        MPI_Sendrecv(l1[i][1][k].y, colrad_neq, MPI_DOUBLE, nbnorth, 762,                  //-y
+                     l1[i][local_fd_dim.y - 1][k].y, colrad_neq, MPI_DOUBLE, nbsouth, 762, //+y
+                     cpugrid, &stati[3]);        
+#endif        
       }
       else //no pbc and surface
       {
@@ -805,6 +836,12 @@ void do_COMMFLUX(void)
           MPI_Sendrecv(&l1[i][local_fd_dim.y - 2][k].U, 1, MPI_DOUBLE, nbsouth, 730,  //+y
                        &l1[i][local_fd_dim.y - 1][k].U, 1, MPI_DOUBLE, nbsouth, 740,  //+y
                        cpugrid, &stati[3]);
+#ifdef COLRAD
+          MPI_Sendrecv(l1[i][local_fd_dim.y - 2][k].y, colrad_neq, MPI_DOUBLE, nbsouth, 752,  //+y
+                       l1[i][local_fd_dim.y - 1][k].y, colrad_neq, MPI_DOUBLE, nbsouth, 762,  //+y
+                       cpugrid, &stati[3]);          
+#endif
+
         }
         else if (my_coord.y == cpu_dim.y - 1 && my_coord.y != 0) // only communicate with -y
         {
@@ -815,6 +852,11 @@ void do_COMMFLUX(void)
           MPI_Sendrecv(&l1[i][1][k].U, 1, MPI_DOUBLE, nbnorth, 740,      //-y
                        &l1[i][0][k].U, 1, MPI_DOUBLE, nbnorth, 730,       //-y
                        cpugrid, &stati[2]);
+#ifdef COLRAD
+          MPI_Sendrecv(l1[i][1][k].y, colrad_neq, MPI_DOUBLE, nbnorth, 762,      //-y
+                       l1[i][0][k].y, colrad_neq, MPI_DOUBLE, nbnorth, 752,       //-y
+                       cpugrid, &stati[2]);          
+#endif          
         }
       }
     }
@@ -1394,6 +1436,21 @@ void do_ADV(double tau)
 #endif
       ) / Nnew;
 
+#ifdef COLRAD
+          int l=0;
+          for(l=0;l<colrad_neq;l++)
+          {
+            Ith(node2.y,l) = Ith(node.y,l) * Nold / Nnew+ tau*(
+                                      // +x/-x
+            + (double) node.flux[0] * Ith(l1[i + 1][j][k].y,l) //erhalten von +x,y
+            - (double) l1[i + 1][j][k].flux[1] * Ith(node.y,l) //nach +x,y abgeflossen
+
+            + (double) node.flux[1] * Ith(l1[i - 1][j][k].y,l) //erhalten von -x,y
+            - (double) l1[i - 1][j][k].flux[0] * Ith(node.y,l) //nach -x,y abgeflossen
+          // +y/-y
+          ) / Nnew;
+        }
+#endif        
 
           //Temp updaten wenn zelle aktiviert
           if(node.natoms >= fd_min_atoms)
@@ -1432,6 +1489,13 @@ void do_ADV(double tau)
       {
         node2.U = 0.0;
         node2.temp = 0.0;
+#ifdef COLRAD
+        int l=0;
+        for(l=0;l<colrad_neq;l++)
+        {
+          Ith(node2.y,l)=0.0;
+        }
+#endif      
       }
     } //for j
   } //for i

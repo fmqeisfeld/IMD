@@ -352,6 +352,7 @@ EXTERN  real ezl_2_old INIT(0.0);; //ez @ n-1 from left @ pos 0,1 and 2
 // * COLRAD STUFF
 // ******************
 EXTERN int total_species;
+EXTERN int colrad_neq INIT(0.0); //nr of equations -> length of y-vector
 EXTERN real totalc;
 EXTERN int neq;
 EXTERN int z0_len,z1_len,z2_len,z3_len,z4_len,z5_len;

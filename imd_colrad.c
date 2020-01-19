@@ -3,6 +3,10 @@
 //#define OMP
 #define LAPACK
 #define MULTIPHOTON
+//#define SPONT  //<-- spontante emission, Kaum effekt 
+//#define STARK  //<-- reabsorption via stark effect
+//#define DOIPD    //<--Dazu muss ich initial saha distrib erstmal anpassen
+
 
 #ifdef OMP
 #include <omp.h>
@@ -11,8 +15,8 @@
 
 // nur zum test
 //#define MAXLINE 255
-#define Ith(v,i)    NV_Ith_S(v,i)       /* Ith numbers components 1..NEQ */
-#define IJth(B,i,j) SM_ELEMENT_D(B,i,j)  //DENSE_ELEM(A,i,j) /* IJth numbers rows,cols 1..NEQ */
+//#define Ith(v,i)    NV_Ith_S(v,i)       /* Ith numbers components 1..NEQ */
+//#define IJth(B,i,j) SM_ELEMENT_D(B,i,j)  //DENSE_ELEM(A,i,j) /* IJth numbers rows,cols 1..NEQ */
 
 // *********************************************************
 // PHYSICAL CONSTANTS
@@ -113,7 +117,9 @@ void do_colrad(double dt)
         {
           flag = CVode(cvode_mem, tout, y, &t, CV_NORMAL);
         }
+
 //printf("myid:%d, after i:%d,j:%d,k:%d,Tefin:%.4e,nefin:%.4e\n",myid,i,j,k, Ith(y,0), Ith(y,2));
+printf("myid:%d, i:%d, Delta(Te):%.4e,Zmean:%.4e\n",myid,i, Ith(y,0)-Te0,Ith(y,2)/ni0);      
 
         //REASSIGN NEW TE AND NE
         l1[i][j][k].temp=Ith(y,0)/11604.5;
@@ -692,11 +698,6 @@ void do_Saha(double Te,double totalc,double ne,N_Vector y) //Bei init
 static int colrad_ydot(double t, N_Vector y, N_Vector colrad_ydot, void *user_data)
 {
 
-//#define SPONT  //<--Kaum effek
-//#define MPI
-//#define STARK  //
-//#define DOIPD    //<--Dazu muss ich initial saha distrib erstmal anpassen
-
 /*
   double t0=1e-12;
   double I0=1e17;
@@ -711,7 +712,7 @@ static int colrad_ydot(double t, N_Vector y, N_Vector colrad_ydot, void *user_da
   data = (colrad_UserData) user_data;
 
   double It=data->It;
-  It=0.0;
+  It=0; //It ist LOKALE Intesität!
 
   bool initial_equi=data->initial_equi; //falls ja, wird temperatur nicht variiert.
 
@@ -767,7 +768,7 @@ static int colrad_ydot(double t, N_Vector y, N_Vector colrad_ydot, void *user_da
 #endif
   int retval=colrad_GetCoeffs(y,It,data);
   if(retval !=0 )
-          return 1;
+    return 1; //d.h. failure of RHS
 
 //printf("IPD0:%.4e,IPD1:%.4e,IPD2:%.4e\n", IPD0*J2eV,IPD1*J2eV,IPD2*J2eV);
   //**********************************************
@@ -1066,7 +1067,7 @@ if(DeltaE-IPD0 >0)
       Ith(colrad_ydot,2)-=krev;
 
       // für 2 photonen und rad.recomb
-      P_E_MPI2  += kfwd* (2.0*planck*LASERFREQ-(DeltaE-IPD0)); //kein heating durch rad.recomb->Photon verschwindert (bisher ohne self-absorption)
+      P_E_MPI2  += kfwd* (2.0*planck*LASERFREQ-(DeltaE-IPD0)); //kein heating durch rad.recomb->Photon verschwindet (bisher ohne self-absorption)
       //jetzt für 3 photonen
       P_E_MPI3  += kfwd2*(3.0*planck*LASERFREQ-(DeltaE-IPD0));
       //jetzt rad recomb
@@ -1318,6 +1319,7 @@ if(DeltaE-IPD0 >0)
   //         P_E_MPI3, 
   //         P_E_RAD_RECOMB);
 
+  //BEI PRE-EQUILIBRIERUNG T=CONST !
   if(initial_equi==false)
   {
     Ith(colrad_ydot,0) =  cvinv*P_E_TOTAL;
@@ -1327,7 +1329,7 @@ if(DeltaE-IPD0 >0)
     Ith(colrad_ydot,0)=0.0;
   }
 
-  return 0;
+  return 0; // 0 heisst alles ok
 }
 
 

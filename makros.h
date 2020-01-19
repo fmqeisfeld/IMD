@@ -171,6 +171,11 @@ INLINE static int MOD(shortint p, int q)
 #define LODP(cell,i)       ((cell)->lod[i])
 #endif
 
+#ifdef COLRAD
+#define Ith(v,i)    NV_Ith_S(v,i)       /* Ith numbers components 1..NEQ */
+#define IJth(B,i,j) SM_ELEMENT_D(B,i,j)  //DENSE_ELEM(A,i,j) /* IJth numbers rows,cols 1..NEQ */
+#endif
+  
 #ifdef NRB	//non-refl. bnd
 #define NRBI(cell,i,j)         ((cell)->nrbid [((i)*12)+(j)])
 //2.8.19: NRBN und NRBK brauche ich nicht mehr!
