@@ -2,7 +2,7 @@
 
 //#define OMP
 #define LAPACK
-// #define MULTIPHOTON
+#define MULTIPHOTON
 //#define SPONT  //<-- spontante emission, Kaum effekt 
 //#define STARK  //<-- reabsorption via stark effect
 //#define DOIPD    //<--Dazu muss ich initial saha distrib erstmal anpassen
@@ -810,8 +810,11 @@ void do_Saha(double Te,double totalc,double ne,N_Vector y) //Bei init
     Q_z3+=STATES_z3[i][3]*exp(-(STATES_z3[i][2]-STATES_z3[0][2])*eV2J/BOLTZMAN/Te);
 #endif
 
-  // for(i=0;i<z3_len;++i)
-  //   Q_z4+=STATES_z4[i][3]*exp(-(STATES_z4[i][2]-STATES_z4[0][2])*eV2J/BOLTZMAN/Te);
+#if MAXLEVEL > 3
+   for(i=0;i<z3_len;++i)
+     Q_z4+=STATES_z4[i][3]*exp(-(STATES_z4[i][2]-STATES_z4[0][2])*eV2J/BOLTZMAN/Te);
+#endif
+
 /*
   for(int i=0;i<z5_len;++i)
     Q_z5+=STATES_z5[i][3]*exp(-(STATES_z5[i][2]-STATES_z5[0][2])*eV2J/BOLTZMAN/Te);
@@ -860,15 +863,17 @@ r10=2.0/ne*tmp*Q_z1/Q_z0*p; //r10= ratio of ion-concentrations n(Z=1)/n(Z=0); g_
   r32=2.0/ne*tmp*Q_z3/Q_z2*p;
 #endif  
   // ////////////
-  // // Z=2->3 //
+  // // Z=3->4 //
   // ////////////
-  // z=4.0;
-  // IPD=3.0*z*ECHARGE*ECHARGE/2.0/r0/4.0/pi/ECONST;  //Ion-Sphere model
-  // IPD=0.0;
-  // DeltaE=(STATES_z4[0][2]-STATES_z3[0][2])*eV2J-IPD;
-  // DeltaE=fmax(0.0,DeltaE);
-  // p=exp(-DeltaE/BOLTZMAN/Te);
-  // r43=2.0/ne*tmp*Q_z4/Q_z3*p;
+#if MAXLEVEL > 3
+  z=4.0;
+  IPD=3.0*z*ECHARGE*ECHARGE/2.0/r0/4.0/pi/ECONST;  //Ion-Sphere model
+  IPD=0.0;
+  DeltaE=(STATES_z4[0][2]-STATES_z3[0][2])*eV2J-IPD;
+  DeltaE=fmax(0.0,DeltaE);
+  p=exp(-DeltaE/BOLTZMAN/Te);
+  r43=2.0/ne*tmp*Q_z4/Q_z3*p;
+#endif
 
   //concentrations from ratios and totalc
   n0=totalc/(r54*r43*r32*r21*r10+r43*r32*r21*r10+r32*r21*r10+r21*r10+r10+1.0);
@@ -902,12 +907,20 @@ r10=2.0/ne*tmp*Q_z1/Q_z0*p; //r10= ratio of ion-concentrations n(Z=1)/n(Z=0); g_
   for(i=0;i<z1_len;++i)
     Ith(y,i+ishift+z0_len)=n1/Q_z1*STATES_z1[i][3]*exp(-(STATES_z1[i][2]-STATES_z1[0][2])*eV2J/BOLTZMAN/Te);
 
-  #if MAXLEVEL >1
+  #if MAXLEVEL > 1
   for(i=0;i<z2_len;++i)
     Ith(y,i+ishift+z0_len+z1_len)=n2/Q_z2*STATES_z2[i][3]*exp(-(STATES_z2[i][2]-STATES_z2[0][2])*eV2J/BOLTZMAN/Te);
   #endif
-  // for(i=0;i<z3_len;++i)
-  //   Ith(y,i+ishift+z0_len+z1_len+z2_len)=n3/Q_z3*STATES_z3[i][3]*exp(-(STATES_z3[i][2]-STATES_z3[0][2])*eV2J/BOLTZMAN/Te);
+
+  #if MAXLEVEL > 2
+  for(i=0;i<z3_len;++i)
+    Ith(y,i+ishift+z0_len+z1_len+z2_len)=n3/Q_z3*STATES_z3[i][3]*exp(-(STATES_z3[i][2]-STATES_z3[0][2])*eV2J/BOLTZMAN/Te);
+  #endif
+
+  #if MAXLEVEL > 3
+  for(i=0;i<z4_len;++i)
+    Ith(y,i+ishift+z0_len+z1_len+z2_len+z3_len)=n4/Q_z4*STATES_z4[i][3]*exp(-(STATES_z4[i][2]-STATES_z4[0][2])*eV2J/BOLTZMAN/Te);
+  #endif  
 
 }
 
