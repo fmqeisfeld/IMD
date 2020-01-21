@@ -424,7 +424,7 @@ if (node.dens == 0) //in step 0...noch keine neigh list?
 
 
 
-node.dens= node2.dens = (double) node.natoms * atomic_weight / fd_vol * 1660.53907;       
+//node.dens= node2.dens = (double) node.natoms * atomic_weight / fd_vol * 1660.53907;       
 
 
           node.vcomx /= tot_mass;

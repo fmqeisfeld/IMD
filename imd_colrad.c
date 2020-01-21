@@ -1,8 +1,8 @@
 #include "imd.h"
 
-//#define OMP
+#define OMP
 #define LAPACK
-#define MULTIPHOTON
+//#define MULTIPHOTON
 //#define SPONT  //<-- spontante emission, Kaum effekt 
 //#define STARK  //<-- reabsorption via stark effect
 //#define DOIPD    //<--Dazu muss ich initial saha distrib erstmal anpassen
@@ -13,7 +13,6 @@
 #endif
 
 #define MAXLEVEL 4 // bis zu welchem Ionisationsgrad?
-// nur zum test
 //#define MAXLINE 255
 //#define Ith(v,i)    NV_Ith_S(v,i)       /* Ith numbers components 1..NEQ */
 //#define IJth(B,i,j) SM_ELEMENT_D(B,i,j)  //DENSE_ELEM(A,i,j) /* IJth numbers rows,cols 1..NEQ */
@@ -36,7 +35,7 @@ const double colrad_tequi=1e-15;//TEST// 1e-12; //bei initial equi ohne Temperat
 double  HBAR;
 double  LASERFREQ;
 
-const int user_num_threads=2; //
+const int user_num_threads=2; //falls =0 --> automatisch maxnumthreads
 int num_threads;
 //const double  EMASS=9.10938356e-31;     // kg
 //const double  ECONST=8.854187817e-12;   // As/Vm
@@ -118,8 +117,10 @@ void do_colrad(double dt)
           flag = CVode(cvode_mem, tout, y, &t, CV_NORMAL);
         }
 
-//printf("myid:%d, after i:%d,j:%d,k:%d,Tefin:%.4e,nefin:%.4e\n",myid,i,j,k, Ith(y,0), Ith(y,2));
-printf("myid:%d, i:%d, Delta(Te):%.4e,Zmean:%.4e\n",myid,i, Ith(y,0)-Te0,Ith(y,2)/ni0);      
+printf("myid:%d, after i:%d,j:%d,k:%d,Tefin:%.4e,Zfin:%.4e,Zvgl:%.4e\n",
+    myid,i,j,k, Ith(y,0), Ith(y,2)/ni0,
+    MeanCharge(Ith(y,0), rho0, atomic_charge, atomic_weight,i,j,k));
+//printf("myid:%d, i:%d, Delta(Te):%.4e,Zmean:%.4e\n",myid,i, Ith(y,0)-Te0,Ith(y,2)/ni0);      
 
         //REASSIGN NEW TE AND NE
         l1[i][j][k].temp=Ith(y,0)/11604.5;
@@ -684,7 +685,7 @@ free(buf);
 
      // **********************************
      // * ALLOC ARRAYS
-
+     // **********************************
      alloc2darr(double, k_EE_z0_z0, z0_len,z0_len);
      alloc2darr(double, k_EE_z0_z0_b, z0_len,z0_len);
 
@@ -1593,7 +1594,7 @@ if(DeltaE-IPD3 >0)
 
 
 // ********************************************************************+
-// *    COMPUTE RATE COEFFS
+// *                COMPUTE RATE COEFFS
 // ********************************************************************+
 int colrad_GetCoeffs(N_Vector y,double It,void *user_data)
 {
@@ -1797,8 +1798,6 @@ if(expint==-1)
 if(fail==1)
   return -1;
 
-// printf("myid:%d,stage 1 clear\n",myid);
-
   //Now reverse rate (seperate loop because rev.rate needs koeff. of fwd. rate
 #ifdef OMP
 #pragma omp parallel for schedule(dynamic,1) collapse(2) private(kronecker,tmp0,tmp1,tmp2) num_threads(num_threads)
@@ -1849,8 +1848,6 @@ if(fail==1)
           a=DeltaE/(Te*BOLTZMAN);
           expint=ExpInt(a);
 
-// printf("myid:%d, a:%.4e,de:%.4e,eu:%.4e,el:%.3e\n", myid,a,DeltaE, STATES_z1[j][2],STATES_z1[i][2]);
-
 if(expint==-1)
 #ifndef OMP
         return -1;
@@ -1865,8 +1862,6 @@ if(expint==-1)
       }
     }
   if(fail==1) return -1;
-
-// printf("myid:%d,stage 2 clear\n",myid);
 
   //NOW REVERSE RATE
 #ifdef OMP
