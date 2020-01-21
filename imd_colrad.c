@@ -46,6 +46,7 @@ int num_threads;
 typedef struct {
   realtype It; //Intesity
   realtype IPD0,IPD1,IPD2,IPD3;
+  double P_TOTAL; //komplette colrad-Leistungsdichte, für eng-filge
   bool initial_equi;
 } *colrad_UserData;
 colrad_UserData  cdata;
@@ -61,6 +62,7 @@ void do_colrad(double dt)
   int i,j,k;
   N_Vector y;
   double Te0,Ti0,rho0,ni0,ne0;
+  colrad_ptotal=0.0;
 
   if(myid==0 && cdata->initial_equi)
     printf("COLRAD performs initial equilibration for t=%.4e s...This may take some time.\n",colrad_tequi);
@@ -115,11 +117,13 @@ void do_colrad(double dt)
         else //NORMAL
         {
           flag = CVode(cvode_mem, tout, y, &t, CV_NORMAL);
+          colrad_ptotal+=(fd_vol)*1e-30*cdata->P_TOTAL; // d.h. ptotal ist Gesamt-Leisung
         }
 
-printf("myid:%d, after i:%d,j:%d,k:%d,Tefin:%.4e,Zfin:%.4e,Zvgl:%.4e\n",
+printf("myid:%d, after i:%d,j:%d,k:%d,Tefin:%.4e,Zfin:%.4e,Zvgl:%.4e,pcell:%.4e,ptot:%.4e\n",
     myid,i,j,k, Ith(y,0), Ith(y,2)/ni0,
-    MeanCharge(Ith(y,0), rho0, atomic_charge, atomic_weight,i,j,k));
+    MeanCharge(Ith(y,0), rho0, atomic_charge, atomic_weight,i,j,k),
+    cdata->P_TOTAL, colrad_ptotal);
 //printf("myid:%d, i:%d, Delta(Te):%.4e,Zmean:%.4e\n",myid,i, Ith(y,0)-Te0,Ith(y,2)/ni0);      
 
         //REASSIGN NEW TE AND NE
@@ -189,6 +193,7 @@ void colrad_init(void)
 
   cdata=(colrad_UserData) malloc(sizeof *cdata); 
   cdata->initial_equi=true;
+  cdata->P_TOTAL=0.0;
 
 	//total_species=z0_len+z1_len; //wird bereits in read-states reduced
 	neq=total_species+3;
@@ -1571,6 +1576,7 @@ if(DeltaE-IPD3 >0)
 
   double cvinv=1.0/(1.5*BOLTZMAN*ne);
   double P_E_TOTAL=P_E_EI+P_E_EE+P_E_MPI2+P_E_MPI3+P_E_RAD_RECOMB;
+  data->P_TOTAL=P_E_TOTAL;
   // printf("myid:%d, PEI:%.4e, PEE:%.4e,MPI2:%.4e, MPI3:%.4e, RADREC:%.4e\n",
   //         myid,
   //         P_E_EI, 

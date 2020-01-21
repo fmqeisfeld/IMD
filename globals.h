@@ -356,6 +356,8 @@ EXTERN int colrad_neq INIT(0.0); //nr of equations -> length of y-vector
 EXTERN real totalc;
 EXTERN int neq;
 EXTERN int z0_len,z1_len,z2_len,z3_len,z4_len,z5_len;
+EXTERN real colrad_ptotal INIT(0.0); //for eng-file output
+EXTERN real colrad_ptotal_global INIT(0.0); //for eng-file output
 // ******************
 // * COLRAD POWER DENSITIES
 // ******************
