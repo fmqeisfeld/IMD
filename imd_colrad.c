@@ -1,11 +1,19 @@
 #include "imd.h"
 
-#define OMP
+
+// ***************************************************
+// * TODO:
+// * 
+// * -PHYSIK: Ist MPI überhaupt von IPD betroffen?
+// ****************************************************
+
+
+//#define OMP
 #define LAPACK
 //#define MULTIPHOTON
 //#define SPONT  //<-- spontante emission, Kaum effekt 
 //#define STARK  //<-- reabsorption via stark effect
-//#define DOIPD    //<--Dazu muss ich initial saha distrib erstmal anpassen
+#define DOIPD    //<--Dazu muss ich initial saha distrib erstmal anpassen
 
 
 #ifdef OMP
@@ -47,6 +55,7 @@ typedef struct {
   realtype It; //Intesity
   realtype IPD0,IPD1,IPD2,IPD3;
   double P_TOTAL; //komplette colrad-Leistungsdichte, für eng-filge
+  double dens;
   bool initial_equi;
 } *colrad_UserData;
 colrad_UserData  cdata;
@@ -102,6 +111,7 @@ void do_colrad(double dt)
 
 //printf("myid:%d, running cvode i:%d,j:%d,k:%d,Te0:%.4e,ne0:%.4e,dt:%.4e\n",myid,i,j,k,Te0,ne0,dt);
 
+
         
         if(cdata->initial_equi==true)
         {
@@ -116,6 +126,7 @@ void do_colrad(double dt)
         }
         else //NORMAL
         {
+          cdata->dens=l1[i][j][k].dens;
           flag = CVode(cvode_mem, tout, y, &t, CV_NORMAL);
           colrad_ptotal+=(fd_vol)*1e-30*cdata->P_TOTAL; // d.h. ptotal ist Gesamt-Leisung
         }
@@ -770,28 +781,40 @@ void do_Saha(double Te,double totalc,double ne,N_Vector y) //Bei init
 {
   double tmp;
   double Zav=ne/totalc;
-  double Ti=Te;
-  double r0; //Ion sphere radius
+  // double Ti=Te;
+
   double Q_z0,Q_z1,Q_z2,Q_z3,Q_z4,Q_z5; //partition functions
-  double IPD_SP=0.0; //Stewart and Pyatt =(pow(1.0+a/Debye,2.0/3.0)-1.0)/2.0/(Zav+1.0);
-  double IPD_IS=0.0; //Ion-sphere model (high dens,low T) =3.0*1.0*ECHARGE*ECHARGE/2.0/a/BOLTZMAN/Te;
-  double IPD_DH=0.0; //Debye-Hückel (high T,low dens) = 1.0*ECHARGE*ECHARGE/Debye/BOLTZMAN/Te;
+  // double IPD_SP=0.0; //Stewart and Pyatt =(pow(1.0+a/Debye,2.0/3.0)-1.0)/2.0/(Zav+1.0);
+  // double IPD_IS=0.0; //Ion-sphere model (high dens,low T) =3.0*1.0*ECHARGE*ECHARGE/2.0/a/BOLTZMAN/Te;
+  // double IPD_DH=0.0; //Debye-Hückel (high T,low dens) = 1.0*ECHARGE*ECHARGE/Debye/BOLTZMAN/Te;
   double r10,r21,r32,r43,r54; //ratios of ion. conc.
   double DeltaE;
-  double IPD;
+  double IPD=0.0;
   double n0,n1,n2,n3,n4,n5;
   double p; //probability
-  double z; //DOI after ionization (e.g.=1 for Al0)
+
   int i;
 
 
   r10=r21=r32=r43=r54=0;
 
 
-  double Ti_init=Ti;
   Zav=ne/totalc;
   //Debye=sqrt(BOLTZMAN*Te/4.0/pi/ECHARGE/ECHARGE/ne/(Zav+1));
   tmp=pow(2.0*pi*EMASS*BOLTZMAN*Te,1.5)/planck/planck/planck;
+
+#ifdef DOIPD
+  double IPD0,IPD1,IPD2,IPD3;
+  double z; //DOI after ionization (e.g.=1 for Al0)
+  double r0; //Ion sphere radius
+  r0=pow(3.0/4.0/pi/totalc,1.0/3.0);
+  double debye=sqrt(BOLTZMAN*Te/4.0/pi/pow(totalc+ne,2.0));
+  // Atoms, solids, and plasmas in super-intense laser fields S.220
+  IPD0=1.0*3.0/2.0/r0*ECHARGE*ECHARGE*(pow(1.0+pow(debye/r0,3.0),2.0/3.0)-pow(debye/r0,2.0))/4.0/pi/ECONST;
+  IPD1=2.0*3.0/2.0/r0*ECHARGE*ECHARGE*(pow(1.0+pow(debye/r0,3.0),2.0/3.0)-pow(debye/r0,2.0))/4.0/pi/ECONST;
+  IPD2=3.0*3.0/2.0/r0*ECHARGE*ECHARGE*(pow(1.0+pow(debye/r0,3.0),2.0/3.0)-pow(debye/r0,2.0))/4.0/pi/ECONST;
+  IPD3=4.0*3.0/2.0/r0*ECHARGE*ECHARGE*(pow(1.0+pow(debye/r0,3.0),2.0/3.0)-pow(debye/r0,2.0))/4.0/pi/ECONST;  
+#endif  
 
   //compute partition functions
   Q_z0=0.0;
@@ -825,14 +848,16 @@ void do_Saha(double Te,double totalc,double ne,N_Vector y) //Bei init
   for(int i=0;i<z5_len;++i)
     Q_z5+=STATES_z5[i][3]*exp(-(STATES_z5[i][2]-STATES_z5[0][2])*eV2J/BOLTZMAN/Te);
 */
-  double tmp2,tmp3;
+  // double tmp2,tmp3;
   ////////////
   // Z=0->1 //
   ////////////
-z=1.0;
-r0=pow(3.0/4.0/pi/totalc,1.0/3.0);
-IPD=3.0*z*ECHARGE*ECHARGE/2.0/r0/4.0/pi/ECONST;  //Ion-Sphere model
-IPD=0; //vorerst
+
+#ifdef DOIPD
+// z=1.0;
+// IPD=3.0*z*ECHARGE*ECHARGE/2.0/r0/4.0/pi/ECONST;  //Ion-Sphere model
+IPD=IPD0;
+#endif
 
 DeltaE=(STATES_z1[0][2]-0.0)*eV2J-IPD;
 DeltaE=fmax(0.0,DeltaE);
@@ -847,9 +872,12 @@ r10=2.0/ne*tmp*Q_z1/Q_z0*p; //r10= ratio of ion-concentrations n(Z=1)/n(Z=0); g_
   ////////////
 
 #if MAXLEVEL > 1
-  z=2.0;
-  IPD=3.0*z*ECHARGE*ECHARGE/2.0/r0/4.0/pi/ECONST;  //Ion-Sphere model
-  IPD=0.0;
+
+#ifdef DOIPD
+  // z=2.0;
+  // IPD=3.0*z*ECHARGE*ECHARGE/2.0/r0/4.0/pi/ECONST;  //Ion-Sphere model
+  IPD=IPD1;
+#endif  
   DeltaE=(STATES_z2[0][2]-STATES_z1[0][2])*eV2J-IPD;
   DeltaE=fmax(0.0,DeltaE);
   p=exp(-DeltaE/BOLTZMAN/Te);
@@ -860,9 +888,11 @@ r10=2.0/ne*tmp*Q_z1/Q_z0*p; //r10= ratio of ion-concentrations n(Z=1)/n(Z=0); g_
   // // Z=2->3 //
   // ////////////
 #if MAXLEVEL > 2  
-  z=3.0;
-  IPD=3.0*z*ECHARGE*ECHARGE/2.0/r0/4.0/pi/ECONST;  //Ion-Sphere model
-  IPD=0.0;
+#ifdef DOIPD  
+  // z=3.0;
+  // IPD=3.0*z*ECHARGE*ECHARGE/2.0/r0/4.0/pi/ECONST;  //Ion-Sphere model
+  IPD=IPD2;
+#endif  
   DeltaE=(STATES_z3[0][2]-STATES_z2[0][2])*eV2J-IPD;
   DeltaE=fmax(0.0,DeltaE);
   p=exp(-DeltaE/BOLTZMAN/Te);
@@ -872,9 +902,11 @@ r10=2.0/ne*tmp*Q_z1/Q_z0*p; //r10= ratio of ion-concentrations n(Z=1)/n(Z=0); g_
   // // Z=3->4 //
   // ////////////
 #if MAXLEVEL > 3
-  z=4.0;
-  IPD=3.0*z*ECHARGE*ECHARGE/2.0/r0/4.0/pi/ECONST;  //Ion-Sphere model
-  IPD=0.0;
+#ifdef DOIPD  
+  // z=4.0;
+  // IPD=3.0*z*ECHARGE*ECHARGE/2.0/r0/4.0/pi/ECONST;  //Ion-Sphere model
+  IPD=IPD3;
+#endif  
   DeltaE=(STATES_z4[0][2]-STATES_z3[0][2])*eV2J-IPD;
   DeltaE=fmax(0.0,DeltaE);
   p=exp(-DeltaE/BOLTZMAN/Te);
@@ -968,7 +1000,7 @@ static int colrad_ydot(double t, N_Vector y, N_Vector colrad_ydot, void *user_da
 
   double DeltaE;
   double kfwd,krev;
-  double kfwd2;
+  double kfwd2; // für 3-Photon absorption
 
 
   int i,j;
@@ -1008,6 +1040,11 @@ static int colrad_ydot(double t, N_Vector y, N_Vector colrad_ydot, void *user_da
   IPD1=2.0*3.0/2.0/r0*ECHARGE*ECHARGE*(pow(1.0+pow(debye/r0,3.0),2.0/3.0)-pow(debye/r0,2.0))/4.0/pi/ECONST;
   IPD2=3.0*3.0/2.0/r0*ECHARGE*ECHARGE*(pow(1.0+pow(debye/r0,3.0),2.0/3.0)-pow(debye/r0,2.0))/4.0/pi/ECONST;
   IPD3=4.0*3.0/2.0/r0*ECHARGE*ECHARGE*(pow(1.0+pow(debye/r0,3.0),2.0/3.0)-pow(debye/r0,2.0))/4.0/pi/ECONST;
+  data->IPD0=IPD0;
+  data->IPD1=IPD1;
+  data->IPD2=IPD2;
+  data->IPD3=IPD3;
+
 #endif
 
   int retval=colrad_GetCoeffs(y,It,data);
@@ -1267,8 +1304,11 @@ static int colrad_ydot(double t, N_Vector y, N_Vector colrad_ydot, void *user_da
   {
     for(j=0;j<z1_len;++j)
     {
-      DeltaE=(STATES_z1[j][2]-STATES_z0[i][2])*eV2J; //-IPD0;
+      DeltaE=(STATES_z1[j][2]-STATES_z0[i][2])*eV2J-IPD0;
 
+#ifdef DOIPD
+      DeltaE=MAX(0.0,DeltaE);
+#endif
       //COLL IONIZ
       Ith(colrad_ydot,i+shift1)          -= k_EI_z0_z1[i][j]*Ith(y,i+shift1)*ne;
       Ith(colrad_ydot,2)                 += k_EI_z0_z1[i][j]*Ith(y,i+shift1)*ne;   //Ne inc.
@@ -1303,7 +1343,8 @@ static int colrad_ydot(double t, N_Vector y, N_Vector colrad_ydot, void *user_da
       }
 #endif
 
-if(DeltaE-IPD0 >0)
+//ACHTUNG: Diskussion ob MPI sich überhaupt für Potential-Lowering interessiert...?
+if(DeltaE-IPD0 >0 )
 {
       kfwd= k_MPI_z0_z1[i][j][0]*Ith(y,i+shift1); // Einheit: k_MPI = 1/s
       kfwd2=k_MPI_z0_z1[i][j][1]*Ith(y,i+shift1); // *wup;   // 2 photon- and 3-photon ionization!
@@ -1347,8 +1388,11 @@ if(DeltaE-IPD0 >0)
   {
     for(j=0;j<z2_len;++j)
     {
-      DeltaE=(STATES_z2[j][2]-STATES_z1[i][2])*eV2J; //-IPD0;
+      DeltaE=(STATES_z2[j][2]-STATES_z1[i][2])*eV2J-IPD1;
 
+#ifdef DOIPD
+      DeltaE=MAX(0.0,DeltaE);
+#endif
       //COLL IONIZ
       Ith(colrad_ydot,i+shift1)          -= k_EI_z1_z2[i][j]*Ith(y,i+shift1)*ne;
       Ith(colrad_ydot,2)                 += k_EI_z1_z2[i][j]*Ith(y,i+shift1)*ne;   //Ne inc.
@@ -1427,8 +1471,11 @@ if(DeltaE-IPD1 >0)
   {
     for(j=0;j<z3_len;++j)
     {
-      DeltaE=(STATES_z3[j][2]-STATES_z2[i][2])*eV2J; //-IPD0;
+      DeltaE=(STATES_z3[j][2]-STATES_z2[i][2])*eV2J-IPD2;
 
+#ifdef DOIPD
+      DeltaE=MAX(0.0,DeltaE);
+#endif
       //COLL IONIZ
       Ith(colrad_ydot,i+shift1)          -= k_EI_z2_z3[i][j]*Ith(y,i+shift1)*ne;
       Ith(colrad_ydot,2)                 += k_EI_z2_z3[i][j]*Ith(y,i+shift1)*ne;   //Ne inc.
@@ -1507,8 +1554,10 @@ if(DeltaE-IPD2 >0)
   {
     for(j=0;j<z4_len;++j)
     {
-      DeltaE=(STATES_z4[j][2]-STATES_z3[i][2])*eV2J; //-IPD0;
-
+      DeltaE=(STATES_z4[j][2]-STATES_z3[i][2])*eV2J-IPD3;
+#ifdef DOIPD
+      DeltaE=MAX(0.0,DeltaE);
+#endif
       //COLL IONIZ
       Ith(colrad_ydot,i+shift1)          -= k_EI_z3_z4[i][j]*Ith(y,i+shift1)*ne;
       Ith(colrad_ydot,2)                 += k_EI_z3_z4[i][j]*Ith(y,i+shift1)*ne;   //Ne inc.
@@ -1574,7 +1623,8 @@ if(DeltaE-IPD3 >0)
 #endif //MAXLEVEL > 3  
   // ********************** THERMO ******************************************
 
-  double cvinv=1.0/(1.5*BOLTZMAN*ne);
+  // double cvinv=1.0/(1.5*BOLTZMAN*ne);
+
   double P_E_TOTAL=P_E_EI+P_E_EE+P_E_MPI2+P_E_MPI3+P_E_RAD_RECOMB;
   data->P_TOTAL=P_E_TOTAL;
   // printf("myid:%d, PEI:%.4e, PEE:%.4e,MPI2:%.4e, MPI3:%.4e, RADREC:%.4e\n",
@@ -1588,6 +1638,7 @@ if(DeltaE-IPD3 >0)
   //BEI PRE-EQUILIBRIERUNG T=CONST !
   if(initial_equi==false)
   {
+    double cvinv=  1.0/EOS_cve_from_r_te(data->dens, Te);
     Ith(colrad_ydot,0) =  cvinv*P_E_TOTAL;
   }
   else
@@ -1820,7 +1871,6 @@ if(fail==1)
 
         //tmp1=3.0*(1.0-kronecker)/2.0;
         tmp1=0.0; //3.0*(1.0-kronecker)/2.0;
-
         tmp2=exp(-(STATES_z0[j][2]-STATES_z0[i][2])*eV2J/(BOLTZMAN*Te));
 
         //k_EE_z0_z0_b[i][j]=k_EE_z0_z0[i][j]/tmp0/(pow(two_pi_me_kT_hsq,tmp1))/tmp2;
@@ -2120,8 +2170,10 @@ if(expint==-1)
       if(STATES_z0[i][4]==STATES_z1[j][4])
         kronecker=1.0;
 
-      DeltaE=(STATES_z1[j][2]-STATES_z0[i][2])*eV2J; //-IPD0;
-
+      DeltaE=(STATES_z1[j][2]-STATES_z0[i][2])*eV2J-IPD0;
+#ifdef DOIPD
+      DeltaE=MAX(0.0,DeltaE);
+#endif      
       a=DeltaE/(Te*BOLTZMAN);
       expint=ExpInt(a);
 
@@ -2137,26 +2189,28 @@ if(expint==-1)
       I_2=I_1*log(5.0/4.0*beta_i)+expint/a-G2;
       k_EI_z0_z1[i][j]=v_e*four_pi_a0_sq*alpha_i*E_ion_H_div_kTe_sq*I_2;
 
+#ifdef MULTIPHOTON
       //MPI 2 PHOTONS
       if(2.0*planck*LASERFREQ >= DeltaE-IPD0 && DeltaE-IPD0 > 0.0 )
       {
-        sigma1=sigma_tmp*pow(DeltaE-IPD0,2.5)/sqrt(DeltaE-IPD0);
+        sigma1=sigma_tmp*pow(DeltaE,2.5)/sqrt(DeltaE);
         sigma_MPI_2=sigma1*sigma1/LASERFREQ/pow(planck*LASERFREQ,2.0);
         k_MPI_z0_z1[i][j][0]=sigma_MPI_2*I_sq;
       }
-      //MPI 3 PHOTONS
-      if(3.0*planck*LASERFREQ>=DeltaE && DeltaE-IPD0 > 0.0 )
+      //MPI 3 PHOTONS      
+      if(3.0*planck*LASERFREQ>=DeltaE) 
       {
-        sigma1=sigma_tmp*pow(DeltaE-IPD0,2.5)/sqrt(DeltaE-IPD0);
+        sigma1=sigma_tmp*pow(DeltaE,2.5)/sqrt(DeltaE);
         sigma_MPI_3=sigma1*sigma1*sigma1/2.0/LASERFREQ/LASERFREQ/pow(planck*LASERFREQ,3.0);
         k_MPI_z0_z1[i][j][1]=sigma_MPI_3*I_cu;//*prob*beta_pi(Te,mu,DeltaE);
       }
+#endif      
       //RAD RECOMB
-      if(DeltaE-IPD0>0)
+      if(DeltaE>0)
       {
         if(expint > 0 )
         {
-          k_MPI_z1_z0[i][j][0]=v_e*k_RR_fact1*1.0*k_RR_fact2*pow((DeltaE-IPD0)*J2eV/STATES_z1[j][2],1.5)*expint*exp(a);
+          k_MPI_z1_z0[i][j][0]=v_e*k_RR_fact1*1.0*k_RR_fact2*pow((DeltaE)*J2eV/STATES_z1[j][2],1.5)*expint*exp(a);
         }
         else 
         {
@@ -2194,8 +2248,10 @@ if(expint==-1)
       if(STATES_z1[i][4]==STATES_z2[j][4])
         kronecker=1.0;
 
-      DeltaE=(STATES_z2[j][2]-STATES_z1[i][2])*eV2J; //-IPD0;
-      
+      DeltaE=(STATES_z2[j][2]-STATES_z1[i][2])*eV2J-IPD1;
+#ifdef DOIPD
+      DeltaE=MAX(0.0,DeltaE);
+#endif            
       a=DeltaE/(Te*BOLTZMAN);
       expint=ExpInt(a);
 
@@ -2211,26 +2267,28 @@ if(expint==-1)
       I_2=I_1*log(5.0/4.0*beta_i)+expint/a-G2;
       k_EI_z1_z2[i][j]=v_e*four_pi_a0_sq*alpha_i*E_ion_H_div_kTe_sq*I_2;
 
+#ifdef MULTIPHOTON
       //MPI 2 PHOTONS
-      if(2.0*planck*LASERFREQ >= DeltaE-IPD1 && DeltaE-IPD1>0.0)
+      if(2.0*planck*LASERFREQ >= DeltaE)
       {
-        sigma1=sigma_tmp*pow(DeltaE,2.5)/sqrt(DeltaE-IPD1);
+        sigma1=sigma_tmp*pow(DeltaE,2.5)/sqrt(DeltaE);
         sigma_MPI_2=sigma1*sigma1/LASERFREQ/pow(planck*LASERFREQ,2.0);
         k_MPI_z1_z2[i][j][0]=sigma_MPI_2*I_sq;
       }
       //MPI 3 PHOTONS
-      if(3.0*planck*LASERFREQ >=DeltaE-IPD1 && DeltaE-IPD1 >0.0)
+      if(3.0*planck*LASERFREQ > DeltaE)
       {
-        sigma1=sigma_tmp*pow(DeltaE-IPD1,2.5)/sqrt(DeltaE-IPD1);
+        sigma1=sigma_tmp*pow(DeltaE,2.5)/sqrt(DeltaE);
         sigma_MPI_3=sigma1*sigma1*sigma1/2.0/LASERFREQ/LASERFREQ/pow(planck*LASERFREQ,3.0);
         k_MPI_z1_z2[i][j][1]=sigma_MPI_3*I_cu;//*prob*beta_pi(Te,mu,DeltaE);
       }
+#endif      
       //RAD RECOMB
-      if(DeltaE-IPD1>0)
+      if(DeltaE>0)
       {
         if(expint > 0 )
         {
-          k_MPI_z2_z1[i][j][0]=v_e*k_RR_fact1*4.0*k_RR_fact2*pow((DeltaE-IPD1)*J2eV/STATES_z2[j][2],1.5)*expint*exp(a);          
+          k_MPI_z2_z1[i][j][0]=v_e*k_RR_fact1*4.0*k_RR_fact2*pow((DeltaE)*J2eV/STATES_z2[j][2],1.5)*expint*exp(a);          
         }
         else 
         {
@@ -2273,8 +2331,10 @@ if(expint==-1)
       if(STATES_z2[i][4]==STATES_z3[j][4])
       kronecker=1.0;
 
-      DeltaE=(STATES_z3[j][2]-STATES_z2[i][2])*eV2J; //-IPD0;
-      
+      DeltaE=(STATES_z3[j][2]-STATES_z2[i][2])*eV2J-IPD2;
+#ifdef DOIPD
+      DeltaE=MAX(0.0,DeltaE);
+#endif            
       a=DeltaE/(Te*BOLTZMAN);
          expint=ExpInt(a);
 
@@ -2290,26 +2350,28 @@ if(expint==-1)
       I_2=I_1*log(5.0/4.0*beta_i)+expint/a-G2;
       k_EI_z2_z3[i][j]=v_e*four_pi_a0_sq*alpha_i*E_ion_H_div_kTe_sq*I_2;
 
+#ifdef MULTIPHOTON
       //MPI 2 PHOTONS
-      if(2.0*planck*LASERFREQ >= DeltaE-IPD2 && DeltaE-IPD2>0.0)
+      if(2.0*planck*LASERFREQ > DeltaE)
       {
-        sigma1=sigma_tmp*pow(DeltaE,2.5)/sqrt(DeltaE-IPD2);
+        sigma1=sigma_tmp*pow(DeltaE,2.5)/sqrt(DeltaE);
         sigma_MPI_2=sigma1*sigma1/LASERFREQ/pow(planck*LASERFREQ,2.0);
         k_MPI_z2_z3[i][j][0]=sigma_MPI_2*I_sq;
       }
       //MPI 3 PHOTONS
-      if(3.0*planck*LASERFREQ >=DeltaE-IPD2 && DeltaE-IPD2 >0.0)
+      if(3.0*planck*LASERFREQ > DeltaE)
       {
-        sigma1=sigma_tmp*pow(DeltaE-IPD2,2.5)/sqrt(DeltaE-IPD2);
+        sigma1=sigma_tmp*pow(DeltaE,2.5)/sqrt(DeltaE);
         sigma_MPI_3=sigma1*sigma1*sigma1/2.0/LASERFREQ/LASERFREQ/pow(planck*LASERFREQ,3.0);
         k_MPI_z2_z3[i][j][1]=sigma_MPI_3*I_cu;//*prob*beta_pi(Te,mu,DeltaE);
       }
+#endif      
       //RAD RECOMB
-      if(DeltaE-IPD2>0)
+      if(DeltaE>0)
       {
         if(expint > 0)
         {
-          k_MPI_z3_z2[i][j][0]=v_e*k_RR_fact1*4.0*k_RR_fact2*pow((DeltaE-IPD2)*J2eV/STATES_z3[j][2],1.5)*expint*exp(a);  
+          k_MPI_z3_z2[i][j][0]=v_e*k_RR_fact1*4.0*k_RR_fact2*pow((DeltaE)*J2eV/STATES_z3[j][2],1.5)*expint*exp(a);  
         }
         else
         {
@@ -2318,9 +2380,7 @@ if(expint==-1)
         
       }
       
-      //3-body recomb
-      //if(DeltaE>0.0)
-      
+      //3-body recomb            
       kronecker=0;
       tmp0=pow(2.0,(1.0-kronecker))*STATES_z3[j][3]/STATES_z2[i][3];
       tmp1=3.0*(1.0-kronecker)/2.0;
@@ -2358,8 +2418,10 @@ if(expint==-1)
       if(STATES_z3[i][4]==STATES_z4[j][4])
       kronecker=1.0;
 
-      DeltaE=(STATES_z4[j][2]-STATES_z3[i][2])*eV2J; //-IPD0;
-      
+      DeltaE=(STATES_z4[j][2]-STATES_z3[i][2])*eV2J-IPD3;
+#ifdef DOIPD
+      DeltaE=MAX(0.0,DeltaE);
+#endif            
       a=DeltaE/(Te*BOLTZMAN);
          expint=ExpInt(a);
 
@@ -2375,26 +2437,28 @@ if(expint==-1)
       I_2=I_1*log(5.0/4.0*beta_i)+expint/a-G2;
       k_EI_z3_z4[i][j]=v_e*four_pi_a0_sq*alpha_i*E_ion_H_div_kTe_sq*I_2;
 
+#ifdef MULTIPHOTON
       //MPI 2 PHOTONS
-      if(2.0*planck*LASERFREQ >= DeltaE-IPD3 && DeltaE-IPD3>0.0)
+      if(2.0*planck*LASERFREQ > DeltaE)
       {
-        sigma1=sigma_tmp*pow(DeltaE,2.5)/sqrt(DeltaE-IPD3);
+        sigma1=sigma_tmp*pow(DeltaE,2.5)/sqrt(DeltaE);
         sigma_MPI_2=sigma1*sigma1/LASERFREQ/pow(planck*LASERFREQ,2.0);
         k_MPI_z3_z4[i][j][0]=sigma_MPI_2*I_sq;
       }
       //MPI 3 PHOTONS
-      if(3.0*planck*LASERFREQ >=DeltaE-IPD3 && DeltaE-IPD3 >0.0)
+      if(3.0*planck*LASERFREQ > DeltaE)
       {
-        sigma1=sigma_tmp*pow(DeltaE-IPD2,2.5)/sqrt(DeltaE-IPD2);
+        sigma1=sigma_tmp*pow(DeltaE,2.5)/sqrt(DeltaE);
         sigma_MPI_3=sigma1*sigma1*sigma1/2.0/LASERFREQ/LASERFREQ/pow(planck*LASERFREQ,3.0);
         k_MPI_z3_z4[i][j][1]=sigma_MPI_3*I_cu;//*prob*beta_pi(Te,mu,DeltaE);
       }
+#endif
       //RAD RECOMB
-      if(DeltaE-IPD3>0)
+      if(DeltaE>0)
       {
         if(expint>0)
         {
-          k_MPI_z4_z3[i][j][0]=v_e*k_RR_fact1*4.0*k_RR_fact2*pow((DeltaE-IPD3)*J2eV/STATES_z4[j][2],1.5)*expint*exp(a);  
+          k_MPI_z4_z3[i][j][0]=v_e*k_RR_fact1*4.0*k_RR_fact2*pow((DeltaE)*J2eV/STATES_z4[j][2],1.5)*expint*exp(a);  
         }
         else
         {
