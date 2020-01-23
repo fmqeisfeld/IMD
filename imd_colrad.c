@@ -55,6 +55,7 @@ int num_threads;
 typedef struct {
   realtype It; //Intesity
   realtype IPD0,IPD1,IPD2,IPD3;
+  realtype P_EE,P_EI,P_MPI2,P_MPI3,P_RR;
   double P_TOTAL; //komplette colrad-Leistungsdichte, für eng-filge
   double dens;
   bool initial_equi;
@@ -142,10 +143,20 @@ printf("myid:%d, after i:%d,j:%d,k:%d,Tefin:%.4e,Zfin:%.4e,Zvgl:%.4e,pcell:%.4e,
         l1[i][j][k].temp=Ith(y,0)/11604.5;
         l1[i][j][k].ne=Ith(y,2);
         l1[i][j][k].Z=l1[i][j][k].ne/ni0;
+        l1[i][j][k].P_EE=cdata->P_EE;
+        l1[i][j][k].P_EI=cdata->P_EI;
+        l1[i][j][k].P_MPI2=cdata->P_MPI2;
+        l1[i][j][k].P_MPI3=cdata->P_MPI3;
+        l1[i][j][k].P_RR=cdata->P_RR;
 
         l2[i][j][k].temp=l1[i][j][k].temp; //auch in l2 speichern! wichtig!
-        l2[i][j][k].ne=l1[i][j][k].ne;
-        l2[i][j][k].Z=l1[i][j][k].Z;
+        l2[i][j][k].ne=l1[i][j][k].ne;     //sonst geht alles im diffusion-step vor 
+        l2[i][j][k].Z=l1[i][j][k].Z;       //ttm-writeout verloren!
+        l2[i][j][k].P_EE=l1[i][j][k].P_EE;
+        l2[i][j][k].P_EI=l1[i][j][k].P_EI;
+        l2[i][j][k].P_MPI2=l1[i][j][k].P_MPI2;
+        l2[i][j][k].P_MPI3=l1[i][j][k].P_MPI3;
+        l2[i][j][k].P_RR=l1[i][j][k].P_RR;
 
 //printf("myid:%d,COLRAD,i:%d,ne:%.4e,Z:%.4e,temp:%.4e\n", myid,i,l1[i][j][k].ne, l1[i][j][k].Z,l1[i][j][k].temp);
 
@@ -218,6 +229,11 @@ void colrad_init(void)
 			for(k=1;k<local_fd_dim.z-1;k++)
 			{
 				l1[i][j][k].y=N_VNew_Serial(neq);
+        l1[i][j][k].P_EE=0.0;
+        l1[i][j][k].P_EI=0.0;
+        l1[i][j][k].P_MPI2=0.0;
+        l1[i][j][k].P_MPI3=0.0;
+        l1[i][j][k].P_RR=0.0;
 
 				//l2... <--brauche nur 1 mal speicher alloc'en
 				//aber in DIFF-LOOP darauf achten, dass beim swappen
@@ -1629,6 +1645,12 @@ if(DeltaE-IPD3 >0)
 
   double P_E_TOTAL=P_E_EI+P_E_EE+P_E_MPI2+P_E_MPI3+P_E_RAD_RECOMB;
   data->P_TOTAL=P_E_TOTAL;
+  data->P_EE=P_E_EE;
+  data->P_EI=P_E_EI;
+  data->P_MPI2=P_E_MPI2;
+  data->P_MPI3=P_E_MPI3;
+  data->P_RR=P_E_RAD_RECOMB;
+
   // printf("myid:%d, PEI:%.4e, PEE:%.4e,MPI2:%.4e, MPI3:%.4e, RADREC:%.4e\n",
   //         myid,
   //         P_E_EI, 

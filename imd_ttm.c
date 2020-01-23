@@ -1881,6 +1881,7 @@ void ttm_writeout(int number)
   n = global_fd_dim.x * global_fd_dim.y * global_fd_dim.z;
   nlocal = (local_fd_dim.x - 2) * (local_fd_dim.y - 2) * (local_fd_dim.z - 2);
 
+//ACHTUNG: MPIIO-OUTPUT SCHON LANGE NICHT MEHR AKTUALISIESRT. COLRAD FEHLT 
 #ifdef MPIIO
   MPI_File fh;
   MPI_Status iostatus;
@@ -1915,24 +1916,24 @@ void ttm_writeout(int number)
       {
         k_global =  ((k - 1) + my_coord.z * (local_fd_dim.z - 2));
         //write to buffer
-#ifndef FDTD
+ #ifndef FDTD
         sprintf(outbufline, "%d %d %d %d %e %e %e %e %e %e %e %e %e %e %e %d %f",
-#else
+ #else
         sprintf(outbufline, "%d %d %d %d %e %e %e %e %e %e %e %e %e %e %e %d %f %e %e %e %e %e %e %e %e %e %e",
-#endif
+ #endif
                 i_global, j_global, k_global, node.natoms, node.temp,
                 node.md_temp, node.xi,
                 node.source, node.dens,
                 node.vcomx, node.vcomy, node.vcomz,
                 node.fd_k, node.fd_g,
-#ifndef FDTD
+ #ifndef FDTD
                 node.Z, node.proc, node.Ce
-#else
+ #else
                 node.Z, node.proc, node.Ce,
                 node.Ezx, node.Ezy, node.Hx, node.Hy,
                 node.sigmax, node.sigmay,
                 node.Hzx, node.Hzy, node.Ex, node.Ey
-#endif
+ #endif
                );
 
         len_of_outbufline = strlen(outbufline);
@@ -1971,15 +1972,15 @@ void ttm_writeout(int number)
   int headofs;
   if (myid == 0)
   {
-#ifndef FDTD
+ #ifndef FDTD
     sprintf(outbufline,
             "#x y z natoms temp md_temp xi source dens vx vy vz fd_k fd_g Z proc Ce");
-#else
+ #else
     sprintf(outbufline,
             "#x y z natoms temp md_temp xi source dens vx vy vz fd_k fd_g Z proc Ce Ezx Ezy Hx Hy sigmax sigmay Hzx Hzy Ex Ey");
-#endif
-//    padding_len=300-strlen(outbufline)-1;
-//    sprintf(singleline,"%s%*s\n",outbufline,padding_len,"");
+ #endif
+  //    padding_len=300-strlen(outbufline)-1;
+  //    sprintf(singleline,"%s%*s\n",outbufline,padding_len,"");
     sprintf(singleline, "%s\n", outbufline);
     MPI_File_write_at(fh, 0, singleline, strlen(singleline), MPI_CHAR, &iostatus);
     headofs = strlen(singleline);
@@ -1987,14 +1988,14 @@ void ttm_writeout(int number)
   MPI_Bcast(&headofs, 1, MPI_INT, 0, cpugrid);
 
   //Daten schreiben
-//  long myofs=(long) 300+myid*300*(local_fd_dim.x-2)*(local_fd_dim.y-2)*(local_fd_dim.z-2);
+  //  long myofs=(long) 300+myid*300*(local_fd_dim.x-2)*(local_fd_dim.y-2)*(local_fd_dim.z-2);
   long myofs = 0;
   MPI_Exscan(&l, &myofs, 1, MPI_LONG, MPI_SUM, MPI_COMM_WORLD); //undefined on proc 0
 
   myofs += (long) headofs;
   MPI_File_set_view(fh, myofs, MPI_CHAR, MPI_CHAR, "native", MPI_INFO_NULL);
 
-//  MPI_File_write_all(fh, ttmoutbuf, 300*(local_fd_dim.x-2)*(local_fd_dim.y-2)*(local_fd_dim.z-2), MPI_CHAR, &iostatus);
+  //  MPI_File_write_all(fh, ttmoutbuf, 300*(local_fd_dim.x-2)*(local_fd_dim.y-2)*(local_fd_dim.z-2), MPI_CHAR, &iostatus);
   MPI_File_write_all(fh, ttmoutbuf, l, MPI_CHAR, &iostatus);
 
   MPI_File_close(&fh);
@@ -2062,13 +2063,21 @@ void ttm_writeout(int number)
     sprintf(fname, "%s.%d.ttm", outfilename, number);
     outfile = fopen(fname, "w");
     if (NULL == outfile) error ("Cannot open ttm file for writing.\n");
-#ifndef FDTD
-    fprintf(outfile,
-            "#x y z natoms temp md_temp xi source dens vx vy vz fd_k fd_g Z proc Ce\n");
-#else
-    fprintf(outfile,
-            "#x y z natoms temp md_temp xi source dens vx vy vz fd_k fd_g Z proc Ce Ezx Ezy Hx Hy sigmax sigmay Hzx Hzy Ex Ey\n");
+
+    //Das wird immer rausgeschrieben
+    fprintf(outfile,"#x y z natoms temp md_temp U xi source dens vx vy vz fd_k fd_g Z proc Ce");
+
+
+#ifdef FDTD //Das kommt bei FDTD zusätzlich dazu
+    fprintf(outfile, " Ezx Ezy Hx Hy sigmax sigmay Hzx Hzy Ex Ey");
 #endif
+
+#ifdef COLRAD
+    fprintf(outfile, " P_EE P_EI P_MPI2 P_MPI3 P_RR");
+#endif    
+
+    //Linebreak immer am ende der ifdefs
+    fprintf(outfile,"\n"); 
     for (i = 0; i < global_fd_dim.x; ++i)
     {
       for (j = 0; j < global_fd_dim.y; ++j)
@@ -2095,25 +2104,27 @@ void ttm_writeout(int number)
             k;
 #endif /* MPI*/
 
-#ifndef FDTD
-          fprintf(outfile, "%d %d %d %d %e %e %e %e %e %e %e %e %e %e %e %d %f\n",
-#else
-          fprintf(outfile, "%d %d %d %d %e %e %e %e %e %e %e %e %e %e %e %d %f %e %e %e %e %e %e %e %e %e %e\n",
-#endif
+
+          fprintf(outfile, "%d %d %d %d %e %e %e %e %e %e %e %e %e %e %e %e %d %f",
                   i, j, k, lglobal[index].natoms, lglobal[index].temp,
-                  lglobal[index].md_temp, lglobal[index].xi,
+                  lglobal[index].md_temp, lglobal[index].U, lglobal[index].xi,
                   lglobal[index].source, lglobal[index].dens,
                   lglobal[index].vcomx, lglobal[index].vcomy, lglobal[index].vcomz,
                   lglobal[index].fd_k, lglobal[index].fd_g,
-#ifndef FDTD
-                  lglobal[index].Z, lglobal[index].proc, lglobal[index].Ce
-#else
-                  lglobal[index].Z, lglobal[index].proc, lglobal[index].Ce,
+                  lglobal[index].Z, lglobal[index].proc, lglobal[index].Ce);
+
+#ifdef FDTF
+          fprintf(outfile, " %e %e %e %e %e %e %e %e %e %e",
                   lglobal[index].Ezx, lglobal[index].Ezy, lglobal[index].Hx, lglobal[index].Hy,
                   lglobal[index].sigmax, lglobal[index].sigmay,
                   lglobal[index].Hzx, lglobal[index].Hzy, lglobal[index].Ex, lglobal[index].Ey
-#endif
                  );
+#endif          
+#ifdef COLRAD
+          fprintf(outfile," %e %e %e %e %e ",
+                lglobal[index].P_EE,lglobal[index].P_EI,lglobal[index].P_MPI2,lglobal[index].P_MPI3, lglobal[index].P_RR);
+#endif          
+          fprintf(outfile,"\n");
         }
       }
     }
@@ -3099,8 +3110,8 @@ void ttm_create_mpi_datatypes(void)
     MPI_Type_struct(4, blockcounts, displs, types, &mpi_element);
     if (MPI_Type_commit(&mpi_element) != MPI_SUCCESS)
       error("type mpi_element failed to commit");
-
   }
+
   {
     // ****************************************************************
     // * Jetzt der derived-datatype für kommunikation für ttm-output
@@ -3111,96 +3122,105 @@ void ttm_create_mpi_datatypes(void)
     tmpelement_pointer = &tmpelement;
     MPI_Aint tmpaddr;
 
-#ifndef FDTD
-//natoms temp md_temp xi u source dens vcom.x vcom.y vcom.z fd_k fd_g Z proc Ce
-    int blockcounts[15] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
-    MPI_Datatype types[15] = {MPI_INT, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE,
-                              MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE, MPI_INT, MPI_DOUBLE,
-                              MPI_UB
-                             };
+    int  blockcountselements; //==alle meine elemnte + 1 für UB
+    blockcountselements=15+1;
+#ifdef FDTD    
+    blockcountselements+=10,
+#endif    
+#ifdef COLRAD
+    blockcountselements+=5; // P_EE P_EI P_MPI2 P_MPI3 P_RR
+#endif    
 
+    int *blockcounts;
+    alloc1darr(int, blockcounts, blockcountselements);
 
+    MPI_Datatype* types;
+    alloc1darr(MPI_Datatype, types, blockcountselements);
 
-    MPI_Aint displs[15];
-#else
+    MPI_Aint* displs;
+    alloc1darr(MPI_Aint, displs, blockcountselements);
 
-// natoms temp md_temp U xi source dens vcom.x vcom.y vcom.z fd_k fd_g Z proc Ce Ezx Ezy Hx Hy sigmax sigmay Hzx Hzy Ex Ey
-    int blockcounts[25] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, //natoms-fd_g
-                           1, 1, 1, //Z-Ce
-                           1, 1, 1, 1, 1, 1, // Ezx-sigmay
-                           1, 1, 1, 1
-                          }; //Hzx-Ey
-    MPI_Datatype types[25] = {MPI_INT, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE,
-                              MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE, MPI_INT, MPI_DOUBLE,
-                              //ADDITIONAL FDTD-elements from here
-                              MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE,
-                              MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE,
-                              MPI_UB
-                             };
-    MPI_Aint displs[25];
+    for(i=0;i<blockcountselements-1;i++)
+      blockcounts[i]=1;    
 
-#endif
+    //erstmal die blockcount-elemente besetzen, die immer benutzt werden
+    types[0]=MPI_INT;   //+1:   natoms
+    for(i=1;i<=12;i++)  //+12:  temp, md_temp, xi, U, source, dens, vcom.x, vcom.y, vcom.z, fd_k, fd_g, Z
+      types[i]=MPI_DOUBLE;
+
+    types[13]=MPI_INT;    // +1: proc
+    types[14]=MPI_DOUBLE; // +1: Ce
+    types[blockcountselements-1]=MPI_UB;  //das letzte immer MPI_UB 
+    int next_i=15;
+
+#ifdef FDTD
+    for(i=next_i; i < next_i + 10; i++) //+10: Ezx Ezy Hx Hy sigmax sigmay Hzx Hzy Ex Ey
+      types[i]=MPI_DOUBLE;
+    next_i+=10;
+#endif    
+#ifdef COLRAD
+    for(i=next_i; i < next_i + 5; i++)
+      types[i]=MPI_DOUBLE;    
+#endif    
     MPI_Address(&tmpelement, &tmpaddr);
     MPI_Address(&tmpelement.natoms, &displs[0]);
     MPI_Address(&tmpelement.temp, &displs[1]);
     MPI_Address(&tmpelement.md_temp, &displs[2]);
-
     MPI_Address(&tmpelement.xi, &displs[3]);
+    MPI_Address(&tmpelement.U, &displs[4]);
+    MPI_Address(&tmpelement.source, &displs[5]);
+    MPI_Address(&tmpelement.dens, &displs[6]);
+    MPI_Address(&tmpelement.vcomx, &displs[7]);
+    MPI_Address(&tmpelement.vcomy, &displs[8]);
+    MPI_Address(&tmpelement.vcomz, &displs[9]);
+    MPI_Address(&tmpelement.fd_k, &displs[10]);
+    MPI_Address(&tmpelement.fd_g, &displs[11]);
+    MPI_Address(&tmpelement.Z, &displs[12]);
+    MPI_Address(&tmpelement.proc, &displs[13]);
+    MPI_Address(&tmpelement.Ce, &displs[14]);
+    next_i=15;
+#ifdef FDTD
+    MPI_Address(&tmpelement.Ezx, &displs[next_i++]);
+    MPI_Address(&tmpelement.Ezy, &displs[next_i++]);
+    MPI_Address(&tmpelement.Hx, &displs[next_i++]);
+    MPI_Address(&tmpelement.Hy, &displs[next_i++]);
+    MPI_Address(&tmpelement.sigmax, &displs[next_i++]);
+    MPI_Address(&tmpelement.sigmay, &displs[next_i++]);
 
-    MPI_Address(&tmpelement.source, &displs[4]);
-    MPI_Address(&tmpelement.dens, &displs[5]);
-
-    MPI_Address(&tmpelement.vcomx, &displs[6]);
-    MPI_Address(&tmpelement.vcomy, &displs[7]);
-    MPI_Address(&tmpelement.vcomz, &displs[8]);
-
-    MPI_Address(&tmpelement.fd_k, &displs[9]);
-    MPI_Address(&tmpelement.fd_g, &displs[10]);
-    MPI_Address(&tmpelement.Z, &displs[11]);
-    MPI_Address(&tmpelement.proc, &displs[12]);
-    MPI_Address(&tmpelement.Ce, &displs[13]);
-
-#ifndef FDTD
-    tmpelement_pointer++;
-    MPI_Address(tmpelement_pointer, &displs[14]);
-
-    for (i = 0; i < 15; ++i)
-    {
-      displs[i] -= tmpaddr;
-    }
-
-    MPI_Type_struct(15, blockcounts, displs, types, &mpi_element2);
-#else
-    MPI_Address(&tmpelement.Ezx, &displs[14]);
-    MPI_Address(&tmpelement.Ezy, &displs[15]);
-    MPI_Address(&tmpelement.Hx, &displs[16]);
-    MPI_Address(&tmpelement.Hy, &displs[17]);
-    MPI_Address(&tmpelement.sigmax, &displs[18]);
-    MPI_Address(&tmpelement.sigmay, &displs[19]);
-
-    MPI_Address(&tmpelement.Hzx, &displs[20]);
-    MPI_Address(&tmpelement.Hzy, &displs[21]);
-    MPI_Address(&tmpelement.Ex, &displs[22]);
-    MPI_Address(&tmpelement.Ey, &displs[23]);
-
-    tmpelement_pointer++;
-    MPI_Address(tmpelement_pointer, &displs[24]);
-    for (i = 0; i < 25; ++i)
-    {
-      displs[i] -= tmpaddr;
-    }
-
-    MPI_Type_struct(25, blockcounts, displs, types, &mpi_element2);
+    MPI_Address(&tmpelement.Hzx, &displs[next_i++]);
+    MPI_Address(&tmpelement.Hzy, &displs[next_i++]);
+    MPI_Address(&tmpelement.Ex, &displs[next_i++]);
+    MPI_Address(&tmpelement.Ey, &displs[next_i++]);    
 #endif
+#ifdef COLRAD
+    MPI_Address(&tmpelement.P_EE, &displs[next_i++]);
+    MPI_Address(&tmpelement.P_EI, &displs[next_i++]);
+    MPI_Address(&tmpelement.P_MPI2, &displs[next_i++]);
+    MPI_Address(&tmpelement.P_MPI3, &displs[next_i++]);    
+    MPI_Address(&tmpelement.P_RR, &displs[next_i++]);    
+#endif    
+
+
+    tmpelement_pointer++;
+    MPI_Address(tmpelement_pointer, &displs[blockcountselements-1]);
+    for (i = 0; i < blockcountselements; ++i)
+    {
+      displs[i] -= tmpaddr;
+    }
+
+    MPI_Type_struct(blockcountselements, blockcounts, displs, types, &mpi_element2);
+
     if (MPI_Type_commit(&mpi_element2) != MPI_SUCCESS)
       error("type mpi_element2 failed to commit");
+    MPI_Type_contiguous(local_fd_dim.z - 2, mpi_element, &mpi_zrow);
+    //MPI_Type_commit(&mpi_zrow);
+    if (MPI_Type_commit(&mpi_zrow) != MPI_SUCCESS)
+      error("type mpi_zrow failed to commit");
+      
   }
 
   /* datatype for one string of elements along z (short of 2 lattice points) */
-  MPI_Type_contiguous(local_fd_dim.z - 2, mpi_element, &mpi_zrow);
-  //MPI_Type_commit(&mpi_zrow);
-  if (MPI_Type_commit(&mpi_zrow) != MPI_SUCCESS)
-    error("type mpi_zrow failed to commit");
+  
 
 
   { /* add displacements to skip ghost layers (mpi_zrow_block) */

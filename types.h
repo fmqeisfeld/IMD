@@ -484,6 +484,7 @@ typedef struct
 #endif
 #ifdef COLRAD
   N_Vector y; //<-enthält: Te,Ti,ne,c0,c1,c2,c3,....
+  real P_EE,P_EI,P_MPI2,P_MPI3,P_RR; //Leistungsdichten für TTM-OUTPUT
 #endif
 } ttm_Element;
 
