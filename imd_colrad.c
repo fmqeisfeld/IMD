@@ -8,13 +8,14 @@
 // ****************************************************
 
 
-//#define OMP
+#define OMP
 #define LAPACK
 //#define MULTIPHOTON
 //#define SPONT  //<-- spontante emission, Kaum effekt 
 //#define STARK  //<-- reabsorption via stark effect
 #define DOIPD    //<--Dazu muss ich initial saha distrib erstmal anpassen
 
+const int user_num_threads=4; //falls =0 --> automatisch maxnumthreads
 
 #ifdef OMP
 #include <omp.h>
@@ -43,7 +44,7 @@ const double colrad_tequi=1e-15;//TEST// 1e-12; //bei initial equi ohne Temperat
 double  HBAR;
 double  LASERFREQ;
 
-const int user_num_threads=2; //falls =0 --> automatisch maxnumthreads
+
 int num_threads;
 //const double  EMASS=9.10938356e-31;     // kg
 //const double  ECONST=8.854187817e-12;   // As/Vm
@@ -188,7 +189,8 @@ void colrad_init(void)
       num_threads = omp_get_max_threads();
     else
       num_threads=user_num_threads;
-    //printf("myid:%d, omp threads:%d\n",myid,num_threads);
+    printf("myid:%d, omp threads:%d\n",myid,num_threads);
+    omp_set_num_threads(num_threads);
 #endif 
 
 	if(myid==0)
@@ -1679,7 +1681,8 @@ int colrad_GetCoeffs(N_Vector y,double It,void *user_data)
 
   double E_ion_H_div_kTe_sq=pow((E_ion_H/BOLTZMAN/Te),2.0);
   double two_pi_me_kT_hsq=2.0*pi*EMASS*BOLTZMAN*Te/pow(planck,2.0);
-
+  double log54_beta_i=log(5.0/4.0*beta_i);
+  double kbTe=(BOLTZMAN*Te);
 
   double tmp0,tmp1,tmp2;
 
@@ -1696,6 +1699,7 @@ int colrad_GetCoeffs(N_Vector y,double It,void *user_data)
   double sigma_MPI_2;//=sigma1/LASERFREQ/pow(planck*LASERFREQ,2.0); //MPI-cross-sect. (2-photon)
   double sigma_MPI_3;
   double sigma1;
+
   //const. zur berechnung von sigma1
   double sigma_tmp=64.0*pow(pi,4.0)*pow(ECHARGE,10.0)*EMASS/3.0/sqrt(3.0)/pow(4.0*pi*ECONST,5.0)/pow(planck,6.0)/LIGHTSPEED/pow(LASERFREQ,3.0)/pow(13.6*eV2J,2.0);
   double I_sq=It*It; //for 2-photon-ioniz.
@@ -1703,6 +1707,9 @@ int colrad_GetCoeffs(N_Vector y,double It,void *user_data)
   int fail=0;
 
   //pre-zero k_EE's
+#ifdef OMP
+#pragma omp parallel for schedule(static) collapse(2)
+#endif   
   for(i=0;i<z0_len;i++)
   {
           for(j=0;j<z0_len;j++)
@@ -1711,6 +1718,10 @@ int colrad_GetCoeffs(N_Vector y,double It,void *user_data)
                   k_EE_z0_z0_b[i][j]=0.0;
           }
   }
+
+#ifdef OMP
+#pragma omp parallel for schedule(static) collapse(2)
+#endif 
   for(i=0;i<z1_len;i++)
   {
           for(j=0;j<z1_len;j++)
@@ -1721,6 +1732,9 @@ int colrad_GetCoeffs(N_Vector y,double It,void *user_data)
   }
 
   #if MAXLEVEL > 1
+#ifdef OMP
+#pragma omp parallel for schedule(static) collapse(2)
+#endif   
   for(i=0;i<z2_len;i++)
   {
           for(j=0;j<z2_len;j++)
@@ -1732,6 +1746,9 @@ int colrad_GetCoeffs(N_Vector y,double It,void *user_data)
   #endif
 
   #if MAXLEVEL > 2
+#ifdef OMP
+#pragma omp parallel for schedule(static) collapse(2)
+#endif   
   for(i=0;i<z3_len;i++)
   {
           for(j=0;j<z3_len;j++)
@@ -1743,6 +1760,9 @@ int colrad_GetCoeffs(N_Vector y,double It,void *user_data)
   #endif
 
 #if MAXLEVEL > 3
+#ifdef OMP
+#pragma omp parallel for schedule(static) collapse(2)
+#endif   
   for(i=0;i<z4_len;i++)
   {
           for(j=0;j<z4_len;j++)
@@ -1754,7 +1774,10 @@ int colrad_GetCoeffs(N_Vector y,double It,void *user_data)
 #endif
 
 
-  //pre-zero k_EI's
+  //pre-zero k_MPI's
+#ifdef OMP
+#pragma omp parallel for schedule(static) collapse(2)
+#endif    
   for(i=0;i<z0_len;i++)
   {
           for(j=0;j<z1_len;j++)
@@ -1770,6 +1793,9 @@ int colrad_GetCoeffs(N_Vector y,double It,void *user_data)
   }
 
 #if MAXLEVEL > 1
+#ifdef OMP
+#pragma omp parallel for schedule(static) collapse(2)
+#endif    
   for(i=0;i<z1_len;i++)
   {
           for(j=0;j<z2_len;j++)
@@ -1786,6 +1812,9 @@ int colrad_GetCoeffs(N_Vector y,double It,void *user_data)
   #endif
 
 #if MAXLEVEL > 2
+#ifdef OMP
+#pragma omp parallel for schedule(static) collapse(2)
+#endif    
    for(i=0;i<z2_len;i++)
   {
           for(j=0;j<z3_len;j++)
@@ -1802,6 +1831,9 @@ int colrad_GetCoeffs(N_Vector y,double It,void *user_data)
 #endif  
 
 #if MAXLEVEL > 3  
+#ifdef OMP
+#pragma omp parallel for schedule(static) collapse(2)
+#endif  
   for(i=0;i<z3_len;i++)
   {
           for(j=0;j<z4_len;j++)
@@ -1834,7 +1866,7 @@ int colrad_GetCoeffs(N_Vector y,double It,void *user_data)
             kronecker=1.0;//optically forbidden transition
 
           DeltaE=(STATES_z0[j][2]-STATES_z0[i][2])*eV2J;
-          a=DeltaE/(Te*BOLTZMAN);
+          a=DeltaE/kbTe;
           expint=ExpInt(a);
 
 if(expint==-1)
@@ -1846,7 +1878,7 @@ if(expint==-1)
 
           G2=genexpint(a,1.0,1.0);
           I_1=exp(-a)/a - expint;
-          I_2=I_1*log(5.0/4.0*beta_i)+expint/a-G2;
+          I_2=I_1*log54_beta_i+expint/a-G2;
           k_EE_z0_z0[i][j]=v_e*four_pi_a0_sq*(kronecker*alpha_e*a*a*I_1 +  (1.0-kronecker)*alpha_i*E_ion_H_div_kTe_sq*I_2);
 
       }
@@ -1871,7 +1903,7 @@ if(fail==1)
 
         //tmp1=3.0*(1.0-kronecker)/2.0;
         tmp1=0.0; //3.0*(1.0-kronecker)/2.0;
-        tmp2=exp(-(STATES_z0[j][2]-STATES_z0[i][2])*eV2J/(BOLTZMAN*Te));
+        tmp2=exp(-(STATES_z0[j][2]-STATES_z0[i][2])*eV2J/kbTe);
 
         //k_EE_z0_z0_b[i][j]=k_EE_z0_z0[i][j]/tmp0/(pow(two_pi_me_kT_hsq,tmp1))/tmp2;
         if(k_EE_z0_z0[i][j]> 0)
@@ -1901,7 +1933,7 @@ if(fail==1)
           if(STATES_z1[i][4]==STATES_z1[j][4])
             kronecker=1.0;
           DeltaE=(STATES_z1[j][2]-STATES_z1[i][2])*eV2J;
-          a=DeltaE/(Te*BOLTZMAN);
+          a=DeltaE/kbTe;
           expint=ExpInt(a);
 
 if(expint==-1)
@@ -1912,7 +1944,7 @@ if(expint==-1)
 #endif
           G2=genexpint(a,1.0,1.0);
           I_1=exp(-a)/a - expint;
-          I_2=I_1*log(5.0/4.0*beta_i)+expint/a-G2;
+          I_2=I_1*log54_beta_i+expint/a-G2;
           k_EE_z1_z1[i][j]=v_e*four_pi_a0_sq*(kronecker*alpha_e*a*a*I_1 +(1-kronecker)*alpha_i*E_ion_H_div_kTe_sq*I_2);
         }
       }
@@ -1933,7 +1965,7 @@ if(expint==-1)
         //tmp1=3.0*(1.0-kronecker)/2.0;
         tmp1=0.0; //3.0*(1.0-kronecker)/2.0;
 
-        tmp2=exp(-(STATES_z1[j][2]-STATES_z1[i][2])*eV2J/(BOLTZMAN*Te));
+        tmp2=exp(-(STATES_z1[j][2]-STATES_z1[i][2])*eV2J/kbTe);
 
         //k_EE_z0_z0_b[i][j]=k_EE_z0_z0[i][j]/tmp0/(pow(two_pi_me_kT_hsq,tmp1))/tmp2;
         if(k_EE_z1_z1[i][j]>0)
@@ -1968,7 +2000,7 @@ if(expint==-1)
           if(STATES_z2[i][4]==STATES_z2[j][4])
             kronecker=1.0;
           DeltaE=(STATES_z2[j][2]-STATES_z2[i][2])*eV2J;
-          a=DeltaE/(Te*BOLTZMAN);
+          a=DeltaE/kbTe;
           expint=ExpInt(a);
 
 if(expint==-1)
@@ -1979,7 +2011,7 @@ if(expint==-1)
 #endif
           G2=genexpint(a,1.0,1.0);
           I_1=exp(-a)/a - expint;
-          I_2=I_1*log(5.0/4.0*beta_i)+expint/a-G2;
+          I_2=I_1*log54_beta_i+expint/a-G2;
           k_EE_z2_z2[i][j]=v_e*four_pi_a0_sq*(kronecker*alpha_e*a*a*I_1 +(1-kronecker)*alpha_i*E_ion_H_div_kTe_sq*I_2);
         }
       }
@@ -2000,7 +2032,7 @@ if(expint==-1)
         //tmp1=3.0*(1.0-kronecker)/2.0;
         tmp1=0.0; //3.0*(1.0-kronecker)/2.0;
 
-        tmp2=exp(-(STATES_z2[j][2]-STATES_z2[i][2])*eV2J/(BOLTZMAN*Te));
+        tmp2=exp(-(STATES_z2[j][2]-STATES_z2[i][2])*eV2J/kbTe);
         //ACHTUNG: tmp2 kann -->0 gehen
         // --> krev = NaN
         // --> prüfe ob fwd-rate nicht sowieso = 0 ist
@@ -2037,7 +2069,7 @@ if(expint==-1)
           if(STATES_z3[i][4]==STATES_z3[j][4])
             kronecker=1.0;
           DeltaE=(STATES_z3[j][2]-STATES_z3[i][2])*eV2J;
-          a=DeltaE/(Te*BOLTZMAN);
+          a=DeltaE/kbTe;
           expint=ExpInt(a);
 
 if(expint==-1)
@@ -2049,7 +2081,7 @@ if(expint==-1)
 
           G2=genexpint(a,1.0,1.0);
           I_1=exp(-a)/a - expint;
-          I_2=I_1*log(5.0/4.0*beta_i)+expint/a-G2;
+          I_2=I_1*log54_beta_i+expint/a-G2;
           k_EE_z3_z3[i][j]=v_e*four_pi_a0_sq*(kronecker*alpha_e*a*a*I_1 +(1-kronecker)*alpha_i*E_ion_H_div_kTe_sq*I_2);
         }
       }
@@ -2070,7 +2102,7 @@ if(expint==-1)
         //tmp1=3.0*(1.0-kronecker)/2.0;
         tmp1=0.0; //3.0*(1.0-kronecker)/2.0;
 
-        tmp2=exp(-(STATES_z3[j][2]-STATES_z3[i][2])*eV2J/(BOLTZMAN*Te));
+        tmp2=exp(-(STATES_z3[j][2]-STATES_z3[i][2])*eV2J/kbTe);
         //k_EE_z0_z0_b[i][j]=k_EE_z0_z0[i][j]/tmp0/(pow(two_pi_me_kT_hsq,tmp1))/tmp2;
         if(k_EE_z3_z3[i][j] > 0)
         {
@@ -2104,7 +2136,7 @@ if(expint==-1)
           if(STATES_z4[i][4]==STATES_z4[j][4])
             kronecker=1.0;
           DeltaE=(STATES_z4[j][2]-STATES_z4[i][2])*eV2J;
-          a=DeltaE/(Te*BOLTZMAN);
+          a=DeltaE/kbTe;
           expint=ExpInt(a);
 
 if(expint==-1)
@@ -2116,7 +2148,7 @@ if(expint==-1)
 
           G2=genexpint(a,1.0,1.0);
           I_1=exp(-a)/a - expint;
-          I_2=I_1*log(5.0/4.0*beta_i)+expint/a-G2;
+          I_2=I_1*log54_beta_i+expint/a-G2;
           k_EE_z4_z4[i][j]=v_e*four_pi_a0_sq*(kronecker*alpha_e*a*a*I_1 +(1-kronecker)*alpha_i*E_ion_H_div_kTe_sq*I_2);
         }
       }
@@ -2138,7 +2170,7 @@ if(expint==-1)
         //tmp1=3.0*(1.0-kronecker)/2.0;
         tmp1=0.0; //3.0*(1.0-kronecker)/2.0;
 
-        tmp2=exp(-(STATES_z4[j][2]-STATES_z4[i][2])*eV2J/(BOLTZMAN*Te));
+        tmp2=exp(-(STATES_z4[j][2]-STATES_z4[i][2])*eV2J/kbTe);
         //k_EE_z0_z0_b[i][j]=k_EE_z0_z0[i][j]/tmp0/(pow(two_pi_me_kT_hsq,tmp1))/tmp2;
         if(k_EE_z4_z4[i][j] > 0)
         {
@@ -2174,7 +2206,7 @@ if(expint==-1)
 #ifdef DOIPD
       DeltaE=MAX(0.0,DeltaE);
 #endif      
-      a=DeltaE/(Te*BOLTZMAN);
+      a=DeltaE/kbTe;
       expint=ExpInt(a);
 
 
@@ -2186,7 +2218,7 @@ if(expint==-1)
 #endif
       G2=genexpint(a,1.0,1.0);
       I_1=exp(-a)/a - expint;
-      I_2=I_1*log(5.0/4.0*beta_i)+expint/a-G2;
+      I_2=I_1*log54_beta_i+expint/a-G2;
       k_EI_z0_z1[i][j]=v_e*four_pi_a0_sq*alpha_i*E_ion_H_div_kTe_sq*I_2;
 
 #ifdef MULTIPHOTON
@@ -2221,7 +2253,7 @@ if(expint==-1)
       kronecker=0;
       tmp0=pow(2.0,(1.0-kronecker))*STATES_z1[j][3]/STATES_z0[i][3];
       tmp1=3.0*(1.0-kronecker)/2.0;
-      tmp2=exp(-DeltaE/(BOLTZMAN*Te));
+      tmp2=exp(-DeltaE/kbTe);
       if(k_EI_z0_z1[i][j]==0) //wohl wichtig
         k_EI_z1_z0[i][j]=0; 
       else       
@@ -2252,7 +2284,7 @@ if(expint==-1)
 #ifdef DOIPD
       DeltaE=MAX(0.0,DeltaE);
 #endif            
-      a=DeltaE/(Te*BOLTZMAN);
+      a=DeltaE/kbTe;
       expint=ExpInt(a);
 
 if(expint==-1)
@@ -2264,7 +2296,7 @@ if(expint==-1)
 
       G2=genexpint(a,1.0,1.0);
       I_1=exp(-a)/a - expint;
-      I_2=I_1*log(5.0/4.0*beta_i)+expint/a-G2;
+      I_2=I_1*log54_beta_i+expint/a-G2;
       k_EI_z1_z2[i][j]=v_e*four_pi_a0_sq*alpha_i*E_ion_H_div_kTe_sq*I_2;
 
 #ifdef MULTIPHOTON
@@ -2299,7 +2331,7 @@ if(expint==-1)
       kronecker=0;
       tmp0=pow(2.0,(1.0-kronecker))*STATES_z2[j][3]/STATES_z1[i][3];
       tmp1=3.0*(1.0-kronecker)/2.0;
-      tmp2=exp(-DeltaE/(BOLTZMAN*Te));
+      tmp2=exp(-DeltaE/kbTe);
       if(k_EI_z1_z2[i][j]==0) //wohl wichtig
         k_EI_z2_z1[i][j]=0; 
       else             
@@ -2335,7 +2367,7 @@ if(expint==-1)
 #ifdef DOIPD
       DeltaE=MAX(0.0,DeltaE);
 #endif            
-      a=DeltaE/(Te*BOLTZMAN);
+      a=DeltaE/kbTe;
          expint=ExpInt(a);
 
 if(expint==-1)
@@ -2347,7 +2379,7 @@ if(expint==-1)
 
       G2=genexpint(a,1.0,1.0);
       I_1=exp(-a)/a - expint;
-      I_2=I_1*log(5.0/4.0*beta_i)+expint/a-G2;
+      I_2=I_1*log54_beta_i+expint/a-G2;
       k_EI_z2_z3[i][j]=v_e*four_pi_a0_sq*alpha_i*E_ion_H_div_kTe_sq*I_2;
 
 #ifdef MULTIPHOTON
@@ -2384,7 +2416,7 @@ if(expint==-1)
       kronecker=0;
       tmp0=pow(2.0,(1.0-kronecker))*STATES_z3[j][3]/STATES_z2[i][3];
       tmp1=3.0*(1.0-kronecker)/2.0;
-      tmp2=exp(-DeltaE/(BOLTZMAN*Te));
+      tmp2=exp(-DeltaE/kbTe);
 
       if(k_EI_z2_z3[i][j] > 0)
       {
@@ -2422,7 +2454,7 @@ if(expint==-1)
 #ifdef DOIPD
       DeltaE=MAX(0.0,DeltaE);
 #endif            
-      a=DeltaE/(Te*BOLTZMAN);
+      a=DeltaE/kbTe;
          expint=ExpInt(a);
 
 if(expint==-1)
@@ -2434,7 +2466,7 @@ if(expint==-1)
 
       G2=genexpint(a,1.0,1.0);
       I_1=exp(-a)/a - expint;
-      I_2=I_1*log(5.0/4.0*beta_i)+expint/a-G2;
+      I_2=I_1*log54_beta_i+expint/a-G2;
       k_EI_z3_z4[i][j]=v_e*four_pi_a0_sq*alpha_i*E_ion_H_div_kTe_sq*I_2;
 
 #ifdef MULTIPHOTON
@@ -2473,7 +2505,7 @@ if(expint==-1)
       kronecker=0;
       tmp0=pow(2.0,(1.0-kronecker))*STATES_z4[j][3]/STATES_z3[i][3];
       tmp1=3.0*(1.0-kronecker)/2.0;
-      tmp2=exp(-DeltaE/(BOLTZMAN*Te));
+      tmp2=exp(-DeltaE/kbTe);
       if(k_EI_z3_z4[i][j] >9 )
       {
         k_EI_z4_z3[i][j]=k_EI_z3_z4[i][j]/tmp0/pow(two_pi_me_kT_hsq,tmp1)/tmp2;
@@ -2497,7 +2529,8 @@ if(expint==-1)
 // ***************************************************************************************
 double ExpInt(double x)
 {
- if(x>500)
+ //if(x>500) //vorher
+ if(x>250) 
  {
       return 0; //sonst underflow?
  }  
@@ -2525,7 +2558,7 @@ double ExpInt(double x)
 }
 double fak(double t, double x, double j,double s) //aux. function for genexpint
 {
-  return pow(t,x-1)*pow(pow(log(-log(t)),j)/-log(t),s);
+  return pow(t,x-1)*pow( pow(log(-log(t)) , j) / -log(t),s);
 }
 
 double genexpint(double x,double ss,double j) 
@@ -2544,8 +2577,16 @@ double genexpint(double x,double ss,double j)
 //  double j=1.0; //j=k-1 (k=2)
 //  double ss=1.0;
 
+// für x=60 ---> 4.7243e-45
+
+// if(x>=60)
+//  return 5e-45;
+
   int maks=5;
   double eps=1E-12;
+
+eps=1E-6;  
+
   double b=exp(-1.);
   double s_old=0;
 
@@ -2562,7 +2603,11 @@ double genexpint(double x,double ss,double j)
     if(n==1)
     {
         i=1.0;
-        s=b*fak(0.5*b,x,j,ss);
+        //s=b*fak(0.5*b,x,j,ss);
+        double logt=log(0.5*b);
+        double simplefak=-pow(0.5*b,x-1.0)*log(-logt)/logt;
+        s=b*simplefak;
+
     }
     else
     {
@@ -2571,11 +2616,26 @@ double genexpint(double x,double ss,double j)
       dd=2*d;
       t=0.5*d;
       sum=0.0;
+
+// #ifdef OMP      
+// #pragma omp parallel for shared(sum, t) reduction(+: sum)
+// #endif
       for(k=1;k<m+1;++k)
       {
-        sum=sum+fak(t,x,j,ss);
+        double logt=log(t);
+        double simplefak=-pow(t,x-1.0)*log(-logt)/logt;        
+
+        //sum=sum+fak(t,x,j,ss);
+        sum+=simplefak;
+
         t=t+dd;
-        sum=sum+fak(t,x,j,ss);
+
+        logt=log(t);
+        simplefak=-pow(t,x-1.0)*log(-logt)/logt;
+
+        //sum=sum+fak(t,x,j,ss);
+
+        sum+=simplefak;
         t=t+d;
       }
       i=i*3.0;

@@ -46,4 +46,7 @@ Stattdessen muss ich schon im diffusionsschritt
 rechnen. Warum die beiden Sachen nicht exakt dasselbe liefern weiss ich leider nicht. 
 Habe jedenfalls gecheckt, dass Cv aus interpol.tabel identisch ist zu differenzen-quotienten-näherung.
 Evtl. ist meine Tabelle nicht dicht genug!
+
+22.1.20:
+ imd.c, z90: MPI_Init_thread statt MPI_Init. Besser für OMP?
         
