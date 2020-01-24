@@ -4,10 +4,12 @@
 // ***************************************************
 // * TODO:
 // * 
-// * -PHYSIK: Ist MPI überhaupt von IPD betroffen?
+// * SPEEDUP pragma omp simd auch in ydot
+// * floats wo möglich
 // ****************************************************
 
 
+#define USEFLOAT
 #define OMP
 #define LAPACK
 //#define MULTIPHOTON
@@ -51,6 +53,16 @@ int num_threads;
 //const double  BOLTZMAN=1.38064852e-23;  // J/K
 //const double  ECHARGE=1.60217662e-19;  // C
 //const double  AMU=1.66053904020e-27;   // atomic mass unit
+
+#ifdef USEFLOAT
+float fak(float t, float x, float j,float s); //aux. function for genexpint
+float genexpint(float x,float ss,float j);
+#else
+double fak(double t, double x, double j,double s); //aux. function for genexpint
+double genexpint(double x,double ss,double j);
+#endif
+double ExpInt(double x);
+
 
 typedef struct {
   realtype It; //Intesity
@@ -1943,7 +1955,7 @@ if(fail==1)
   ///////////////////////
   fail=0;
 #ifdef OMP
-#pragma omp parallel for schedule(dynamic,1) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2) num_threads(num_threads)
+#pragma omp parallel for simd schedule(dynamic,1) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2) num_threads(num_threads)
 #endif
   for(i=0;i<z1_len;++i)
   {
@@ -1975,7 +1987,7 @@ if(expint==-1)
 
   //NOW REVERSE RATE
 #ifdef OMP
-#pragma omp parallel for schedule(dynamic,1) collapse(2) private(kronecker,tmp0,tmp1,tmp2) num_threads(num_threads)
+#pragma omp parallel for simd schedule(dynamic,1) collapse(2) private(kronecker,tmp0,tmp1,tmp2) num_threads(num_threads)
 #endif
   for(i=0;i<z1_len;++i)
   {
@@ -2010,7 +2022,7 @@ if(expint==-1)
 
   fail=0;
 #ifdef OMP
-#pragma omp parallel for schedule(dynamic,1) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2) num_threads(num_threads)
+#pragma omp parallel for simd schedule(dynamic,1) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2) num_threads(num_threads)
 #endif
   for(i=0;i<z2_len;++i)
   {
@@ -2042,7 +2054,7 @@ if(expint==-1)
 
     //NOW REVERSE RATE
 #ifdef OMP
-#pragma omp parallel for schedule(dynamic,1) collapse(2) private(kronecker,tmp0,tmp1,tmp2) num_threads(num_threads)
+#pragma omp parallel for simd schedule(dynamic,1) collapse(2) private(kronecker,tmp0,tmp1,tmp2) num_threads(num_threads)
 #endif
   for(i=0;i<z2_len;++i)
   {
@@ -2079,7 +2091,7 @@ if(expint==-1)
 
   fail=0;
   #ifdef OMP
-  #pragma omp parallel for schedule(dynamic,1) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2) num_threads(num_threads)
+  #pragma omp parallel for simd schedule(dynamic,1) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2) num_threads(num_threads)
   #endif
   for(i=0;i<z3_len;++i)
   {
@@ -2112,7 +2124,7 @@ if(expint==-1)
           return -1;
   //NOW REVERSE RATE
   #ifdef OMP
-  #pragma omp parallel for schedule(dynamic,1) collapse(2) private(kronecker,tmp0,tmp1,tmp2) num_threads(num_threads)
+  #pragma omp parallel for simd schedule(dynamic,1) collapse(2) private(kronecker,tmp0,tmp1,tmp2) num_threads(num_threads)
   #endif
   for(i=0;i<z3_len;++i)
   {
@@ -2146,7 +2158,7 @@ if(expint==-1)
 
   fail=0;
 #ifdef OMP
-#pragma omp parallel for schedule(dynamic,1) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2) num_threads(num_threads)
+#pragma omp parallel for simd schedule(dynamic,1) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2) num_threads(num_threads)
 #endif
   for(i=0;i<z4_len;++i)
   {
@@ -2180,7 +2192,7 @@ if(expint==-1)
 
   //NOW REVERSE RATE
 #ifdef OMP
-#pragma omp parallel for schedule(dynamic,1) collapse(2) private(kronecker,tmp0,tmp1,tmp2) num_threads(num_threads)
+#pragma omp parallel for simd schedule(dynamic,1) collapse(2) private(kronecker,tmp0,tmp1,tmp2) num_threads(num_threads)
 #endif        
   for(i=0;i<z4_len;++i)
   {
@@ -2214,7 +2226,7 @@ if(expint==-1)
   /////////////////
   fail=0;
 #ifdef OMP
-  #pragma omp parallel for schedule(dynamic,1) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2,sigma1,sigma_MPI_2,sigma_MPI_3,tmp0,tmp1,tmp2) num_threads(num_threads)
+  #pragma omp parallel for simd schedule(dynamic,1) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2,sigma1,sigma_MPI_2,sigma_MPI_3,tmp0,tmp1,tmp2) num_threads(num_threads)
 #endif
   for(i=0;i<z0_len;++i)
   {
@@ -2292,7 +2304,7 @@ if(expint==-1)
 #if MAXLEVEL > 1
   fail=0;
 #ifdef OMP
-#pragma omp parallel for schedule(dynamic,1) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2,sigma1,sigma_MPI_2,sigma_MPI_3,tmp0,tmp1,tmp2) num_threads(num_threads)
+#pragma omp parallel for simd schedule(dynamic,1) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2,sigma1,sigma_MPI_2,sigma_MPI_3,tmp0,tmp1,tmp2) num_threads(num_threads)
 #endif
   for(i=0;i<z1_len;++i)
   {
@@ -2375,7 +2387,7 @@ if(expint==-1)
 
   fail=0;
 #ifdef OMP
-#pragma omp parallel for schedule(dynamic,1) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2,sigma1,sigma_MPI_2,sigma_MPI_3,tmp0,tmp1,tmp2) num_threads(num_threads)
+#pragma omp parallel for simd schedule(dynamic,1) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2,sigma1,sigma_MPI_2,sigma_MPI_3,tmp0,tmp1,tmp2) num_threads(num_threads)
 #endif
   for(i=0;i<z2_len;++i)
   {
@@ -2462,7 +2474,7 @@ if(expint==-1)
 
   fail=0;
 #ifdef OMP
-#pragma omp parallel for schedule(dynamic,1) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2,sigma1,sigma_MPI_2,sigma_MPI_3,tmp0,tmp1,tmp2) num_threads(num_threads)
+#pragma omp parallel for simd schedule(dynamic,1) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2,sigma1,sigma_MPI_2,sigma_MPI_3,tmp0,tmp1,tmp2) num_threads(num_threads)
 #endif
   for(i=0;i<z3_len;++i)
   {
@@ -2556,18 +2568,7 @@ double ExpInt(double x)
  {
       return 0; //sonst underflow?
  }  
-
-/*
-   if(x<1E-300)
-     return 6.947249040044042E2; //Limiting case
-   else if(x>87.5)
-     return 0;
-*/
   
-   // gsl_sf_result result;
-   // int retval=gsl_sf_expint_E1_e(x, &result);
-   // printf("retval:%d, x:%.4e result:%.4e\n",retval,x,result.val);
-   // return result.val;
    
    return gsl_sf_expint_E1(x);
 
@@ -2578,11 +2579,82 @@ double ExpInt(double x)
    B=x*x*x*x*exp(7.7*x)*pow(2.0+x,3.7);
    return pow(pow(A,-7.7)+B,-0.13);
 }
+
+
+#ifdef USEFLOAT
+float fak(float t, float x, float j,float s) //aux. function for genexpint
+{
+  return powf(t,x-1)*powf( powf(logf(-logf(t)) , j) / -logf(t),s);
+}
+#else
 double fak(double t, double x, double j,double s) //aux. function for genexpint
 {
   return pow(t,x-1)*pow( pow(log(-log(t)) , j) / -log(t),s);
 }
+#endif
 
+
+
+#ifdef USEFLOAT
+float genexpint(float x,float ss,float j) 
+{
+  int maks=5;
+  float eps=1E-6;
+
+  float b=0.36787944117f;
+  float s_old=0;
+
+  float i=0.0;
+  float s=0.0;
+  float t=0.0;
+  float d=0.0;
+  float dd=0.0;
+  float sum=0.0;
+  float m=0.0;
+  int n,k;
+  for(n=1;n<maks+1;++n)
+  {
+    if(n==1)
+    {
+        i=1.0;
+        float logt=logf(0.5*b);
+        float simplefak=-powf(0.5*b,x-1.0)*logf(-logt)/logt;
+        s=b*simplefak;
+
+    }
+    else
+    {
+      m=i;
+      d=b/(3*m);
+      dd=2*d;
+      t=0.5*d;
+      sum=0.0;
+
+      for(k=1;k<m+1;++k)
+      {
+        float logt=logf(t);
+        float simplefak=-powf(t,x-1.0)*logf(-logt)/logt;        
+        sum+=simplefak;
+        t=t+dd;
+        logt=logf(t);
+        simplefak=-powf(t,x-1.0)*logf(-logt)/logt;
+        sum+=simplefak;
+        t=t+d;
+      }
+      i=i*3.0;
+      s=(s+b*sum/m)/3.0;
+    }
+    s=s/tgammaf(j+1.0);
+    if(fabs(s_old-s)<=eps)
+      break;
+    else
+       s_old=s;
+  }
+  return s; ///tgamma(j+1.0);
+  //return s/tgamma1pm1(j+1.0); //,policy<digits10<3> >());
+}
+
+#else
 double genexpint(double x,double ss,double j) 
 // G_k(x)= E_1^(k-1) (x) wobei  
 // E_ss^j= 1/(Gamma(j+1)) * int_1^inf (ln(t))^j * t^(-ss) e^(-z*t) dt
@@ -2673,6 +2745,7 @@ eps=1E-6;
   return s; ///tgamma(j+1.0);
   //return s/tgamma1pm1(j+1.0); //,policy<digits10<3> >());
 }
+#endif
 
 // ************************************************
 // *            RE-ABSORPTION KRAM

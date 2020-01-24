@@ -156,9 +156,9 @@ double tmm_K1(double nu);
 static int colrad_ydot(double t, N_Vector u, N_Vector udot, void *user_data);
 void do_Saha(double Te,double totalc,double ne,N_Vector y);
 int colrad_GetCoeffs(N_Vector y,double It, void * user_data);
-double ExpInt(double x);
-double fak(double t, double x, double j,double s); //aux. function for genexpint
-double genexpint(double x,double ss,double j);
+//double ExpInt(double x);
+// double fak(double t, double x, double j,double s); //aux. function for genexpint
+// double genexpint(double x,double ss,double j);
 double EscapeFactor(double w,double tau0);
 double StarkWidth(double nu,double nl,double Te,double Ti,double Tr,double Ne,double Ni);
 double EinsteinCoeff(double n1,double n2,double g2,double DeltaE);
