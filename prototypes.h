@@ -153,7 +153,7 @@ double tmm_K1(double nu);
 #endif
 
 #ifdef COLRAD
-static int colrad_ydot(double t, N_Vector u, N_Vector udot, void *user_data);
+int colrad_ydot(double t, N_Vector u, N_Vector udot, void *user_data);
 void do_Saha(double Te,double totalc,double ne,N_Vector y);
 int colrad_GetCoeffs(N_Vector y,double It, void * user_data);
 //double ExpInt(double x);

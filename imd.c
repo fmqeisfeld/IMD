@@ -57,9 +57,11 @@ int main(int argc, char **argv)
   //MPI_Init(&argc, &argv);
 
 //MYMOD  
+  
   int provided;
   MPI_Init_thread(&argc, &argv,  MPI_THREAD_FUNNELED, &provided);
 //ENDOF MYMOD  
+
   init_mpi();
 #endif
 

@@ -10,14 +10,12 @@
 
 
 #define USEFLOAT
-#define OMP
+//#define OMP
 #define LAPACK
 //#define MULTIPHOTON
 //#define SPONT  //<-- spontante emission, Kaum effekt 
 //#define STARK  //<-- reabsorption via stark effect
-#define DOIPD    //<--Dazu muss ich initial saha distrib erstmal anpassen
-
-const int user_num_threads=4; //falls =0 --> automatisch maxnumthreads
+#define DOIPD    //
 
 #ifdef OMP
 #include <omp.h>
@@ -39,7 +37,7 @@ const double bohr_radius=0.52917721067E-10; // m
 const int MAXLINE = 255;
 const double  pi=3.141592653589793;
 
-const double colrad_tequi=1e-15;//TEST// 1e-12; //bei initial equi ohne Temperatur-variation erst einmal 
+const double colrad_tequi=10e-12;//TEST// 1e-12; //bei initial equi ohne Temperatur-variation erst einmal 
                                 //die Saha-besetzungsdichten equilibrieren
 
 //const double  LIGHTSPEED=2.997925458e8; // m/s
@@ -190,6 +188,7 @@ if(l1[i][j][k].ne <0 || isnan(l1[i][j][k].ne) !=0 )
   }
  if(cdata->initial_equi==true)
  {
+  colrad_write(0);
   cdata->initial_equi=false;
  }
   
@@ -208,12 +207,14 @@ void colrad_init(void)
 	int i,j,k;
 	
 #ifdef OMP
-   if(user_num_threads==0) //Also nicht vom user festgelegt
-      num_threads = omp_get_max_threads();
-    else
-      num_threads=user_num_threads;
-    printf("myid:%d, omp threads:%d\n",myid,num_threads);
-    omp_set_num_threads(num_threads);
+    #pragma omp parallel
+    {
+      #pragma omp single
+      {
+        num_threads=omp_get_num_threads();
+        printf("myid:%d, omp threads:%d\n",myid,num_threads);
+      }
+    }
 #endif 
 
 	if(myid==0)
@@ -315,7 +316,8 @@ void colrad_init(void)
   SUNLinSolFree(LS);
   CVodeFree(&cvode_mem);	
 */
-
+  
+  colrad_read(0);
 }
 
 
@@ -999,7 +1001,7 @@ r10=2.0/ne*tmp*Q_z1/Q_z0*p; //r10= ratio of ion-concentrations n(Z=1)/n(Z=0); g_
 // ************************************************************************************************************
 //                                      ACTION
 // ///////////////////////////////////////////////////////////////////////////////////////////////////////////
-static int colrad_ydot(double t, N_Vector y, N_Vector colrad_ydot, void *user_data)
+int colrad_ydot(double t, N_Vector y, N_Vector colrad_ydot, void *user_data)
 {
 
 /*
@@ -2563,8 +2565,7 @@ if(expint==-1)
 // ***************************************************************************************
 double ExpInt(double x)
 {
- //if(x>500) //vorher
- if(x>250) 
+ if(x>500) //vorher
  {
       return 0; //sonst underflow?
  }  
@@ -2601,7 +2602,7 @@ float genexpint(float x,float ss,float j)
   int maks=5;
   float eps=1E-6;
 
-  float b=0.36787944117f;
+  float b=0.36787944117f; //exp(-1)
   float s_old=0;
 
   float i=0.0;
@@ -2887,4 +2888,99 @@ double EinsteinCoeff(double n1,double n2,double g2,double DeltaE)
   return A21;
 }
 
+int colrad_write(int number)
+{
+    FILE *outfile;
+    char fname[255];
+    sprintf(fname, "%s.%d.%d.colrad", outfilename, myid,number);
+    outfile = fopen(fname, "w");
+    if (NULL == outfile)
+    {
+      char errstr[255];
+      sprintf(errstr,"ERROR: cannot open colrad outfile %s\n",fname);
+      error(errstr);
+    }
 
+    int i,j,k,l;    
+    for(i=1; i < local_fd_dim.x-1; i++)
+    {
+      for(j=1; j < local_fd_dim.y-1; j++)
+      {
+        for(k=1; k < local_fd_dim.z-1; k++) 
+        {
+          fprintf(outfile,"%d %d %d",i,j,k);
+          for(l=0;l<neq;l++)
+          {
+            fprintf(outfile, " %.4e ", Ith(l1[i][j][k].y,l));
+          }
+          fprintf(outfile,"\n");
+        }        
+      }
+
+    }
+  return 0; //alles ok
+}
+
+int colrad_read(int number)
+{
+  FILE *infile;
+  char fname[255];
+  int i,j,k,l;
+
+  sprintf(fname, "%s.%d.%d.colrad", outfilename, myid,number);
+  infile=fopen(fname,"r");
+  if(infile==NULL)
+  {
+    char errstr[255];
+    sprintf(errstr,"ERROR: Colrad infile %s not found\n", fname);
+    error(errstr);
+
+  }
+  double tmp;
+
+
+    char **tokens;
+    size_t numtokens;
+    int MAX_LINE_LENGTH=3000; //Hängt davon ab wieviele states betrachtet werden
+                             //sollte dynamisch berechnet werden
+    char line[MAX_LINE_LENGTH];
+    int linenr=1;
+    for(i=1; i < local_fd_dim.x-1; i++)
+    {
+      for(j=1; j < local_fd_dim.y-1; j++)
+      {
+        for(k=1; k < local_fd_dim.z-1; k++) 
+        {
+
+          //read data
+          if (fgets (line, MAX_LINE_LENGTH, infile) == NULL) {
+            char errstr[255];
+            sprintf(errstr,"Error Reading colrad-input-file: %s in line %d.\n", fname,linenr);
+            error(errstr);
+          }
+
+          tokens = strsplit(line, ", \t\n", &numtokens); //strsplit in imd_ttm.char
+
+printf("myid:%d,numtokens:%d\n",myid,numtokens);
+
+          for(l=0;l<neq;l++)
+          {
+            sscanf(tokens[l+3], "%lf",  &tmp);
+            Ith(l1[i][j][k].y,l)=tmp;
+            
+          }
+          linenr++;
+
+        for (l = 0; l < numtokens; l++) {
+          free(tokens[l]);
+        }
+        if (tokens != NULL)
+          free(tokens);          
+
+        }        
+      }
+
+    }  
+  fclose(infile);
+  return 0;
+}
