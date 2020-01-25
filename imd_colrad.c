@@ -3,17 +3,17 @@
 
 // ***************************************************
 // * TODO:
-// * 
-// * SPEEDUP pragma omp simd auch in ydot
+// * mpi2 und mpi3 anpassen weil energies delE und kbTe in eV
+// * SPEEDUP pragma omp   auch in ydot
 // * floats wo möglich
 // ****************************************************
 
 
 #define USEFLOAT
-//#define OMP
+#define OMP
 #define LAPACK
 //#define MULTIPHOTON
-//#define SPONT  //<-- spontante emission, Kaum effekt 
+#define SPONT  //<-- spontante emission, Kaum effekt 
 //#define STARK  //<-- reabsorption via stark effect
 #define DOIPD    //
 
@@ -22,6 +22,14 @@
 #endif
 
 #define MAXLEVEL 4 // bis zu welchem Ionisationsgrad?
+
+// #ifdef USEFLOAT 
+// #define EXPR(x) expf(x)
+// #else
+// #define EXPR(x) exp(x)
+// #endif
+
+#define EXPR(x) exp(x)  //<--NIEMALS expf draus machen!
 //#define MAXLINE 255
 //#define Ith(v,i)    NV_Ith_S(v,i)       /* Ith numbers components 1..NEQ */
 //#define IJth(B,i,j) SM_ELEMENT_D(B,i,j)  //DENSE_ELEM(A,i,j) /* IJth numbers rows,cols 1..NEQ */
@@ -31,13 +39,16 @@
 // *********************************************************
 // const double eV2J=1.6021766E-19;
 const double eV2H=0.03674932; //eV to Hartree
+const double colrad_reltol=1e-6;
+const double colrad_abstol=10;
+
 // const double J2eV=6.2415091E18;
 const double planck=6.62607004E-34; // J/s
 const double bohr_radius=0.52917721067E-10; // m
 const int MAXLINE = 255;
 const double  pi=3.141592653589793;
 
-const double colrad_tequi=10e-12;//TEST// 1e-12; //bei initial equi ohne Temperatur-variation erst einmal 
+const double colrad_tequi=1e-3;//TEST// 1e-12; //bei initial equi ohne Temperatur-variation erst einmal 
                                 //die Saha-besetzungsdichten equilibrieren
 
 //const double  LIGHTSPEED=2.997925458e8; // m/s
@@ -86,7 +97,21 @@ void do_colrad(double dt)
   colrad_ptotal=0.0;
 
   if(myid==0 && cdata->initial_equi)
-    printf("COLRAD performs initial equilibration for t=%.4e s...This may take some time.\n",colrad_tequi);
+    printf("COLRAD performs pre-equilibration of Saha-distribution\nfor t=%.4e s...This may take some time.\n",colrad_tequi);
+
+
+  clock_t begin;
+  struct timeval start, end;
+  gettimeofday(&start, NULL);
+
+
+
+
+
+  if (myid == 0) // In der Entwicklungsphase macht es Sinn IMMER die Performance im Auge zu behalten
+  {     
+    begin = clock();
+  }
 
   for(i=1;i<local_fd_dim.x-1;i++)
   {
@@ -134,7 +159,7 @@ void do_colrad(double dt)
           i_global = ((i - 1) + my_coord.x * (local_fd_dim.x - 2));
           j_global = ((j - 1) + my_coord.y * (local_fd_dim.y - 2));
           k_global =  ((k-1) + my_coord.z*(local_fd_dim.z-2));          
-          printf("COLRAD Cell %d,%d,%d was equilibrated\n",i_global,j_global,k_global);
+  // printf("COLRAD Cell %d,%d,%d was equilibrated\n",i_global,j_global,k_global);
         }
         else //NORMAL
         {
@@ -143,10 +168,10 @@ void do_colrad(double dt)
           colrad_ptotal+=(fd_vol)*1e-30*cdata->P_TOTAL; // d.h. ptotal ist Gesamt-Leisung
         }
 
-printf("myid:%d, after i:%d,j:%d,k:%d,Tefin:%.4e,Zfin:%.4e,Zvgl:%.4e,pcell:%.4e,ptot:%.4e\n",
-    myid,i,j,k, Ith(y,0), Ith(y,2)/ni0,
-    MeanCharge(Ith(y,0), rho0, atomic_charge, atomic_weight,i,j,k),
-    cdata->P_TOTAL, colrad_ptotal);
+// printf("myid:%d, after i:%d,j:%d,k:%d,Tefin:%.4e,Zfin:%.4e,Zvgl:%.4e,pcell:%.4e,ptot:%.4e\n",
+//     myid,i,j,k, Ith(y,0), Ith(y,2)/ni0,
+//     MeanCharge(Ith(y,0), rho0, atomic_charge, atomic_weight,i,j,k),
+//     cdata->P_TOTAL, colrad_ptotal);
 //printf("myid:%d, i:%d, Delta(Te):%.4e,Zmean:%.4e\n",myid,i, Ith(y,0)-Te0,Ith(y,2)/ni0);      
 
         //REASSIGN NEW TE AND NE
@@ -191,6 +216,26 @@ if(l1[i][j][k].ne <0 || isnan(l1[i][j][k].ne) !=0 )
   colrad_write(0);
   cdata->initial_equi=false;
  }
+ else if(steps % ttm_int ==0)
+ {
+  colrad_write(ttm_int);
+ } 
+
+ MPI_Barrier(cpugrid);
+ if(myid==0)
+ {
+
+    // clock_t end = clock();
+    // double time_spent = (double)(end - begin) / CLOCKS_PER_SEC;
+
+
+    gettimeofday(&end, NULL);
+    double delta = ((end.tv_sec  - start.tv_sec) * 1000000u + 
+             end.tv_usec - start.tv_usec) / 1.e6;
+
+
+    printf("spent:%f\n",delta);
+ }
   
 }
 
@@ -202,10 +247,27 @@ void colrad_init(void)
 	HBAR=planck/2.0/pi;
 	LASERFREQ=LIGHTSPEED/lambda;
 	SUNMatrix A;
-	N_Vector abstol;
-	double reltol;
+	N_Vector abstol;	
 	int i,j,k;
 	
+
+
+	if(myid==0)
+	{
+    printf("*****************************************\n");
+    printf("*      COLLISIONAL RADIATIVE MODEL      *\n");
+    printf("*****************************************\n");
+    printf(" READING ENERGY LEVELS \n");	
+    printf("reltol:%.4e\n",colrad_reltol);
+    printf("abstol:%.4e\n",colrad_abstol);
+	}
+	colrad_read_states();
+  if(myid==0)
+  {
+    printf("* Nr. of Equations:%d                  *\n",neq);    
+  }
+
+MPI_Barrier(cpugrid);
 #ifdef OMP
     #pragma omp parallel
     {
@@ -216,17 +278,10 @@ void colrad_init(void)
       }
     }
 #endif 
-
-	if(myid==0)
-	{
-    printf("*****************************************\n");
-    printf("*      COLLISIONAL RADIATIVE MODEL      *\n");
-    printf("*****************************************\n");
-    printf(" READING ENERGY LEVELS \n");
-    printf("*****************************************\n");
-		
-	}
-	colrad_read_states();
+if(myid==0)
+{  
+  printf("*****************************************\n");
+}
 
   cdata=(colrad_UserData) malloc(sizeof *cdata); 
   cdata->initial_equi=true;
@@ -260,11 +315,10 @@ void colrad_init(void)
 
 	// *************************  //
 	// *   TOLERANCES          *
-	// ************************* 
-     	reltol=1.0e-6;
+	// *************************     
      	for(i=0;i<neq;i++)
      	{
-       	  Ith(abstol,i) = 10;//fmax(Ith(colrad_y,i)*1e-6,10.0);
+       	  Ith(abstol,i) = colrad_abstol;//fmax(Ith(colrad_y,i)*1e-6,10.0);
 
      	}
       Ith(abstol,0)=2.0; //Temp
@@ -277,7 +331,7 @@ void colrad_init(void)
     	CVodeInit(cvode_mem, colrad_ydot, 0, Vdummy);
 
     	CVodeSetUserData(cvode_mem, cdata);
-    	CVodeSVtolerances(cvode_mem, reltol, abstol);
+    	CVodeSVtolerances(cvode_mem, colrad_reltol, abstol);
 
    	SUNLinearSolver LS;
     	A=SUNDenseMatrix(neq, neq);
@@ -297,16 +351,16 @@ void colrad_init(void)
 	//CVodeSetMaxOrd(cvode_mem,12);  //Bei adams default=12	
 	//CVodeSetMaxErrTestFails(cvode_mem,7); //Default=7
 	//CVodeSetMaxNonlinIters(cvode_mem,3); //Default=3
-	//VodeSetMaxConvFails(cvode_mem,10); //Default=10
+	//CVodeSetMaxConvFails(cvode_mem,10); //Default=10
 	//
-	CVodeSetMaxStep(cvode_mem,1e-15);
+	//CVodeSetMaxStep(cvode_mem,1e-15);
 	//CVodeSetNonlinConvCoef(cvode_mem,0.01); //Default=0.1
 	//Max Steps muss sehr hoch sein bei großen steps,
 	//sonst beschwert sich newton
 	CVodeSetMaxNumSteps(cvode_mem,1500); //Default=500
 	//CVodeSetInitStep(cvode_mem,1e-20);  //ACHTUNG:Wenn zu klein --> BS
 	//CVodeSetEpsLin(cvode_mem,0.01); //Default=0.05;
-
+  CVodeSetMaxStepsBetweenJac(cvode_mem,200); //default 50 --> guter performance boost
 	
 	//N_VDestroy(dummy);	
 	
@@ -317,7 +371,7 @@ void colrad_init(void)
   CVodeFree(&cvode_mem);	
 */
   
-  colrad_read(0);
+  //colrad_read(0);
 }
 
 
@@ -421,7 +475,6 @@ MPI_Bcast(buf,z0_len*6,MPI_DOUBLE,0,cpugrid);
 //NOW RECONSTRUCT on other procs
 if(myid>0)
 {
-  printf("myid:%d,alloc\n",myid);
   alloc2darr(double,STATES_z0,z0_len,6);
   for(i=0;i<z0_len*6;i+=6)
   {
@@ -872,7 +925,7 @@ void do_Saha(double Te,double totalc,double ne,N_Vector y) //Bei init
 #endif
 
 #if MAXLEVEL > 3
-   for(i=0;i<z3_len;++i)
+   for(i=0;i<z4_len;++i)
      Q_z4+=STATES_z4[i][3]*exp(-(STATES_z4[i][2]-STATES_z4[0][2])*eV2J/BOLTZMAN/Te);
 #endif
 
@@ -1051,7 +1104,7 @@ int colrad_ydot(double t, N_Vector y, N_Vector colrad_ydot, void *user_data)
 
 
   //Pre-Zero <--- MUI IMPORTANTE!!!!
-  //and count totalc for ipd and stark effect
+  //and count totalc for ipd and stark effect  
   totalc=0.0;
   for(i=0;i<neq;i++)
   {
@@ -1088,7 +1141,8 @@ int colrad_ydot(double t, N_Vector y, N_Vector colrad_ydot, void *user_data)
   //Z=0, Exec/De-Exec  + SPONTANEOUS EMISSION
   //**********************************************
 #ifdef OMP  //OMP FUNZT AUF DIESE WEISE NICHT !!!
-//  #pragma omp parallel for schedule(dynamic,1) collapse(2) private(DeltaE,kfwd,krev,lambda0,Ajk,escape_factor,Eexc) num_threads(num_threads)
+  //#pragma omp parallel for schedule(static) collapse(2) private(DeltaE,kfwd,krev,lambda0,Ajk,escape_factor,Eexc) num_threads(num_threads)
+  #pragma omp for nowait schedule(static) private(j,DeltaE,kfwd,krev,lambda0,Ajk,escape_factor,Eexc)
 #endif
   for(i=0;i<z0_len;++i)
   {
@@ -1137,6 +1191,7 @@ int colrad_ydot(double t, N_Vector y, N_Vector colrad_ydot, void *user_data)
   shift2=z0_len;
 #ifdef OMP
   //#pragma omp parallel for schedule(dynamic,1) collapse(2) private(DeltaE,kfwd,krev,lambda0,Ajk,escape_factor,Eexc) num_threads(num_threads)
+  #pragma omp for nowait schedule(static) private(j,DeltaE,kfwd,krev,lambda0,Ajk,escape_factor,Eexc)
 #endif
   for(i=0;i<z1_len;++i)
   {
@@ -1183,6 +1238,7 @@ int colrad_ydot(double t, N_Vector y, N_Vector colrad_ydot, void *user_data)
   shift2=z0_len+z1_len;
 #ifdef OMP
   //#pragma omp parallel for schedule(dynamic,1) collapse(2) private(DeltaE,kfwd,krev,lambda0,Ajk,escape_factor,Eexc) num_threads(num_threads)
+  #pragma omp for nowait schedule(static) private(j,DeltaE,kfwd,krev,lambda0,Ajk,escape_factor,Eexc)
 #endif
   for(i=0;i<z2_len;++i)
   {
@@ -1232,6 +1288,7 @@ int colrad_ydot(double t, N_Vector y, N_Vector colrad_ydot, void *user_data)
   shift2=z0_len+z1_len+z2_len;
 #ifdef OMP
 //  #pragma omp parallel for schedule(dynamic,1) collapse(2) private(DeltaE,kfwd,krev,lambda0,Ajk,escape_factor,Eexc) num_threads(num_threads)
+  #pragma omp for nowait schedule(static) private(j,DeltaE,kfwd,krev,lambda0,Ajk,escape_factor,Eexc)
 #endif
   for(i=0;i<z2_len;++i)
   {
@@ -1281,10 +1338,11 @@ int colrad_ydot(double t, N_Vector y, N_Vector colrad_ydot, void *user_data)
   shift2=z0_len+z1_len+z2_len+z3_len;
 #ifdef OMP
 //  #pragma omp parallel for schedule(dynamic,1) collapse(2) private(DeltaE,kfwd,krev,lambda0,Ajk,escape_factor,Eexc) num_threads(num_threads)
+  #pragma omp for nowait schedule(static) private(j,DeltaE,kfwd,krev,lambda0,Ajk,escape_factor,Eexc)
 #endif
-  for(i=0;i<z3_len;++i)
+  for(i=0;i<z4_len;++i)
   {
-    for(j=0;j<z3_len;++j)
+    for(j=0;j<z4_len;++j)
     {
       if(j<=i) continue; // MUI IMPORTANTE
       DeltaE=(STATES_z4[j][2]-STATES_z4[i][2])*eV2J;
@@ -1331,6 +1389,8 @@ int colrad_ydot(double t, N_Vector y, N_Vector colrad_ydot, void *user_data)
 #ifdef OMP
  // #pragma omp parallel for schedule(dynamic,1) collapse(2) private(DeltaE,kfwd,kfwd2,krev,\
                   escape_factor,groundstate_ioniz,sigma_PI,abs_coeff,tau,wstark_freq,lambda0,Eexc) num_threads(num_threads)
+#pragma omp for nowait schedule(static) private(j,DeltaE,kfwd,kfwd2,krev,\
+                  escape_factor,groundstate_ioniz,sigma_PI,abs_coeff,tau,wstark_freq,lambda0,Eexc)
 #endif
   for(i=0;i<z0_len;++i)
   {
@@ -1415,6 +1475,8 @@ if(DeltaE-IPD0 >0 )
 #ifdef OMP
   //#pragma omp parallel for schedule(dynamic,1) collapse(2) private(DeltaE,kfwd,kfwd2,krev,\
                   escape_factor,groundstate_ioniz,sigma_PI,abs_coeff,tau,wstark_freq,lambda0,Eexc) num_threads(num_threads)
+#pragma omp for nowait schedule(static) private(j,DeltaE,kfwd,kfwd2,krev,\
+                  escape_factor,groundstate_ioniz,sigma_PI,abs_coeff,tau,wstark_freq,lambda0,Eexc)                  
 #endif
   for(i=0;i<z1_len;++i)
   {
@@ -1498,6 +1560,8 @@ if(DeltaE-IPD1 >0)
 #ifdef OMP
   //#pragma omp parallel for schedule(dynamic,1) collapse(2) private(DeltaE,kfwd,kfwd2,krev,\
                   escape_factor,groundstate_ioniz,sigma_PI,abs_coeff,tau,wstark_freq,lambda0,Eexc) num_threads(num_threads)
+#pragma omp for nowait schedule(static) private(j,DeltaE,kfwd,kfwd2,krev,\
+                  escape_factor,groundstate_ioniz,sigma_PI,abs_coeff,tau,wstark_freq,lambda0,Eexc)                  
 #endif
   for(i=0;i<z2_len;++i)
   {
@@ -1581,6 +1645,8 @@ if(DeltaE-IPD2 >0)
 #ifdef OMP
  //#pragma omp parallel for schedule(dynamic,1) collapse(2) private(DeltaE,kfwd,kfwd2,krev,\
                    escape_factor,groundstate_ioniz,sigma_PI,abs_coeff,tau,wstark_freq,lambda0,Eexc) num_threads(num_threads)
+#pragma omp for nowait schedule(static) private(j,DeltaE,kfwd,kfwd2,krev,\
+                  escape_factor,groundstate_ioniz,sigma_PI,abs_coeff,tau,wstark_freq,lambda0,Eexc)                   
 #endif
   for(i=0;i<z3_len;++i)
   {
@@ -1713,21 +1779,22 @@ int colrad_GetCoeffs(N_Vector y,double It,void *user_data)
   double alpha_e=0.05;
   double beta_i=4.0;
   double four_pi_a0_sq=4.0*pi*pow(bohr_radius,2.0);
-
+  
 
   double E_ion_H_div_kTe_sq=pow((E_ion_H/BOLTZMAN/Te),2.0);
   double two_pi_me_kT_hsq=2.0*pi*EMASS*BOLTZMAN*Te/pow(planck,2.0);
   double log54_beta_i=log(5.0/4.0*beta_i);
   double kbTe=(BOLTZMAN*Te);
+  kbTe=Te/11604.5;
 
   double tmp0,tmp1,tmp2;
 
   colrad_UserData data;
   data = (colrad_UserData) user_data;
-  double IPD0=data->IPD0;
-  double IPD1=data->IPD1;
-  double IPD2=data->IPD2;
-  double IPD3=data->IPD3;
+  double IPD0=data->IPD0*J2eV;
+  double IPD1=data->IPD1*J2eV;
+  double IPD2=data->IPD2*J2eV;
+  double IPD3=data->IPD3*J2eV;
 
   //MPI
   double k_RR_fact1=32*pi*pow(bohr_radius,2.0)/3.0/175700.00067;
@@ -1742,9 +1809,10 @@ int colrad_GetCoeffs(N_Vector y,double It,void *user_data)
   double I_cu=I_sq*It; // for 3-photon-ioniz.
   int fail=0;
 
+  double pow_two_pi_me_kT_hsq_tmp1= pow(two_pi_me_kT_hsq,1.5);
   //pre-zero k_EE's
 #ifdef OMP
-#pragma omp parallel for schedule(static) collapse(2)
+// #pragma omp parallel for schedule(static) collapse(2)
 #endif   
   for(i=0;i<z0_len;i++)
   {
@@ -1756,7 +1824,7 @@ int colrad_GetCoeffs(N_Vector y,double It,void *user_data)
   }
 
 #ifdef OMP
-#pragma omp parallel for schedule(static) collapse(2)
+// #pragma omp parallel for schedule(static) collapse(2)
 #endif 
   for(i=0;i<z1_len;i++)
   {
@@ -1769,7 +1837,7 @@ int colrad_GetCoeffs(N_Vector y,double It,void *user_data)
 
   #if MAXLEVEL > 1
 #ifdef OMP
-#pragma omp parallel for schedule(static) collapse(2)
+// #pragma omp parallel for schedule(static) collapse(2)
 #endif   
   for(i=0;i<z2_len;i++)
   {
@@ -1783,7 +1851,7 @@ int colrad_GetCoeffs(N_Vector y,double It,void *user_data)
 
   #if MAXLEVEL > 2
 #ifdef OMP
-#pragma omp parallel for schedule(static) collapse(2)
+//#pragma omp parallel for schedule(static) collapse(2)
 #endif   
   for(i=0;i<z3_len;i++)
   {
@@ -1797,7 +1865,7 @@ int colrad_GetCoeffs(N_Vector y,double It,void *user_data)
 
 #if MAXLEVEL > 3
 #ifdef OMP
-#pragma omp parallel for schedule(static) collapse(2)
+// #pragma omp parallel for schedule(static) collapse(2)
 #endif   
   for(i=0;i<z4_len;i++)
   {
@@ -1812,7 +1880,7 @@ int colrad_GetCoeffs(N_Vector y,double It,void *user_data)
 
   //pre-zero k_MPI's
 #ifdef OMP
-#pragma omp parallel for schedule(static) collapse(2)
+// #pragma omp parallel for schedule(static) collapse(2)
 #endif    
   for(i=0;i<z0_len;i++)
   {
@@ -1830,7 +1898,7 @@ int colrad_GetCoeffs(N_Vector y,double It,void *user_data)
 
 #if MAXLEVEL > 1
 #ifdef OMP
-#pragma omp parallel for schedule(static) collapse(2)
+// #pragma omp parallel for schedule(static) collapse(2)
 #endif    
   for(i=0;i<z1_len;i++)
   {
@@ -1849,7 +1917,7 @@ int colrad_GetCoeffs(N_Vector y,double It,void *user_data)
 
 #if MAXLEVEL > 2
 #ifdef OMP
-#pragma omp parallel for schedule(static) collapse(2)
+// #pragma omp parallel for schedule(static) collapse(2)
 #endif    
    for(i=0;i<z2_len;i++)
   {
@@ -1868,7 +1936,7 @@ int colrad_GetCoeffs(N_Vector y,double It,void *user_data)
 
 #if MAXLEVEL > 3  
 #ifdef OMP
-#pragma omp parallel for schedule(static) collapse(2)
+// #pragma omp parallel for schedule(static) collapse(2)
 #endif  
   for(i=0;i<z3_len;i++)
   {
@@ -1890,7 +1958,9 @@ int colrad_GetCoeffs(N_Vector y,double It,void *user_data)
   ///////////////////////////////
   fail=0;
 #ifdef OMP
-#pragma omp parallel for schedule(dynamic,1) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2) num_threads(num_threads)
+//#pragma omp parallel for schedule(dynamic,1) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2) num_threads(num_threads)
+  #pragma omp for simd schedule(static) private(j,kronecker,DeltaE,a,expint,G2,I_1,I_2)
+  // #pragma omp for simd schedule(static) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2)
 #endif
   for(i=0;i<z0_len;++i)
   {
@@ -1901,7 +1971,7 @@ int colrad_GetCoeffs(N_Vector y,double It,void *user_data)
           if(STATES_z0[i][4]==STATES_z0[j][4])  // l_j==l_i ?
             kronecker=1.0;//optically forbidden transition
 
-          DeltaE=(STATES_z0[j][2]-STATES_z0[i][2])*eV2J;
+          DeltaE=(STATES_z0[j][2]-STATES_z0[i][2]);
           a=DeltaE/kbTe;
           expint=ExpInt(a);
 
@@ -1925,7 +1995,8 @@ if(fail==1)
 
   //Now reverse rate (seperate loop because rev.rate needs koeff. of fwd. rate
 #ifdef OMP
-#pragma omp parallel for schedule(dynamic,1) collapse(2) private(kronecker,tmp0,tmp1,tmp2) num_threads(num_threads)
+//#pragma omp parallel for   schedule(dynamic,1) collapse(2) private(kronecker,tmp0,tmp1,tmp2) num_threads(num_threads)
+#pragma omp for schedule(static) private(j,kronecker,tmp0,tmp2)
 #endif
   for(i=0;i<z0_len;++i)
   {
@@ -1939,7 +2010,7 @@ if(fail==1)
 
         //tmp1=3.0*(1.0-kronecker)/2.0;
         tmp1=0.0; //3.0*(1.0-kronecker)/2.0;
-        tmp2=exp(-(STATES_z0[j][2]-STATES_z0[i][2])*eV2J/kbTe);
+        tmp2=EXPR(-(STATES_z0[j][2]-STATES_z0[i][2])/kbTe);
 
         //k_EE_z0_z0_b[i][j]=k_EE_z0_z0[i][j]/tmp0/(pow(two_pi_me_kT_hsq,tmp1))/tmp2;
         if(k_EE_z0_z0[i][j]> 0)
@@ -1957,7 +2028,9 @@ if(fail==1)
   ///////////////////////
   fail=0;
 #ifdef OMP
-#pragma omp parallel for simd schedule(dynamic,1) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2) num_threads(num_threads)
+// #pragma omp parallel for   schedule(dynamic,1) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2) num_threads(num_threads)
+  #pragma omp for simd schedule(static) private(j,kronecker,DeltaE,a,expint,G2,I_1,I_2)
+  // #pragma omp for simd schedule(static) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2)
 #endif
   for(i=0;i<z1_len;++i)
   {
@@ -1968,7 +2041,7 @@ if(fail==1)
         {
           if(STATES_z1[i][4]==STATES_z1[j][4])
             kronecker=1.0;
-          DeltaE=(STATES_z1[j][2]-STATES_z1[i][2])*eV2J;
+          DeltaE=(STATES_z1[j][2]-STATES_z1[i][2]);
           a=DeltaE/kbTe;
           expint=ExpInt(a);
 
@@ -1979,7 +2052,7 @@ if(expint==-1)
         fail=1;
 #endif
           G2=genexpint(a,1.0,1.0);
-          I_1=exp(-a)/a - expint;
+          I_1=EXPR(-a)/a - expint;
           I_2=I_1*log54_beta_i+expint/a-G2;
           k_EE_z1_z1[i][j]=v_e*four_pi_a0_sq*(kronecker*alpha_e*a*a*I_1 +(1-kronecker)*alpha_i*E_ion_H_div_kTe_sq*I_2);
         }
@@ -1989,7 +2062,8 @@ if(expint==-1)
 
   //NOW REVERSE RATE
 #ifdef OMP
-#pragma omp parallel for simd schedule(dynamic,1) collapse(2) private(kronecker,tmp0,tmp1,tmp2) num_threads(num_threads)
+//#pragma omp parallel for   schedule(dynamic,1) collapse(2) private(kronecker,tmp0,tmp1,tmp2) num_threads(num_threads)
+#pragma omp for schedule(static) private(j,kronecker,tmp0,tmp2)
 #endif
   for(i=0;i<z1_len;++i)
   {
@@ -2001,7 +2075,7 @@ if(expint==-1)
         //tmp1=3.0*(1.0-kronecker)/2.0;
         tmp1=0.0; //3.0*(1.0-kronecker)/2.0;
 
-        tmp2=exp(-(STATES_z1[j][2]-STATES_z1[i][2])*eV2J/kbTe);
+        tmp2=EXPR(-(STATES_z1[j][2]-STATES_z1[i][2])/kbTe);
 
         //k_EE_z0_z0_b[i][j]=k_EE_z0_z0[i][j]/tmp0/(pow(two_pi_me_kT_hsq,tmp1))/tmp2;
         if(k_EE_z1_z1[i][j]>0)
@@ -2024,7 +2098,9 @@ if(expint==-1)
 
   fail=0;
 #ifdef OMP
-#pragma omp parallel for simd schedule(dynamic,1) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2) num_threads(num_threads)
+// #pragma omp parallel for   schedule(dynamic,1) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2) num_threads(num_threads)
+  #pragma omp for simd schedule(static) private(j,kronecker,DeltaE,a,expint,G2,I_1,I_2)
+  // #pragma omp for simd schedule(static) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2)
 #endif
   for(i=0;i<z2_len;++i)
   {
@@ -2035,7 +2111,7 @@ if(expint==-1)
         {
           if(STATES_z2[i][4]==STATES_z2[j][4])
             kronecker=1.0;
-          DeltaE=(STATES_z2[j][2]-STATES_z2[i][2])*eV2J;
+          DeltaE=(STATES_z2[j][2]-STATES_z2[i][2]);
           a=DeltaE/kbTe;
           expint=ExpInt(a);
 
@@ -2046,7 +2122,7 @@ if(expint==-1)
         fail=1;
 #endif
           G2=genexpint(a,1.0,1.0);
-          I_1=exp(-a)/a - expint;
+          I_1=EXPR(-a)/a - expint;
           I_2=I_1*log54_beta_i+expint/a-G2;
           k_EE_z2_z2[i][j]=v_e*four_pi_a0_sq*(kronecker*alpha_e*a*a*I_1 +(1-kronecker)*alpha_i*E_ion_H_div_kTe_sq*I_2);
         }
@@ -2056,7 +2132,8 @@ if(expint==-1)
 
     //NOW REVERSE RATE
 #ifdef OMP
-#pragma omp parallel for simd schedule(dynamic,1) collapse(2) private(kronecker,tmp0,tmp1,tmp2) num_threads(num_threads)
+//#pragma omp parallel for   schedule(dynamic,1) collapse(2) private(kronecker,tmp0,tmp1,tmp2) num_threads(num_threads)
+#pragma omp for schedule(static) private(j,kronecker,tmp0,tmp2)  
 #endif
   for(i=0;i<z2_len;++i)
   {
@@ -2068,7 +2145,7 @@ if(expint==-1)
         //tmp1=3.0*(1.0-kronecker)/2.0;
         tmp1=0.0; //3.0*(1.0-kronecker)/2.0;
 
-        tmp2=exp(-(STATES_z2[j][2]-STATES_z2[i][2])*eV2J/kbTe);
+        tmp2=EXPR(-(STATES_z2[j][2]-STATES_z2[i][2])/kbTe);
         //ACHTUNG: tmp2 kann -->0 gehen
         // --> krev = NaN
         // --> prüfe ob fwd-rate nicht sowieso = 0 ist
@@ -2093,7 +2170,9 @@ if(expint==-1)
 
   fail=0;
   #ifdef OMP
-  #pragma omp parallel for simd schedule(dynamic,1) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2) num_threads(num_threads)
+  // #pragma omp parallel for   schedule(dynamic,1) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2) num_threads(num_threads)
+  #pragma omp for simd schedule(static) private(j,kronecker,DeltaE,a,expint,G2,I_1,I_2)
+  // #pragma omp for simd schedule(static) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2)
   #endif
   for(i=0;i<z3_len;++i)
   {
@@ -2104,7 +2183,7 @@ if(expint==-1)
         {
           if(STATES_z3[i][4]==STATES_z3[j][4])
             kronecker=1.0;
-          DeltaE=(STATES_z3[j][2]-STATES_z3[i][2])*eV2J;
+          DeltaE=(STATES_z3[j][2]-STATES_z3[i][2]);
           a=DeltaE/kbTe;
           expint=ExpInt(a);
 
@@ -2116,7 +2195,7 @@ if(expint==-1)
 #endif
 
           G2=genexpint(a,1.0,1.0);
-          I_1=exp(-a)/a - expint;
+          I_1=EXPR(-a)/a - expint;
           I_2=I_1*log54_beta_i+expint/a-G2;
           k_EE_z3_z3[i][j]=v_e*four_pi_a0_sq*(kronecker*alpha_e*a*a*I_1 +(1-kronecker)*alpha_i*E_ion_H_div_kTe_sq*I_2);
         }
@@ -2126,7 +2205,8 @@ if(expint==-1)
           return -1;
   //NOW REVERSE RATE
   #ifdef OMP
-  #pragma omp parallel for simd schedule(dynamic,1) collapse(2) private(kronecker,tmp0,tmp1,tmp2) num_threads(num_threads)
+  //#pragma omp parallel for   schedule(dynamic,1) collapse(2) private(kronecker,tmp0,tmp1,tmp2) num_threads(num_threads)
+  #pragma omp for schedule(static) private(j,kronecker,tmp0,tmp2)        
   #endif
   for(i=0;i<z3_len;++i)
   {
@@ -2138,7 +2218,7 @@ if(expint==-1)
         //tmp1=3.0*(1.0-kronecker)/2.0;
         tmp1=0.0; //3.0*(1.0-kronecker)/2.0;
 
-        tmp2=exp(-(STATES_z3[j][2]-STATES_z3[i][2])*eV2J/kbTe);
+        tmp2=EXPR(-(STATES_z3[j][2]-STATES_z3[i][2])/kbTe);
         //k_EE_z0_z0_b[i][j]=k_EE_z0_z0[i][j]/tmp0/(pow(two_pi_me_kT_hsq,tmp1))/tmp2;
         if(k_EE_z3_z3[i][j] > 0)
         {
@@ -2160,7 +2240,9 @@ if(expint==-1)
 
   fail=0;
 #ifdef OMP
-#pragma omp parallel for simd schedule(dynamic,1) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2) num_threads(num_threads)
+// #pragma omp parallel for   schedule(dynamic,1) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2) num_threads(num_threads)
+  #pragma omp for simd schedule(static) private(j,kronecker,DeltaE,a,expint,G2,I_1,I_2)
+  // #pragma omp for simd schedule(static) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2)
 #endif
   for(i=0;i<z4_len;++i)
   {
@@ -2171,7 +2253,7 @@ if(expint==-1)
         {
           if(STATES_z4[i][4]==STATES_z4[j][4])
             kronecker=1.0;
-          DeltaE=(STATES_z4[j][2]-STATES_z4[i][2])*eV2J;
+          DeltaE=(STATES_z4[j][2]-STATES_z4[i][2]);
           a=DeltaE/kbTe;
           expint=ExpInt(a);
 
@@ -2183,7 +2265,7 @@ if(expint==-1)
 #endif
 
           G2=genexpint(a,1.0,1.0);
-          I_1=exp(-a)/a - expint;
+          I_1=EXPR(-a)/a - expint;
           I_2=I_1*log54_beta_i+expint/a-G2;
           k_EE_z4_z4[i][j]=v_e*four_pi_a0_sq*(kronecker*alpha_e*a*a*I_1 +(1-kronecker)*alpha_i*E_ion_H_div_kTe_sq*I_2);
         }
@@ -2194,7 +2276,8 @@ if(expint==-1)
 
   //NOW REVERSE RATE
 #ifdef OMP
-#pragma omp parallel for simd schedule(dynamic,1) collapse(2) private(kronecker,tmp0,tmp1,tmp2) num_threads(num_threads)
+//#pragma omp parallel for   schedule(dynamic,1) collapse(2) private(kronecker,tmp0,tmp1,tmp2) num_threads(num_threads)
+#pragma omp for schedule(static) private(j,kronecker,tmp0,tmp2)        
 #endif        
   for(i=0;i<z4_len;++i)
   {
@@ -2206,7 +2289,7 @@ if(expint==-1)
         //tmp1=3.0*(1.0-kronecker)/2.0;
         tmp1=0.0; //3.0*(1.0-kronecker)/2.0;
 
-        tmp2=exp(-(STATES_z4[j][2]-STATES_z4[i][2])*eV2J/kbTe);
+        tmp2=EXPR(-(STATES_z4[j][2]-STATES_z4[i][2])/kbTe);
         //k_EE_z0_z0_b[i][j]=k_EE_z0_z0[i][j]/tmp0/(pow(two_pi_me_kT_hsq,tmp1))/tmp2;
         if(k_EE_z4_z4[i][j] > 0)
         {
@@ -2228,7 +2311,8 @@ if(expint==-1)
   /////////////////
   fail=0;
 #ifdef OMP
-  #pragma omp parallel for simd schedule(dynamic,1) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2,sigma1,sigma_MPI_2,sigma_MPI_3,tmp0,tmp1,tmp2) num_threads(num_threads)
+   // #pragma omp parallel for schedule(static) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2,sigma1,sigma_MPI_2,sigma_MPI_3,tmp0,tmp1,tmp2) num_threads(num_threads)
+   #pragma omp for nowait schedule(static) private(j,kronecker,DeltaE,a,expint,G2,I_1,I_2,sigma1,sigma_MPI_2,sigma_MPI_3,tmp0,tmp1,tmp2)
 #endif
   for(i=0;i<z0_len;++i)
   {
@@ -2238,7 +2322,7 @@ if(expint==-1)
       if(STATES_z0[i][4]==STATES_z1[j][4])
         kronecker=1.0;
 
-      DeltaE=(STATES_z1[j][2]-STATES_z0[i][2])*eV2J-IPD0;
+      DeltaE=(STATES_z1[j][2]-STATES_z0[i][2])-IPD0;
 #ifdef DOIPD
       DeltaE=MAX(0.0,DeltaE);
 #endif      
@@ -2253,7 +2337,7 @@ if(expint==-1)
         fail=1;
 #endif
       G2=genexpint(a,1.0,1.0);
-      I_1=exp(-a)/a - expint;
+      I_1=EXPR(-a)/a - expint;
       I_2=I_1*log54_beta_i+expint/a-G2;
       k_EI_z0_z1[i][j]=v_e*four_pi_a0_sq*alpha_i*E_ion_H_div_kTe_sq*I_2;
 
@@ -2278,22 +2362,23 @@ if(expint==-1)
       {
         if(expint > 0 )
         {
-          k_MPI_z1_z0[i][j][0]=v_e*k_RR_fact1*1.0*k_RR_fact2*pow((DeltaE)*J2eV/STATES_z1[j][2],1.5)*expint*exp(a);
+          //k_MPI_z1_z0[i][j][0]=v_e*k_RR_fact1*1.0*k_RR_fact2*pow((DeltaE)*J2eV/STATES_z1[j][2],1.5)*expint*EXPR(a);
+          k_MPI_z1_z0[i][j][0]=v_e*k_RR_fact1*1.0*k_RR_fact2*pow((DeltaE)/STATES_z1[j][2],1.5)*expint*EXPR(a);
         }
         else 
         {
-          k_MPI_z1_z0[i][j][0]=0.0; //exp(a) kann +Inf werden--> unsinnige rate coeff.. wenn einer der faktoren=0 --> rest egal
+          k_MPI_z1_z0[i][j][0]=0.0; //EXPR(a) kann +Inf werden--> unsinnige rate coeff.. wenn einer der faktoren=0 --> rest egal
         }
       }
       //3-body recomb
       kronecker=0;
-      tmp0=pow(2.0,(1.0-kronecker))*STATES_z1[j][3]/STATES_z0[i][3];
-      tmp1=3.0*(1.0-kronecker)/2.0;
-      tmp2=exp(-DeltaE/kbTe);
+      tmp0=2*STATES_z1[j][3]/STATES_z0[i][3];
+      // tmp1=3.0*(1.0-kronecker)/2.0;
+      tmp2=EXPR(-DeltaE/kbTe);
       if(k_EI_z0_z1[i][j]==0) //wohl wichtig
         k_EI_z1_z0[i][j]=0; 
       else       
-        k_EI_z1_z0[i][j]=k_EI_z0_z1[i][j]/tmp0/pow(two_pi_me_kT_hsq,tmp1)/tmp2;
+        k_EI_z1_z0[i][j]=k_EI_z0_z1[i][j]/tmp0/pow_two_pi_me_kT_hsq_tmp1/tmp2;
 
     }
   }
@@ -2306,7 +2391,8 @@ if(expint==-1)
 #if MAXLEVEL > 1
   fail=0;
 #ifdef OMP
-#pragma omp parallel for simd schedule(dynamic,1) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2,sigma1,sigma_MPI_2,sigma_MPI_3,tmp0,tmp1,tmp2) num_threads(num_threads)
+ // #pragma omp parallel for schedule(static) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2,sigma1,sigma_MPI_2,sigma_MPI_3,tmp0,tmp1,tmp2) num_threads(num_threads)
+  #pragma omp for nowait schedule(static) private(j,kronecker,DeltaE,a,expint,G2,I_1,I_2,sigma1,sigma_MPI_2,sigma_MPI_3,tmp0,tmp1,tmp2)
 #endif
   for(i=0;i<z1_len;++i)
   {
@@ -2316,7 +2402,7 @@ if(expint==-1)
       if(STATES_z1[i][4]==STATES_z2[j][4])
         kronecker=1.0;
 
-      DeltaE=(STATES_z2[j][2]-STATES_z1[i][2])*eV2J-IPD1;
+      DeltaE=(STATES_z2[j][2]-STATES_z1[i][2])-IPD1;
 #ifdef DOIPD
       DeltaE=MAX(0.0,DeltaE);
 #endif            
@@ -2331,7 +2417,7 @@ if(expint==-1)
 #endif
 
       G2=genexpint(a,1.0,1.0);
-      I_1=exp(-a)/a - expint;
+      I_1=EXPR(-a)/a - expint;
       I_2=I_1*log54_beta_i+expint/a-G2;
       k_EI_z1_z2[i][j]=v_e*four_pi_a0_sq*alpha_i*E_ion_H_div_kTe_sq*I_2;
 
@@ -2356,22 +2442,22 @@ if(expint==-1)
       {
         if(expint > 0 )
         {
-          k_MPI_z2_z1[i][j][0]=v_e*k_RR_fact1*4.0*k_RR_fact2*pow((DeltaE)*J2eV/STATES_z2[j][2],1.5)*expint*exp(a);          
+          k_MPI_z2_z1[i][j][0]=v_e*k_RR_fact1*4.0*k_RR_fact2*pow((DeltaE)/STATES_z2[j][2],1.5)*expint*EXPR(a);          
         }
         else 
         {
-          k_MPI_z2_z1[i][j][0]=0.0; //exp(a) kann +Inf werden--> unsinnige rate coeff.. wenn einer der faktoren=0 --> rest egal
+          k_MPI_z2_z1[i][j][0]=0.0; //EXPR(a) kann +Inf werden--> unsinnige rate coeff.. wenn einer der faktoren=0 --> rest egal
         }      
       }
       //3-body recomb            
       kronecker=0;
-      tmp0=pow(2.0,(1.0-kronecker))*STATES_z2[j][3]/STATES_z1[i][3];
-      tmp1=3.0*(1.0-kronecker)/2.0;
-      tmp2=exp(-DeltaE/kbTe);
+      tmp0=2*STATES_z2[j][3]/STATES_z1[i][3];
+      // tmp1=3.0*(1.0-kronecker)/2.0;
+      tmp2=EXPR(-DeltaE/kbTe);
       if(k_EI_z1_z2[i][j]==0) //wohl wichtig
         k_EI_z2_z1[i][j]=0; 
       else             
-        k_EI_z2_z1[i][j]=k_EI_z1_z2[i][j]/tmp0/pow(two_pi_me_kT_hsq,tmp1)/tmp2;      
+        k_EI_z2_z1[i][j]=k_EI_z1_z2[i][j]/tmp0/pow_two_pi_me_kT_hsq_tmp1/tmp2;      
 
     }
   }
@@ -2389,7 +2475,8 @@ if(expint==-1)
 
   fail=0;
 #ifdef OMP
-#pragma omp parallel for simd schedule(dynamic,1) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2,sigma1,sigma_MPI_2,sigma_MPI_3,tmp0,tmp1,tmp2) num_threads(num_threads)
+  // #pragma omp parallel for   schedule(static) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2,sigma1,sigma_MPI_2,sigma_MPI_3,tmp0,tmp1,tmp2) num_threads(num_threads)
+  #pragma omp for nowait schedule(static) private(j,kronecker,DeltaE,a,expint,G2,I_1,I_2,sigma1,sigma_MPI_2,sigma_MPI_3,tmp0,tmp1,tmp2)
 #endif
   for(i=0;i<z2_len;++i)
   {
@@ -2399,7 +2486,7 @@ if(expint==-1)
       if(STATES_z2[i][4]==STATES_z3[j][4])
       kronecker=1.0;
 
-      DeltaE=(STATES_z3[j][2]-STATES_z2[i][2])*eV2J-IPD2;
+      DeltaE=(STATES_z3[j][2]-STATES_z2[i][2])-IPD2;
 #ifdef DOIPD
       DeltaE=MAX(0.0,DeltaE);
 #endif            
@@ -2414,7 +2501,7 @@ if(expint==-1)
 #endif
 
       G2=genexpint(a,1.0,1.0);
-      I_1=exp(-a)/a - expint;
+      I_1=EXPR(-a)/a - expint;
       I_2=I_1*log54_beta_i+expint/a-G2;
       k_EI_z2_z3[i][j]=v_e*four_pi_a0_sq*alpha_i*E_ion_H_div_kTe_sq*I_2;
 
@@ -2439,7 +2526,7 @@ if(expint==-1)
       {
         if(expint > 0)
         {
-          k_MPI_z3_z2[i][j][0]=v_e*k_RR_fact1*4.0*k_RR_fact2*pow((DeltaE)*J2eV/STATES_z3[j][2],1.5)*expint*exp(a);  
+          k_MPI_z3_z2[i][j][0]=v_e*k_RR_fact1*4.0*k_RR_fact2*pow((DeltaE)/STATES_z3[j][2],1.5)*expint*EXPR(a);  
         }
         else
         {
@@ -2450,13 +2537,13 @@ if(expint==-1)
       
       //3-body recomb            
       kronecker=0;
-      tmp0=pow(2.0,(1.0-kronecker))*STATES_z3[j][3]/STATES_z2[i][3];
-      tmp1=3.0*(1.0-kronecker)/2.0;
-      tmp2=exp(-DeltaE/kbTe);
+      tmp0=2*STATES_z3[j][3]/STATES_z2[i][3];
+      // tmp1=3.0*(1.0-kronecker)/2.0;
+      tmp2=EXPR(-DeltaE/kbTe);
 
       if(k_EI_z2_z3[i][j] > 0)
       {
-        k_EI_z3_z2[i][j]=k_EI_z2_z3[i][j]/tmp0/pow(two_pi_me_kT_hsq,tmp1)/tmp2;
+        k_EI_z3_z2[i][j]=k_EI_z2_z3[i][j]/tmp0/pow_two_pi_me_kT_hsq_tmp1/tmp2;
       }
       else
       {
@@ -2476,7 +2563,8 @@ if(expint==-1)
 
   fail=0;
 #ifdef OMP
-#pragma omp parallel for simd schedule(dynamic,1) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2,sigma1,sigma_MPI_2,sigma_MPI_3,tmp0,tmp1,tmp2) num_threads(num_threads)
+ // #pragma omp parallel for schedule(static) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2,sigma1,sigma_MPI_2,sigma_MPI_3,tmp0,tmp1,tmp2) num_threads(num_threads)
+  #pragma omp for nowait schedule(static) private(j,kronecker,DeltaE,a,expint,G2,I_1,I_2,sigma1,sigma_MPI_2,sigma_MPI_3,tmp0,tmp1,tmp2)
 #endif
   for(i=0;i<z3_len;++i)
   {
@@ -2486,7 +2574,7 @@ if(expint==-1)
       if(STATES_z3[i][4]==STATES_z4[j][4])
       kronecker=1.0;
 
-      DeltaE=(STATES_z4[j][2]-STATES_z3[i][2])*eV2J-IPD3;
+      DeltaE=(STATES_z4[j][2]-STATES_z3[i][2])-IPD3;
 #ifdef DOIPD
       DeltaE=MAX(0.0,DeltaE);
 #endif            
@@ -2501,7 +2589,7 @@ if(expint==-1)
 #endif
 
       G2=genexpint(a,1.0,1.0);
-      I_1=exp(-a)/a - expint;
+      I_1=EXPR(-a)/a - expint;
       I_2=I_1*log54_beta_i+expint/a-G2;
       k_EI_z3_z4[i][j]=v_e*four_pi_a0_sq*alpha_i*E_ion_H_div_kTe_sq*I_2;
 
@@ -2526,7 +2614,7 @@ if(expint==-1)
       {
         if(expint>0)
         {
-          k_MPI_z4_z3[i][j][0]=v_e*k_RR_fact1*4.0*k_RR_fact2*pow((DeltaE)*J2eV/STATES_z4[j][2],1.5)*expint*exp(a);  
+          k_MPI_z4_z3[i][j][0]=v_e*k_RR_fact1*4.0*k_RR_fact2*pow((DeltaE)/STATES_z4[j][2],1.5)*expint*EXPR(a);  
         }
         else
         {
@@ -2537,14 +2625,13 @@ if(expint==-1)
       
       //3-body recomb
       //if(DeltaE>0.0)
-      
       kronecker=0;
-      tmp0=pow(2.0,(1.0-kronecker))*STATES_z4[j][3]/STATES_z3[i][3];
-      tmp1=3.0*(1.0-kronecker)/2.0;
-      tmp2=exp(-DeltaE/kbTe);
+      tmp0=2*STATES_z4[j][3]/STATES_z3[i][3];
+      // tmp1=3.0*(1.0-kronecker)/2.0;
+      tmp2=EXPR(-DeltaE/kbTe);
       if(k_EI_z3_z4[i][j] >9 )
       {
-        k_EI_z4_z3[i][j]=k_EI_z3_z4[i][j]/tmp0/pow(two_pi_me_kT_hsq,tmp1)/tmp2;
+        k_EI_z4_z3[i][j]=k_EI_z3_z4[i][j]/tmp0/pow_two_pi_me_kT_hsq_tmp1/tmp2;
       }
       else
       {
@@ -2565,9 +2652,9 @@ if(expint==-1)
 // ***************************************************************************************
 double ExpInt(double x)
 {
- if(x>500) //vorher
+ if(x>350) 
  {
-      return 0; //sonst underflow?
+      return 0; //wird extrem klein -> inderflow
  }  
   
    
@@ -2613,6 +2700,7 @@ float genexpint(float x,float ss,float j)
   float sum=0.0;
   float m=0.0;
   int n,k;
+
   for(n=1;n<maks+1;++n)
   {
     if(n==1)
@@ -2664,23 +2752,19 @@ double genexpint(double x,double ss,double j)
   //J.Math.Chem. 49:520-530 (2011)
   // Siehe auch. The effcient computation of some generalisedexponential integrals
   //
-/*  
-  if(x<1.0E-300) //Limiting case
-    return 6.901983122333121E2;
-*/
 
-//  double j=1.0; //j=k-1 (k=2)
-//  double ss=1.0;
+  //  double j=1.0; //j=k-1 (k=2)
+  //  double ss=1.0;
 
-// für x=60 ---> 4.7243e-45
+  // für x=60 ---> 4.7243e-45
 
-// if(x>=60)
-//  return 5e-45;
+  // if(x>=60)
+  //  return 5e-45;
 
   int maks=5;
   double eps=1E-12;
 
-eps=1E-6;  
+  eps=1E-6;  
 
   double b=exp(-1.);
   double s_old=0;
@@ -2712,9 +2796,6 @@ eps=1E-6;
       t=0.5*d;
       sum=0.0;
 
-// #ifdef OMP      
-// #pragma omp parallel for shared(sum, t) reduction(+: sum)
-// #endif
       for(k=1;k<m+1;++k)
       {
         double logt=log(t);
@@ -2918,6 +2999,7 @@ int colrad_write(int number)
       }
 
     }
+    fclose(outfile);
   return 0; //alles ok
 }
 
@@ -2961,11 +3043,14 @@ int colrad_read(int number)
 
           tokens = strsplit(line, ", \t\n", &numtokens); //strsplit in imd_ttm.char
 
-printf("myid:%d,numtokens:%d\n",myid,numtokens);
 
           for(l=0;l<neq;l++)
           {
+
+
             sscanf(tokens[l+3], "%lf",  &tmp);
+                     
+  printf("i:%d,j:%d,k:%d,l:%d, tmp:%.4e\n",i,j,k,l,tmp);          
             Ith(l1[i][j][k].y,l)=tmp;
             
           }

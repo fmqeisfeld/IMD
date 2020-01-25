@@ -1,9 +1,9 @@
 #!/bin/bash
 
 # NORMAL
-make clean
-make -j8 imd_mpi_eam_ttm_tmm_nbl_colrad
-exit 1
+# make clean
+# make -j8 imd_mpi_eam_ttm_tmm_nbl_colrad
+# exit 1
 
 # #CUSTOM MAKE MIT OPENMP ABER NUR FUER COLRAD
  # optflags=" -funroll-loops -march=corei7-avx -mtune=corei7-avx -mavx2 -ftree-vectorize -m64 -ffast-math"
@@ -20,7 +20,7 @@ exit 1
  # 		  /user/eisfeld/sundials-4.1.0/instdir/lib64/libsundials_nvecserial.a \
  # 		  /user/eisfeld/sundials-4.1.0/instdir/lib64/libsundials_sunlinsollapackdense.a \
  # 		  -lgsl -lgslcblas -llapack"
- mpicc  -O3 -fopenmp $CFLAGS -DMPI  -DNBL -DEAM2 -DTTM -DTMM -DCOLRAD -c -Wno-unused-variable \
+ mpicc  -O3 -ffast-math -fopenmp $CFLAGS -DMPI  -DNBL -DEAM2 -DTTM -DTMM -DCOLRAD -c -Wno-unused-variable \
  		 imd_maxwell.c imd_misc.c imd_param.c imd_alloc.c imd_io.c imd_io_3d.c imd_potential.c\
  		 imd_time.c imd_generate.c imd_distrib.c imd_main_3d.c imd_geom_3d.c imd_pictures_3d.c \
  		 imd_geom_mpi_3d.c imd_comm_force_3d.c \

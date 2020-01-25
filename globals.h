@@ -360,6 +360,7 @@ EXTERN real colrad_ptotal INIT(0.0); //for eng-file output
 EXTERN real colrad_ptotal_global INIT(0.0); //for eng-file output
 EXTERN int colrad_write(int number); // output y-vectors for every FD-Cell
 EXTERN int colrad_read(int number);
+EXTERN int telaps_colrad INIT(0);
 // ******************
 // * COLRAD POWER DENSITIES
 // ******************
