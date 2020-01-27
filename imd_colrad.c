@@ -9,11 +9,12 @@
 // ****************************************************
 
 
-#define USEFLOAT
-#define OMP
+//#define USEFLOAT  // hauptsächlich in der funktion genexptint. Profiling zeigte, dass
+                  // hier die meiste zeit verbraucht wird -> float verdoppelt performance
+//#define OMP
 #define LAPACK
 //#define MULTIPHOTON
-#define SPONT  //<-- spontante emission, Kaum effekt 
+// #define SPONT  //<-- spontante emission, Kaum effekt 
 //#define STARK  //<-- reabsorption via stark effect
 #define DOIPD    //
 
@@ -21,18 +22,32 @@
 #include <omp.h>
 #endif
 
+#define TIMING      //time-elapsed to stdout
+
 #define MAXLEVEL 4 // bis zu welchem Ionisationsgrad?
 
-// #ifdef USEFLOAT 
-// #define EXPR(x) expf(x)
-// #else
+// #ifdef USEFLOAT          //Dieser Versuch ist fehlgeschlagen...
+// #define EXPR(x) expf(x)  //floats an wichtigen stellen erschweren 
+// #else                    //konvergenz für solver
 // #define EXPR(x) exp(x)
 // #endif
+#define EXPR(x) exp(x)      //<--NIEMALS expf draus machen!
 
-#define EXPR(x) exp(x)  //<--NIEMALS expf draus machen!
-//#define MAXLINE 255
-//#define Ith(v,i)    NV_Ith_S(v,i)       /* Ith numbers components 1..NEQ */
-//#define IJth(B,i,j) SM_ELEMENT_D(B,i,j)  //DENSE_ELEM(A,i,j) /* IJth numbers rows,cols 1..NEQ */
+#ifdef USEFLOAT
+float fak(float t, float x, float j,float s); //aux. function for genexpint
+float genexpint(float x,float ss,float j);
+#else
+double fak(double t, double x, double j,double s); //aux. function for genexpint
+double genexpint(double x,double ss,double j);
+#endif
+double ExpInt(double x);        //gsl hat keine float-variante für expint
+
+
+const int MAX_LINE_LENGTH=3000; //wird von colrad_read benuthzt
+                                //Hängt davon ab wieviele states betrachtet werden
+                                //sollte eigentlich besser dynamisch berechnet werden
+
+
 
 // *********************************************************
 // PHYSICAL CONSTANTS
@@ -63,14 +78,7 @@ int num_threads;
 //const double  ECHARGE=1.60217662e-19;  // C
 //const double  AMU=1.66053904020e-27;   // atomic mass unit
 
-#ifdef USEFLOAT
-float fak(float t, float x, float j,float s); //aux. function for genexpint
-float genexpint(float x,float ss,float j);
-#else
-double fak(double t, double x, double j,double s); //aux. function for genexpint
-double genexpint(double x,double ss,double j);
-#endif
-double ExpInt(double x);
+
 
 
 typedef struct {
@@ -78,7 +86,8 @@ typedef struct {
   realtype IPD0,IPD1,IPD2,IPD3;
   realtype P_EE,P_EI,P_MPI2,P_MPI3,P_RR;
   double P_TOTAL; //komplette colrad-Leistungsdichte, für eng-filge
-  double dens;
+  double dens; //weil cv F(dens,temp) 
+  double ni; //für Z=ne/ni
   bool initial_equi;
 } *colrad_UserData;
 colrad_UserData  cdata;
@@ -99,19 +108,16 @@ void do_colrad(double dt)
   if(myid==0 && cdata->initial_equi)
     printf("COLRAD performs pre-equilibration of Saha-distribution\nfor t=%.4e s...This may take some time.\n",colrad_tequi);
 
+#ifdef TIMING
+  //if(myid==0)
+  // {
+    struct timeval start, end;
+    gettimeofday(&start, NULL);   
+  // }
+#endif
 
-  clock_t begin;
-  struct timeval start, end;
-  gettimeofday(&start, NULL);
 
 
-
-
-
-  if (myid == 0) // In der Entwicklungsphase macht es Sinn IMMER die Performance im Auge zu behalten
-  {     
-    begin = clock();
-  }
 
   for(i=1;i<local_fd_dim.x-1;i++)
   {
@@ -146,9 +152,6 @@ void do_colrad(double dt)
 
         flag = CVodeReInit(cvode_mem, 0.0, y);                    
 
-//printf("myid:%d, running cvode i:%d,j:%d,k:%d,Te0:%.4e,ne0:%.4e,dt:%.4e\n",myid,i,j,k,Te0,ne0,dt);
-
-
         
         if(cdata->initial_equi==true)
         {
@@ -166,6 +169,7 @@ void do_colrad(double dt)
           cdata->dens=l1[i][j][k].dens;
           flag = CVode(cvode_mem, tout, y, &t, CV_NORMAL);
           colrad_ptotal+=(fd_vol)*1e-30*cdata->P_TOTAL; // d.h. ptotal ist Gesamt-Leisung
+          //ni0=cdata->ni;
         }
 
 // printf("myid:%d, after i:%d,j:%d,k:%d,Tefin:%.4e,Zfin:%.4e,Zvgl:%.4e,pcell:%.4e,ptot:%.4e\n",
@@ -193,20 +197,30 @@ void do_colrad(double dt)
         l2[i][j][k].P_MPI3=l1[i][j][k].P_MPI3;
         l2[i][j][k].P_RR=l1[i][j][k].P_RR;
 
-//printf("myid:%d,COLRAD,i:%d,ne:%.4e,Z:%.4e,temp:%.4e\n", myid,i,l1[i][j][k].ne, l1[i][j][k].Z,l1[i][j][k].temp);
+if(myid==0)
+{
+  int i_global = ((i - 1) + my_coord.x * (local_fd_dim.x - 2));
+  if (i_global==16 || i_global==17)
+  {
+    printf("ig:%d, ne:%.4e, Z:%.4e,natoms:%d, ni0:%.4e,ni:%.4e, rho:%.4e,mpi2:%.4e,mpi3:%.4e\n", 
+      i_global, l1[i][j][k].ne, l1[i][j][k].Z, l1[i][j][k].natoms, ni0, cdata->ni, l1[i][j][k].dens,
+      l1[i][j][k].P_MPI2,l1[i][j][k].P_MPI3);
+  }
+}
+// printf("myid:%d,COLRAD,i:%d,ne:%.4e,Z:%.4e,temp:%.4e\n", myid,i,l1[i][j][k].ne, l1[i][j][k].Z,l1[i][j][k].temp);
 
-if(l1[i][j][k].temp <0 || isnan(l1[i][j][k].temp) !=0 )        
-{
-  char errstr[255];
-  sprintf(errstr,"ERROR in COLRAD: Te became Nan or <0\n");
-  error(errstr);
-}
-if(l1[i][j][k].ne <0 || isnan(l1[i][j][k].ne) !=0 )        
-{
-  char errstr[255];
-  sprintf(errstr,"ERROR in COLRAD: ne became Nan or <0\n");
-  error(errstr);
-}
+        if(l1[i][j][k].temp <0 || isnan(l1[i][j][k].temp) !=0 )        
+        {
+          char errstr[255];
+          sprintf(errstr,"ERROR in COLRAD: Te became Nan or <0\n");
+          error(errstr);
+        }
+        if(l1[i][j][k].ne <0 || isnan(l1[i][j][k].ne) !=0 )        
+        {
+          char errstr[255];
+          sprintf(errstr,"ERROR in COLRAD: ne became Nan or <0\n");
+          error(errstr);
+        }
 
       }
     } 
@@ -218,24 +232,22 @@ if(l1[i][j][k].ne <0 || isnan(l1[i][j][k].ne) !=0 )
  }
  else if(steps % ttm_int ==0)
  {
-  colrad_write(ttm_int);
+  colrad_write(steps);
  } 
 
+ #ifdef TIMING
  MPI_Barrier(cpugrid);
- if(myid==0)
- {
-
-    // clock_t end = clock();
-    // double time_spent = (double)(end - begin) / CLOCKS_PER_SEC;
-
+ // if(myid==0)
+ // {
 
     gettimeofday(&end, NULL);
     double delta = ((end.tv_sec  - start.tv_sec) * 1000000u + 
              end.tv_usec - start.tv_usec) / 1.e6;
 
-
-    printf("spent:%f\n",delta);
- }
+    if(myid==0)
+      printf("t-elapsed:%f\n",delta);
+ // }
+ #endif
   
 }
 
@@ -258,13 +270,13 @@ void colrad_init(void)
     printf("*      COLLISIONAL RADIATIVE MODEL      *\n");
     printf("*****************************************\n");
     printf(" READING ENERGY LEVELS \n");	
-    printf("reltol:%.4e\n",colrad_reltol);
-    printf("abstol:%.4e\n",colrad_abstol);
+    printf(" reltol:%.4e\n",colrad_reltol);
+    printf(" abstol:%.4e\n",colrad_abstol);
 	}
 	colrad_read_states();
   if(myid==0)
   {
-    printf("* Nr. of Equations:%d                  *\n",neq);    
+    printf(" Nr. of Equations:%d                  *\n",total_species+3);    
   }
 
 MPI_Barrier(cpugrid);
@@ -360,7 +372,9 @@ if(myid==0)
 	CVodeSetMaxNumSteps(cvode_mem,1500); //Default=500
 	//CVodeSetInitStep(cvode_mem,1e-20);  //ACHTUNG:Wenn zu klein --> BS
 	//CVodeSetEpsLin(cvode_mem,0.01); //Default=0.05;
+
   CVodeSetMaxStepsBetweenJac(cvode_mem,200); //default 50 --> guter performance boost
+  // CVodeSetMaxStepsBetweenJac(cvode_mem,50); //default 50 --> guter performance boost
 	
 	//N_VDestroy(dummy);	
 	
@@ -390,7 +404,7 @@ void colrad_Saha_init(int i,int j,int k)
 
         Te0=l1[i][j][k].temp*11604.5;
         Ti0=l1[i][j][k].md_temp*11604.5;        
-        rho0=l1[i][j][k].dens/1e10;
+        rho0=l1[i][j][k].dens; ///1e10;
         ni0=rho0/AMU/26.9185; //1e28; //1e26/m^3 entspricht etwa 1e-4/Angtrom^3        
         ne0=l1[i][j][k].ne;
 
@@ -406,456 +420,447 @@ void colrad_Saha_init(int i,int j,int k)
 
 void colrad_read_states(void)
 {
-// **************************************************************************
-// *            READ STATES FILES
-// **********************************************************************
-     int lcnt=1;
-     int i,j;
-     double *buf; //buffer 1d array for communication
-     FILE* fin=NULL;
-     char line[255];
+  // **************************************************************************
+  // *            READ STATES FILES
+  // **********************************************************************
+  int lcnt = 1;
+  int i, j;
+  double *buf; //buffer 1d array for communication
+  FILE* fin = NULL;
+  char line[255];
 
-if(myid==0)
-{	
-     fin = fopen("Al0_states.txt","r");
-
-     if(fin==NULL)
-     {
-        char errstr[255];
-        sprintf(errstr,"ERROR in colrad_read_states: File %s not found\n","Al0_states.txt");
-        error(errstr);
-
-     }
-     while (1) {
-      if (fgets(line,MAXLINE,fin) == NULL) break;
-      lcnt++;
-     }
-     alloc2darr(double, STATES_z0, lcnt,6);
-
-     lcnt=0;
-     rewind(fin);
-     while (1)
-     {
-       if (fgets(line,MAXLINE,fin) == NULL) break;
-       sscanf(line,"%lf\t%lf\t%lf\t%lf\t%lf\t%lf",
-                   &STATES_z0[lcnt][0],&STATES_z0[lcnt][1],&STATES_z0[lcnt][2],
-                   &STATES_z0[lcnt][3],&STATES_z0[lcnt][4],&STATES_z0[lcnt][5]);
-       lcnt++;
-     }
-     z0_len=lcnt;
-     fclose(fin);
-     total_species+=z0_len;        
-}
-
-
-//NOW COMMUNICATE
-MPI_Bcast(&z0_len,1,MPI_INT,0,cpugrid);
-alloc1darr(double,buf,z0_len*6);
-
-MPI_Barrier(cpugrid);
-if(myid==0)
-{
-for(i=0;i<z0_len*6;i+=6) //fill 1d buff-array
-{
-  buf[i]=   (double) STATES_z0[i/6][0];
-  buf[i+1]= (double) STATES_z0[i/6][1];
-  buf[i+2]= (double) STATES_z0[i/6][2];
-  buf[i+3]= (double) STATES_z0[i/6][3];
-  buf[i+4]= (double) STATES_z0[i/6][4];
-  buf[i+5]= (double) STATES_z0[i/6][5];
-
-  //printf("E:%.4e,i/6:%d\n",STATES_z0[i/6][2], i/6);
-}
-}
-
-MPI_Barrier(cpugrid);
-MPI_Bcast(buf,z0_len*6,MPI_DOUBLE,0,cpugrid);
-// printf("myid:%d,after bcast 2\n",myid);
-
-//NOW RECONSTRUCT on other procs
-if(myid>0)
-{
-  alloc2darr(double,STATES_z0,z0_len,6);
-  for(i=0;i<z0_len*6;i+=6)
+  if (myid == 0)
   {
-	STATES_z0[i/6][0]=buf[i];
-	STATES_z0[i/6][1]=buf[i+1];
-	STATES_z0[i/6][2]=buf[i+2];
-	STATES_z0[i/6][3]=buf[i+3];
-	STATES_z0[i/6][4]=buf[i+4];
-	STATES_z0[i/6][5]=buf[i+5]; 
+    fin = fopen("Al0_states.txt", "r");
 
-// if(myid==1)
-//  printf("myid:%d, eng(%d)=%.4e,z0_len=%d\n",myid, i/6, STATES_z0[i/6][2],z0_len);  
-  }
-}
-free(buf);
+    if (fin == NULL)
+    {
+      char errstr[255];
+      sprintf(errstr, "ERROR in colrad_read_states: File %s not found\n", "Al0_states.txt");
+      error(errstr);
 
-     // ***********************************************
-     //Read Al, Z=+1
-     // **********************************************
-if(myid==0)
-{
-     lcnt=1;
-     fin = fopen("Al1_states.txt","r");
-     if(fin==NULL)
-     {
-        char errstr[255];
-        sprintf(errstr,"ERROR in colrad_read_states: File %s not found\n","Al1_states.txt");
-        error(errstr);
-     }
-     while (1) {
-      if (fgets(line,MAXLINE,fin) == NULL) break;
+    }
+    while (1) {
+      if (fgets(line, MAXLINE, fin) == NULL) break;
       lcnt++;
-     }
+    }
+    alloc2darr(double, STATES_z0, lcnt, 6);
 
-     alloc2darr(double, STATES_z1, lcnt,6);
-
-     lcnt=0;
-     rewind(fin);
-     while (1)
-     {
-       if (fgets(line,MAXLINE,fin) == NULL) break;
-       sscanf(line,"%lf\t%lf\t%lf\t%lf\t%lf\t%lf",
-                   &STATES_z1[lcnt][0],&STATES_z1[lcnt][1],&STATES_z1[lcnt][2],
-                   &STATES_z1[lcnt][3],&STATES_z1[lcnt][4],&STATES_z1[lcnt][5]);
-       lcnt++;
-     }
-     z1_len=lcnt;
-     fclose(fin);
-     total_species+=z1_len;
-
-}
-
-//NOW COMMUNICATE
-MPI_Bcast(&z1_len,1,MPI_INT,0,cpugrid);
-alloc1darr(double,buf,z1_len*6);
-if(myid==0)
-{	
-for(i=0;i<z1_len*6;i+=6) //fill 1d buff-array
-{
-  buf[i]=   (double) STATES_z1[i/6][0];
-  buf[i+1]= (double) STATES_z1[i/6][1];
-  buf[i+2]= (double) STATES_z1[i/6][2];
-  buf[i+3]= (double) STATES_z1[i/6][3];
-  buf[i+4]= (double) STATES_z1[i/6][4];
-  buf[i+5]= (double) STATES_z1[i/6][5];
-}
-}
-
-MPI_Bcast(buf,z1_len*6,MPI_DOUBLE,0,cpugrid);
-//NOW RECONSTRUCT on other procs
-if(myid>0)
-{
-  alloc2darr(double,STATES_z1,z1_len,6);
-  for(i=0;i<z1_len*6;i+=6)
-  {
-	STATES_z1[i/6][0]=buf[i];
-	STATES_z1[i/6][1]=buf[i+1];
-	STATES_z1[i/6][2]=buf[i+2];
-	STATES_z1[i/6][3]=buf[i+3];
-	STATES_z1[i/6][4]=buf[i+4];
-  STATES_z1[i/6][5]=buf[i+5];
-
- //  if(myid==1)
- // printf("myid:%d, eng(%d)=%.4e,z1_len=%d\n",myid, i/6, STATES_z1[i/6][2],z1_len);  
-  }
-}
-free(buf);
-
-
-     // ***********************************************
-     //Read Al, Z=+2
-     // **********************************************     
-#if MAXLEVEL > 1
-if(myid==0)
-{
-     lcnt=1;
-     fin = fopen("Al2_states.txt","r");
-     if(fin==NULL)
-     {
-        char errstr[255];
-        sprintf(errstr,"ERROR in colrad_read_states: File %s not found\n","Al2_states.txt");
-        error(errstr);
-     }
-     while (1) {
-      if (fgets(line,MAXLINE,fin) == NULL) break;
+    lcnt = 0;
+    rewind(fin);
+    while (1)
+    {
+      if (fgets(line, MAXLINE, fin) == NULL) break;
+      sscanf(line, "%lf\t%lf\t%lf\t%lf\t%lf\t%lf",
+             &STATES_z0[lcnt][0], &STATES_z0[lcnt][1], &STATES_z0[lcnt][2],
+             &STATES_z0[lcnt][3], &STATES_z0[lcnt][4], &STATES_z0[lcnt][5]);
       lcnt++;
-     }
-
-     alloc2darr(double, STATES_z2, lcnt,6);
-
-     lcnt=0;
-     rewind(fin);
-     while (1)
-     {
-       if (fgets(line,MAXLINE,fin) == NULL) break;
-       sscanf(line,"%lf\t%lf\t%lf\t%lf\t%lf\t%lf",
-                   &STATES_z2[lcnt][0],&STATES_z2[lcnt][1],&STATES_z2[lcnt][2],
-                   &STATES_z2[lcnt][3],&STATES_z2[lcnt][4],&STATES_z2[lcnt][5]);
-       lcnt++;
-     }
-     z2_len=lcnt;
-     fclose(fin);
-     total_species+=z2_len;
-}
-
-//NOW COMMUNICATE
-MPI_Bcast(&z2_len,1,MPI_INT,0,cpugrid);
-alloc1darr(double,buf,z2_len*6);
-if(myid==0)
-{ 
-for(i=0;i<z2_len*6;i+=6) //fill 1d buff-array
-{
-  buf[i]=   (double) STATES_z2[i/6][0];
-  buf[i+1]= (double) STATES_z2[i/6][1];
-  buf[i+2]= (double) STATES_z2[i/6][2];
-  buf[i+3]= (double) STATES_z2[i/6][3];
-  buf[i+4]= (double) STATES_z2[i/6][4];
-  buf[i+5]= (double) STATES_z2[i/6][5];
-}
-}
-
-MPI_Bcast(buf,z2_len*6,MPI_DOUBLE,0,cpugrid);
-//NOW RECONSTRUCT on other procs
-if(myid>0)
-{
-  alloc2darr(double,STATES_z2,z2_len,6);
-  for(i=0;i<z2_len*6;i+=6)
-  {
-  STATES_z2[i/6][0]=buf[i];
-  STATES_z2[i/6][1]=buf[i+1];
-  STATES_z2[i/6][2]=buf[i+2];
-  STATES_z2[i/6][3]=buf[i+3];
-  STATES_z2[i/6][4]=buf[i+4];
-  STATES_z2[i/6][5]=buf[i+5];
-
- //  if(myid==1)
- // printf("myid:%d, eng(%d)=%.4e,z1_len=%d\n",myid, i/6, STATES_z1[i/6][2],z1_len);  
+    }
+    z0_len = lcnt;
+    fclose(fin);
+    total_species += z0_len;
   }
-}
-free(buf);
-#endif //MAXLEVEL > 1
 
 
-     // ***********************************************
-     //Read Al, Z=+3
-     // **********************************************     
-#if MAXLEVEL > 2
-if(myid==0)
-{
-     lcnt=1;
-     fin = fopen("Al3_states.txt","r");
-     if(fin==NULL)
-     {
-        char errstr[255];
-        sprintf(errstr,"ERROR in colrad_read_states: File %s not found\n","Al3_states.txt");
-        error(errstr);
-     }
-     while (1) {
-      if (fgets(line,MAXLINE,fin) == NULL) break;
+  //NOW COMMUNICATE
+  MPI_Bcast(&z0_len, 1, MPI_INT, 0, cpugrid);
+  alloc1darr(double, buf, z0_len * 6);
+
+  MPI_Barrier(cpugrid);
+  if (myid == 0)
+  {
+    for (i = 0; i < z0_len * 6; i += 6) //fill 1d buff-array
+    {
+      buf[i] =   (double) STATES_z0[i / 6][0];
+      buf[i + 1] = (double) STATES_z0[i / 6][1];
+      buf[i + 2] = (double) STATES_z0[i / 6][2];
+      buf[i + 3] = (double) STATES_z0[i / 6][3];
+      buf[i + 4] = (double) STATES_z0[i / 6][4];
+      buf[i + 5] = (double) STATES_z0[i / 6][5];
+
+      //printf("E:%.4e,i/6:%d\n",STATES_z0[i/6][2], i/6);
+    }
+  }
+
+  MPI_Barrier(cpugrid);
+  MPI_Bcast(buf, z0_len * 6, MPI_DOUBLE, 0, cpugrid);
+
+
+  //NOW RECONSTRUCT on other procs
+  if (myid > 0)
+  {
+    alloc2darr(double, STATES_z0, z0_len, 6);
+    for (i = 0; i < z0_len * 6; i += 6)
+    {
+      STATES_z0[i / 6][0] = buf[i];
+      STATES_z0[i / 6][1] = buf[i + 1];
+      STATES_z0[i / 6][2] = buf[i + 2];
+      STATES_z0[i / 6][3] = buf[i + 3];
+      STATES_z0[i / 6][4] = buf[i + 4];
+      STATES_z0[i / 6][5] = buf[i + 5];
+
+
+    }
+  }
+  free(buf);
+
+  // ***********************************************
+  //Read Al, Z=+1
+  // **********************************************
+  if (myid == 0)
+  {
+    lcnt = 1;
+    fin = fopen("Al1_states.txt", "r");
+    if (fin == NULL)
+    {
+      char errstr[255];
+      sprintf(errstr, "ERROR in colrad_read_states: File %s not found\n", "Al1_states.txt");
+      error(errstr);
+    }
+    while (1) {
+      if (fgets(line, MAXLINE, fin) == NULL) break;
       lcnt++;
-     }
+    }
 
-     alloc2darr(double, STATES_z3, lcnt,6);
+    alloc2darr(double, STATES_z1, lcnt, 6);
 
-     lcnt=0;
-     rewind(fin);
-     while (1)
-     {
-       if (fgets(line,MAXLINE,fin) == NULL) break;
-       sscanf(line,"%lf\t%lf\t%lf\t%lf\t%lf\t%lf",
-                   &STATES_z3[lcnt][0],&STATES_z3[lcnt][1],&STATES_z3[lcnt][2],
-                   &STATES_z3[lcnt][3],&STATES_z3[lcnt][4],&STATES_z3[lcnt][5]);
-       lcnt++;
-     }
-     z3_len=lcnt;
-     fclose(fin);
-     total_species+=z3_len;
-}
-
-//NOW COMMUNICATE
-MPI_Bcast(&z3_len,1,MPI_INT,0,cpugrid);
-alloc1darr(double,buf,z3_len*6);
-if(myid==0)
-{ 
-for(i=0;i<z3_len*6;i+=6) //fill 1d buff-array
-{
-  buf[i]=   (double) STATES_z3[i/6][0];
-  buf[i+1]= (double) STATES_z3[i/6][1];
-  buf[i+2]= (double) STATES_z3[i/6][2];
-  buf[i+3]= (double) STATES_z3[i/6][3];
-  buf[i+4]= (double) STATES_z3[i/6][4];
-  buf[i+5]= (double) STATES_z3[i/6][5];
-}
-}
-
-MPI_Bcast(buf,z3_len*6,MPI_DOUBLE,0,cpugrid);
-//NOW RECONSTRUCT on other procs
-if(myid>0)
-{
-  alloc2darr(double,STATES_z3,z3_len,6);
-  for(i=0;i<z3_len*6;i+=6)
-  {
-  STATES_z3[i/6][0]=buf[i];
-  STATES_z3[i/6][1]=buf[i+1];
-  STATES_z3[i/6][2]=buf[i+2];
-  STATES_z3[i/6][3]=buf[i+3];
-  STATES_z3[i/6][4]=buf[i+4];
-  STATES_z3[i/6][5]=buf[i+5];
-
- //  if(myid==1)
- // printf("myid:%d, eng(%d)=%.4e,z1_len=%d\n",myid, i/6, STATES_z1[i/6][2],z1_len);  
-  }
-}
-free(buf);
-#endif //MAXLEVEL > 2
-
-     // ***********************************************
-     //Read Al, Z=+4
-     // **********************************************     
-#if MAXLEVEL > 3
-if(myid==0)
-{
-     lcnt=1;
-     fin = fopen("Al4_states.txt","r");
-     if(fin==NULL)
-     {
-        char errstr[255];
-        sprintf(errstr,"ERROR in colrad_read_states: File %s not found\n","Al4_states.txt");
-        error(errstr);
-     }
-     while (1) {
-      if (fgets(line,MAXLINE,fin) == NULL) break;
+    lcnt = 0;
+    rewind(fin);
+    while (1)
+    {
+      if (fgets(line, MAXLINE, fin) == NULL) break;
+      sscanf(line, "%lf\t%lf\t%lf\t%lf\t%lf\t%lf",
+             &STATES_z1[lcnt][0], &STATES_z1[lcnt][1], &STATES_z1[lcnt][2],
+             &STATES_z1[lcnt][3], &STATES_z1[lcnt][4], &STATES_z1[lcnt][5]);
       lcnt++;
-     }
+    }
+    z1_len = lcnt;
+    fclose(fin);
+    total_species += z1_len;
 
-     alloc2darr(double, STATES_z4, lcnt,6);
-
-     lcnt=0;
-     rewind(fin);
-     while (1)
-     {
-       if (fgets(line,MAXLINE,fin) == NULL) break;
-       sscanf(line,"%lf\t%lf\t%lf\t%lf\t%lf\t%lf",
-                   &STATES_z4[lcnt][0],&STATES_z4[lcnt][1],&STATES_z4[lcnt][2],
-                   &STATES_z4[lcnt][3],&STATES_z4[lcnt][4],&STATES_z4[lcnt][5]);
-       lcnt++;
-     }
-     z4_len=lcnt;
-     fclose(fin);
-     total_species+=z4_len;
-}
-
-//NOW COMMUNICATE
-MPI_Bcast(&z4_len,1,MPI_INT,0,cpugrid);
-alloc1darr(double,buf,z4_len*6);
-if(myid==0)
-{ 
-for(i=0;i<z4_len*6;i+=6) //fill 1d buff-array
-{
-  buf[i]=   (double) STATES_z4[i/6][0];
-  buf[i+1]= (double) STATES_z4[i/6][1];
-  buf[i+2]= (double) STATES_z4[i/6][2];
-  buf[i+3]= (double) STATES_z4[i/6][3];
-  buf[i+4]= (double) STATES_z4[i/6][4];
-  buf[i+5]= (double) STATES_z4[i/6][5];
-}
-}
-
-MPI_Bcast(buf,z4_len*6,MPI_DOUBLE,0,cpugrid);
-//NOW RECONSTRUCT on other procs
-if(myid>0)
-{
-  alloc2darr(double,STATES_z4,z4_len,6);
-  for(i=0;i<z4_len*6;i+=6)
-  {
-  STATES_z4[i/6][0]=buf[i];
-  STATES_z4[i/6][1]=buf[i+1];
-  STATES_z4[i/6][2]=buf[i+2];
-  STATES_z4[i/6][3]=buf[i+3];
-  STATES_z4[i/6][4]=buf[i+4];
-  STATES_z4[i/6][5]=buf[i+5];
-
- //  if(myid==1)
- // printf("myid:%d, eng(%d)=%.4e,z1_len=%d\n",myid, i/6, STATES_z1[i/6][2],z1_len);  
   }
-}
-free(buf);
-#endif //MAXLEVEL > 3
 
-     // **********************************
-     // * ALLOC ARRAYS
-     // **********************************
-     alloc2darr(double, k_EE_z0_z0, z0_len,z0_len);
-     alloc2darr(double, k_EE_z0_z0_b, z0_len,z0_len);
+  //NOW COMMUNICATE
+  MPI_Bcast(&z1_len, 1, MPI_INT, 0, cpugrid);
+  alloc1darr(double, buf, z1_len * 6);
+  if (myid == 0)
+  {
+    for (i = 0; i < z1_len * 6; i += 6) //fill 1d buff-array
+    {
+      buf[i] =   (double) STATES_z1[i / 6][0];
+      buf[i + 1] = (double) STATES_z1[i / 6][1];
+      buf[i + 2] = (double) STATES_z1[i / 6][2];
+      buf[i + 3] = (double) STATES_z1[i / 6][3];
+      buf[i + 4] = (double) STATES_z1[i / 6][4];
+      buf[i + 5] = (double) STATES_z1[i / 6][5];
+    }
+  }
 
-     alloc2darr(double, k_EE_z1_z1, z1_len,z1_len);
-     alloc2darr(double, k_EE_z1_z1_b, z1_len,z1_len);
+  MPI_Bcast(buf, z1_len * 6, MPI_DOUBLE, 0, cpugrid);
+  //NOW RECONSTRUCT on other procs
+  if (myid > 0)
+  {
+    alloc2darr(double, STATES_z1, z1_len, 6);
+    for (i = 0; i < z1_len * 6; i += 6)
+    {
+      STATES_z1[i / 6][0] = buf[i];
+      STATES_z1[i / 6][1] = buf[i + 1];
+      STATES_z1[i / 6][2] = buf[i + 2];
+      STATES_z1[i / 6][3] = buf[i + 3];
+      STATES_z1[i / 6][4] = buf[i + 4];
+      STATES_z1[i / 6][5] = buf[i + 5];
 
-#if MAXLEVEL > 1     
-     alloc2darr(double, k_EE_z2_z2, z2_len,z2_len);
-     alloc2darr(double, k_EE_z2_z2_b, z2_len,z2_len);
-#endif
-
-#if MAXLEVEL > 2 
-     alloc2darr(double, k_EE_z3_z3, z3_len,z3_len);
-     alloc2darr(double, k_EE_z3_z3_b, z3_len,z3_len);
-#endif
-
-#if MAXLEVEL > 3
-     alloc2darr(double, k_EE_z4_z4, z4_len,z4_len);
-     alloc2darr(double, k_EE_z4_z4_b, z4_len,z4_len);
-#endif
-     // **********************************************
-     // Now Thermal Ionization and Recomb. rate coeff. arrays
-
-     // z0->z1
-     alloc2darr(double, k_EI_z0_z1, z0_len,z1_len);
-     alloc2darr(double, k_EI_z1_z0, z0_len,z1_len);
-
-#if MAXLEVEL > 1     
-     //z1->z2
-     alloc2darr(double, k_EI_z1_z2, z1_len,z2_len);
-     alloc2darr(double, k_EI_z2_z1, z1_len,z2_len);
-#endif
-
-#if MAXLEVEL > 2     
-     //z2->z3
-     alloc2darr(double, k_EI_z2_z3, z2_len,z3_len);
-     alloc2darr(double, k_EI_z3_z2, z2_len,z3_len);
-#endif
-
-#if MAXLEVEL > 3  
-     //z3->z4
-     alloc2darr(double, k_EI_z3_z4, z3_len,z4_len);
-     alloc2darr(double, k_EI_z4_z3, z3_len,z4_len);
-#endif
-     // k_MPI arrays
-     //z0->z1
-     alloc3darr(double,k_MPI_z0_z1,z0_len,z1_len,2);
-     alloc3darr(double,k_MPI_z1_z0,z0_len,z1_len,2);
-
-     //z1->z2
-#if MAXLEVEL > 1     
-     alloc3darr(double,k_MPI_z1_z2,z1_len,z2_len,2);
-     alloc3darr(double,k_MPI_z2_z1,z1_len,z2_len,2);
-#endif     
-
-     //z2->z3
-#if MAXLEVEL > 2     
-     alloc3darr(double,k_MPI_z2_z3,z2_len,z3_len,2);
-     alloc3darr(double,k_MPI_z3_z2,z2_len,z3_len,2);
-#endif
+    }
+  }
+  free(buf);
 
 
-     //z3->z4
-#if MAXLEVEL > 3
-     alloc3darr(double,k_MPI_z3_z4,z3_len,z4_len,2);
-     alloc3darr(double,k_MPI_z4_z3,z3_len,z4_len,2);
-#endif
+  // ***********************************************
+  //Read Al, Z=+2
+  // **********************************************
+  #if MAXLEVEL > 1
+  if (myid == 0)
+  {
+    lcnt = 1;
+    fin = fopen("Al2_states.txt", "r");
+    if (fin == NULL)
+    {
+      char errstr[255];
+      sprintf(errstr, "ERROR in colrad_read_states: File %s not found\n", "Al2_states.txt");
+      error(errstr);
+    }
+    while (1) {
+      if (fgets(line, MAXLINE, fin) == NULL) break;
+      lcnt++;
+    }
 
-     MPI_Bcast(&total_species,1,MPI_INT,0,cpugrid);     
+    alloc2darr(double, STATES_z2, lcnt, 6);
+
+    lcnt = 0;
+    rewind(fin);
+    while (1)
+    {
+      if (fgets(line, MAXLINE, fin) == NULL) break;
+      sscanf(line, "%lf\t%lf\t%lf\t%lf\t%lf\t%lf",
+             &STATES_z2[lcnt][0], &STATES_z2[lcnt][1], &STATES_z2[lcnt][2],
+             &STATES_z2[lcnt][3], &STATES_z2[lcnt][4], &STATES_z2[lcnt][5]);
+      lcnt++;
+    }
+    z2_len = lcnt;
+    fclose(fin);
+    total_species += z2_len;
+  }
+
+  //NOW COMMUNICATE
+  MPI_Bcast(&z2_len, 1, MPI_INT, 0, cpugrid);
+  alloc1darr(double, buf, z2_len * 6);
+  if (myid == 0)
+  {
+    for (i = 0; i < z2_len * 6; i += 6) //fill 1d buff-array
+    {
+      buf[i] =   (double) STATES_z2[i / 6][0];
+      buf[i + 1] = (double) STATES_z2[i / 6][1];
+      buf[i + 2] = (double) STATES_z2[i / 6][2];
+      buf[i + 3] = (double) STATES_z2[i / 6][3];
+      buf[i + 4] = (double) STATES_z2[i / 6][4];
+      buf[i + 5] = (double) STATES_z2[i / 6][5];
+    }
+  }
+
+  MPI_Bcast(buf, z2_len * 6, MPI_DOUBLE, 0, cpugrid);
+  //NOW RECONSTRUCT on other procs
+  if (myid > 0)
+  {
+    alloc2darr(double, STATES_z2, z2_len, 6);
+    for (i = 0; i < z2_len * 6; i += 6)
+    {
+      STATES_z2[i / 6][0] = buf[i];
+      STATES_z2[i / 6][1] = buf[i + 1];
+      STATES_z2[i / 6][2] = buf[i + 2];
+      STATES_z2[i / 6][3] = buf[i + 3];
+      STATES_z2[i / 6][4] = buf[i + 4];
+      STATES_z2[i / 6][5] = buf[i + 5];
+
+    }
+  }
+  free(buf);
+  #endif //MAXLEVEL > 1
+
+
+  // ***********************************************
+  //Read Al, Z=+3
+  // **********************************************
+  #if MAXLEVEL > 2
+  if (myid == 0)
+  {
+    lcnt = 1;
+    fin = fopen("Al3_states.txt", "r");
+    if (fin == NULL)
+    {
+      char errstr[255];
+      sprintf(errstr, "ERROR in colrad_read_states: File %s not found\n", "Al3_states.txt");
+      error(errstr);
+    }
+    while (1) {
+      if (fgets(line, MAXLINE, fin) == NULL) break;
+      lcnt++;
+    }
+
+    alloc2darr(double, STATES_z3, lcnt, 6);
+
+    lcnt = 0;
+    rewind(fin);
+    while (1)
+    {
+      if (fgets(line, MAXLINE, fin) == NULL) break;
+      sscanf(line, "%lf\t%lf\t%lf\t%lf\t%lf\t%lf",
+             &STATES_z3[lcnt][0], &STATES_z3[lcnt][1], &STATES_z3[lcnt][2],
+             &STATES_z3[lcnt][3], &STATES_z3[lcnt][4], &STATES_z3[lcnt][5]);
+      lcnt++;
+    }
+    z3_len = lcnt;
+    fclose(fin);
+    total_species += z3_len;
+  }
+
+  //NOW COMMUNICATE
+  MPI_Bcast(&z3_len, 1, MPI_INT, 0, cpugrid);
+  alloc1darr(double, buf, z3_len * 6);
+  if (myid == 0)
+  {
+    for (i = 0; i < z3_len * 6; i += 6) //fill 1d buff-array
+    {
+      buf[i] =   (double) STATES_z3[i / 6][0];
+      buf[i + 1] = (double) STATES_z3[i / 6][1];
+      buf[i + 2] = (double) STATES_z3[i / 6][2];
+      buf[i + 3] = (double) STATES_z3[i / 6][3];
+      buf[i + 4] = (double) STATES_z3[i / 6][4];
+      buf[i + 5] = (double) STATES_z3[i / 6][5];
+    }
+  }
+
+  MPI_Bcast(buf, z3_len * 6, MPI_DOUBLE, 0, cpugrid);
+  //NOW RECONSTRUCT on other procs
+  if (myid > 0)
+  {
+    alloc2darr(double, STATES_z3, z3_len, 6);
+    for (i = 0; i < z3_len * 6; i += 6)
+    {
+      STATES_z3[i / 6][0] = buf[i];
+      STATES_z3[i / 6][1] = buf[i + 1];
+      STATES_z3[i / 6][2] = buf[i + 2];
+      STATES_z3[i / 6][3] = buf[i + 3];
+      STATES_z3[i / 6][4] = buf[i + 4];
+      STATES_z3[i / 6][5] = buf[i + 5];
+
+    }
+  }
+  free(buf);
+  #endif //MAXLEVEL > 2
+
+  // ***********************************************
+  //Read Al, Z=+4
+  // **********************************************
+  #if MAXLEVEL > 3
+  if (myid == 0)
+  {
+    lcnt = 1;
+    fin = fopen("Al4_states.txt", "r");
+    if (fin == NULL)
+    {
+      char errstr[255];
+      sprintf(errstr, "ERROR in colrad_read_states: File %s not found\n", "Al4_states.txt");
+      error(errstr);
+    }
+    while (1) {
+      if (fgets(line, MAXLINE, fin) == NULL) break;
+      lcnt++;
+    }
+
+    alloc2darr(double, STATES_z4, lcnt, 6);
+
+    lcnt = 0;
+    rewind(fin);
+    while (1)
+    {
+      if (fgets(line, MAXLINE, fin) == NULL) break;
+      sscanf(line, "%lf\t%lf\t%lf\t%lf\t%lf\t%lf",
+             &STATES_z4[lcnt][0], &STATES_z4[lcnt][1], &STATES_z4[lcnt][2],
+             &STATES_z4[lcnt][3], &STATES_z4[lcnt][4], &STATES_z4[lcnt][5]);
+      lcnt++;
+    }
+    z4_len = lcnt;
+    fclose(fin);
+    total_species += z4_len;
+  }
+
+  //NOW COMMUNICATE
+  MPI_Bcast(&z4_len, 1, MPI_INT, 0, cpugrid);
+  alloc1darr(double, buf, z4_len * 6);
+  if (myid == 0)
+  {
+    for (i = 0; i < z4_len * 6; i += 6) //fill 1d buff-array
+    {
+      buf[i] =   (double) STATES_z4[i / 6][0];
+      buf[i + 1] = (double) STATES_z4[i / 6][1];
+      buf[i + 2] = (double) STATES_z4[i / 6][2];
+      buf[i + 3] = (double) STATES_z4[i / 6][3];
+      buf[i + 4] = (double) STATES_z4[i / 6][4];
+      buf[i + 5] = (double) STATES_z4[i / 6][5];
+    }
+  }
+
+  MPI_Bcast(buf, z4_len * 6, MPI_DOUBLE, 0, cpugrid);
+  //NOW RECONSTRUCT on other procs
+  if (myid > 0)
+  {
+    alloc2darr(double, STATES_z4, z4_len, 6);
+    for (i = 0; i < z4_len * 6; i += 6)
+    {
+      STATES_z4[i / 6][0] = buf[i];
+      STATES_z4[i / 6][1] = buf[i + 1];
+      STATES_z4[i / 6][2] = buf[i + 2];
+      STATES_z4[i / 6][3] = buf[i + 3];
+      STATES_z4[i / 6][4] = buf[i + 4];
+      STATES_z4[i / 6][5] = buf[i + 5];
+
+    }
+  }
+  free(buf);
+  #endif //MAXLEVEL > 3
+
+  // **********************************
+  // * ALLOC ARRAYS
+  // **********************************
+  alloc2darr(double, k_EE_z0_z0, z0_len, z0_len);
+  alloc2darr(double, k_EE_z0_z0_b, z0_len, z0_len);
+
+  alloc2darr(double, k_EE_z1_z1, z1_len, z1_len);
+  alloc2darr(double, k_EE_z1_z1_b, z1_len, z1_len);
+
+  #if MAXLEVEL > 1
+  alloc2darr(double, k_EE_z2_z2, z2_len, z2_len);
+  alloc2darr(double, k_EE_z2_z2_b, z2_len, z2_len);
+  #endif
+
+  #if MAXLEVEL > 2
+  alloc2darr(double, k_EE_z3_z3, z3_len, z3_len);
+  alloc2darr(double, k_EE_z3_z3_b, z3_len, z3_len);
+  #endif
+
+  #if MAXLEVEL > 3
+  alloc2darr(double, k_EE_z4_z4, z4_len, z4_len);
+  alloc2darr(double, k_EE_z4_z4_b, z4_len, z4_len);
+  #endif
+  // **********************************************
+  // Now Thermal Ionization and Recomb. rate coeff. arrays
+
+  // z0->z1
+  alloc2darr(double, k_EI_z0_z1, z0_len, z1_len);
+  alloc2darr(double, k_EI_z1_z0, z0_len, z1_len);
+
+  #if MAXLEVEL > 1
+  //z1->z2
+  alloc2darr(double, k_EI_z1_z2, z1_len, z2_len);
+  alloc2darr(double, k_EI_z2_z1, z1_len, z2_len);
+  #endif
+
+  #if MAXLEVEL > 2
+  //z2->z3
+  alloc2darr(double, k_EI_z2_z3, z2_len, z3_len);
+  alloc2darr(double, k_EI_z3_z2, z2_len, z3_len);
+  #endif
+
+  #if MAXLEVEL > 3
+  //z3->z4
+  alloc2darr(double, k_EI_z3_z4, z3_len, z4_len);
+  alloc2darr(double, k_EI_z4_z3, z3_len, z4_len);
+  #endif
+  // k_MPI arrays
+  //z0->z1
+  alloc3darr(double, k_MPI_z0_z1, z0_len, z1_len, 2);
+  alloc3darr(double, k_MPI_z1_z0, z0_len, z1_len, 2);
+
+  //z1->z2
+  #if MAXLEVEL > 1
+  alloc3darr(double, k_MPI_z1_z2, z1_len, z2_len, 2);
+  alloc3darr(double, k_MPI_z2_z1, z1_len, z2_len, 2);
+  #endif
+
+  //z2->z3
+  #if MAXLEVEL > 2
+  alloc3darr(double, k_MPI_z2_z3, z2_len, z3_len, 2);
+  alloc3darr(double, k_MPI_z3_z2, z2_len, z3_len, 2);
+  #endif
+
+
+  //z3->z4
+  #if MAXLEVEL > 3
+  alloc3darr(double, k_MPI_z3_z4, z3_len, z4_len, 2);
+  alloc3darr(double, k_MPI_z4_z3, z3_len, z4_len, 2);
+  #endif
+
+  MPI_Bcast(&total_species, 1, MPI_INT, 0, cpugrid);
 }
 
 
@@ -887,9 +892,8 @@ void do_Saha(double Te,double totalc,double ne,N_Vector y) //Bei init
   Zav=ne/totalc;
   //Debye=sqrt(BOLTZMAN*Te/4.0/pi/ECHARGE/ECHARGE/ne/(Zav+1));
   tmp=pow(2.0*pi*EMASS*BOLTZMAN*Te,1.5)/planck/planck/planck;
-
-#ifdef DOIPD
-  double IPD0,IPD1,IPD2,IPD3;
+  #ifdef DOIPD
+  double IPD0,IPD1,IPD2,IPD3,IPD4;
   double z; //DOI after ionization (e.g.=1 for Al0)
   double r0; //Ion sphere radius
   r0=pow(3.0/4.0/pi/totalc,1.0/3.0);
@@ -899,7 +903,8 @@ void do_Saha(double Te,double totalc,double ne,N_Vector y) //Bei init
   IPD1=2.0*3.0/2.0/r0*ECHARGE*ECHARGE*(pow(1.0+pow(debye/r0,3.0),2.0/3.0)-pow(debye/r0,2.0))/4.0/pi/ECONST;
   IPD2=3.0*3.0/2.0/r0*ECHARGE*ECHARGE*(pow(1.0+pow(debye/r0,3.0),2.0/3.0)-pow(debye/r0,2.0))/4.0/pi/ECONST;
   IPD3=4.0*3.0/2.0/r0*ECHARGE*ECHARGE*(pow(1.0+pow(debye/r0,3.0),2.0/3.0)-pow(debye/r0,2.0))/4.0/pi/ECONST;  
-#endif  
+  IPD4=5.0*3.0/2.0/r0*ECHARGE*ECHARGE*(pow(1.0+pow(debye/r0,3.0),2.0/3.0)-pow(debye/r0,2.0))/4.0/pi/ECONST;  
+  #endif  
 
   //compute partition functions
   Q_z0=0.0;
@@ -909,45 +914,88 @@ void do_Saha(double Te,double totalc,double ne,N_Vector y) //Bei init
   Q_z4=0.0;
   Q_z5=0.0;
   for(i=0;i<z0_len;++i)
-    Q_z0+=STATES_z0[i][3]*exp(-(STATES_z0[i][2]-0.0)*eV2J/BOLTZMAN/Te); //Mit Energien, relativ zum Grundzustand (level=0) dieses Ions
+  {
+    #ifdef DOIPD
+    IPD=IPD0;
+    #endif
+    double Ei=STATES_z0[i][2]*eV2J-IPD;
+    double qi=STATES_z0[i][3]*exp(-(STATES_z0[i][2]-0.0)*eV2J/BOLTZMAN/Te); 
+    if(Ei<0) //depressed state- > truncate partiation function 
+      qi=0;
+
+    Q_z0+=qi; //Mit Energien, relativ zum Grundzustand (level=0) dieses Ions
+  }
 
   for(i=0;i<z1_len;++i)
-    Q_z1+=STATES_z1[i][3]*exp(-(STATES_z1[i][2]-STATES_z1[0][2])*eV2J/BOLTZMAN/Te);
+  { 
+    #ifdef DOIPD
+    IPD=IPD0;
+    #endif
+    double Ei=STATES_z1[i][2]*eV2J-IPD;
+    double qi=STATES_z1[i][3]*exp(-(STATES_z1[i][2]-STATES_z1[0][2])*eV2J/BOLTZMAN/Te);     
+    if(Ei<0) qi=0;
+    Q_z1+=qi;
+  }
 
-#if MAXLEVEL > 1
+  #if MAXLEVEL > 1
   for(i=0;i<z2_len;++i)
-     Q_z2+=STATES_z2[i][3]*exp(-(STATES_z2[i][2]-STATES_z2[0][2])*eV2J/BOLTZMAN/Te);
-#endif
+  {
+    #ifdef DOIPD
+    IPD=IPD1;
+    #endif
+    double Ei=STATES_z2[i][2]*eV2J-IPD;
+    double qi=STATES_z2[i][3]*exp(-(STATES_z2[i][2]-STATES_z2[0][2])*eV2J/BOLTZMAN/Te);     
+    if(Ei<0) qi=0;
+    Q_z2+=qi;
+  }
+  #endif
 
-#if MAXLEVEL > 2
+  #if MAXLEVEL > 2
   for(i=0;i<z3_len;++i)
-    Q_z3+=STATES_z3[i][3]*exp(-(STATES_z3[i][2]-STATES_z3[0][2])*eV2J/BOLTZMAN/Te);
-#endif
+  {
+    #ifdef DOIPD
+    IPD=IPD2;
+    #endif
+    double Ei=STATES_z3[i][2]*eV2J-IPD;
+    double qi=STATES_z3[i][3]*exp(-(STATES_z3[i][2]-STATES_z3[0][2])*eV2J/BOLTZMAN/Te);     
+    if(Ei<0) qi=0;
+    Q_z3+=qi;
+  }
+  #endif
 
-#if MAXLEVEL > 3
+  #if MAXLEVEL > 3
    for(i=0;i<z4_len;++i)
-     Q_z4+=STATES_z4[i][3]*exp(-(STATES_z4[i][2]-STATES_z4[0][2])*eV2J/BOLTZMAN/Te);
-#endif
+   {
+    #ifdef DOIPD
+    IPD=IPD3;
+    #endif
+    double Ei=STATES_z4[i][2]*eV2J-IPD;
+    double qi=STATES_z4[i][3]*exp(-(STATES_z4[i][2]-STATES_z4[0][2])*eV2J/BOLTZMAN/Te);     
+    if(Ei<0) qi=0;
 
-/*
+     Q_z4+=qi;
+   }
+  #endif
+
+  /*
   for(int i=0;i<z5_len;++i)
     Q_z5+=STATES_z5[i][3]*exp(-(STATES_z5[i][2]-STATES_z5[0][2])*eV2J/BOLTZMAN/Te);
-*/
+  */
   // double tmp2,tmp3;
   ////////////
   // Z=0->1 //
   ////////////
 
-#ifdef DOIPD
-// z=1.0;
-// IPD=3.0*z*ECHARGE*ECHARGE/2.0/r0/4.0/pi/ECONST;  //Ion-Sphere model
-IPD=IPD0;
-#endif
+  #ifdef DOIPD
+  // z=1.0;
+  // IPD=3.0*z*ECHARGE*ECHARGE/2.0/r0/4.0/pi/ECONST;  //Ion-Sphere model
+  IPD=IPD0;
+  #endif
 
-DeltaE=(STATES_z1[0][2]-0.0)*eV2J-IPD;
-DeltaE=fmax(0.0,DeltaE);
-p=exp(-DeltaE/BOLTZMAN/Te);
-r10=2.0/ne*tmp*Q_z1/Q_z0*p; //r10= ratio of ion-concentrations n(Z=1)/n(Z=0); g_e=2 (statistical weight of electron)
+  DeltaE=(STATES_z1[0][2]-0.0)*eV2J-IPD;
+  DeltaE=fmax(0.0,DeltaE);
+  p=exp(-DeltaE/BOLTZMAN/Te);
+  r10=2.0/ne*tmp*Q_z1/Q_z0*p; //r10= ratio of ion-concentrations n(Z=1)/n(Z=0); g_e=2 (statistical weight of electron)
   //printf("IPD0:%f\n",IPD*J2eV);
   //printf("p:%.2e\n",p);
 
@@ -956,47 +1004,47 @@ r10=2.0/ne*tmp*Q_z1/Q_z0*p; //r10= ratio of ion-concentrations n(Z=1)/n(Z=0); g_
   // Z=1->2 //
   ////////////
 
-#if MAXLEVEL > 1
+  #if MAXLEVEL > 1
 
-#ifdef DOIPD
-  // z=2.0;
-  // IPD=3.0*z*ECHARGE*ECHARGE/2.0/r0/4.0/pi/ECONST;  //Ion-Sphere model
-  IPD=IPD1;
-#endif  
-  DeltaE=(STATES_z2[0][2]-STATES_z1[0][2])*eV2J-IPD;
-  DeltaE=fmax(0.0,DeltaE);
-  p=exp(-DeltaE/BOLTZMAN/Te);
-  r21=2.0/ne*tmp*Q_z2/Q_z1*p;
-#endif
+  #ifdef DOIPD
+    // z=2.0;
+    // IPD=3.0*z*ECHARGE*ECHARGE/2.0/r0/4.0/pi/ECONST;  //Ion-Sphere model
+    IPD=IPD1;
+  #endif  
+    DeltaE=(STATES_z2[0][2]-STATES_z1[0][2])*eV2J-IPD;
+    DeltaE=fmax(0.0,DeltaE);
+    p=exp(-DeltaE/BOLTZMAN/Te);
+    r21=2.0/ne*tmp*Q_z2/Q_z1*p;
+  #endif
 
   // ////////////
   // // Z=2->3 //
   // ////////////
-#if MAXLEVEL > 2  
-#ifdef DOIPD  
-  // z=3.0;
-  // IPD=3.0*z*ECHARGE*ECHARGE/2.0/r0/4.0/pi/ECONST;  //Ion-Sphere model
-  IPD=IPD2;
-#endif  
-  DeltaE=(STATES_z3[0][2]-STATES_z2[0][2])*eV2J-IPD;
-  DeltaE=fmax(0.0,DeltaE);
-  p=exp(-DeltaE/BOLTZMAN/Te);
-  r32=2.0/ne*tmp*Q_z3/Q_z2*p;
-#endif  
+  #if MAXLEVEL > 2  
+  #ifdef DOIPD  
+    // z=3.0;
+    // IPD=3.0*z*ECHARGE*ECHARGE/2.0/r0/4.0/pi/ECONST;  //Ion-Sphere model
+    IPD=IPD2;
+  #endif  
+    DeltaE=(STATES_z3[0][2]-STATES_z2[0][2])*eV2J-IPD;
+    DeltaE=fmax(0.0,DeltaE);
+    p=exp(-DeltaE/BOLTZMAN/Te);
+    r32=2.0/ne*tmp*Q_z3/Q_z2*p;
+  #endif  
   // ////////////
   // // Z=3->4 //
   // ////////////
-#if MAXLEVEL > 3
-#ifdef DOIPD  
+  #if MAXLEVEL > 3
+  #ifdef DOIPD  
   // z=4.0;
   // IPD=3.0*z*ECHARGE*ECHARGE/2.0/r0/4.0/pi/ECONST;  //Ion-Sphere model
   IPD=IPD3;
-#endif  
+  #endif  
   DeltaE=(STATES_z4[0][2]-STATES_z3[0][2])*eV2J-IPD;
   DeltaE=fmax(0.0,DeltaE);
   p=exp(-DeltaE/BOLTZMAN/Te);
   r43=2.0/ne*tmp*Q_z4/Q_z3*p;
-#endif
+  #endif
 
   //concentrations from ratios and totalc
   n0=totalc/(r54*r43*r32*r21*r10+r43*r32*r21*r10+r32*r21*r10+r21*r10+r10+1.0);
@@ -1020,30 +1068,84 @@ r10=2.0/ne*tmp*Q_z1/Q_z0*p; //r10= ratio of ion-concentrations n(Z=1)/n(Z=0); g_
   printf(" Lambda=%.4e\n",lambda);
   printf(" NEQ:%d\n",neq);
   printf("********************************************************************************************************************** \n");
-*/
+  */
 
 
   int ishift=3;
   //Now fill states
   for(i=0;i<z0_len;++i)
-    Ith(y,i+ishift)=n0/Q_z0*STATES_z0[i][3]*exp(-STATES_z0[i][2]*eV2J/BOLTZMAN/Te);
+  {
+    double prob=exp(-STATES_z0[i][2]*eV2J/BOLTZMAN/Te);
+    #ifdef DOIPD
+    IPD=IPD0;
+    double Ei=STATES_z0[i][2]*eV2J-IPD;    
+    if(Ei<0) prob=0.0;    
+    #endif
+    if(Q_z0>0)
+      Ith(y,i+ishift)=n0/Q_z0*STATES_z0[i][3]*prob;
+  }
   for(i=0;i<z1_len;++i)
-    Ith(y,i+ishift+z0_len)=n1/Q_z1*STATES_z1[i][3]*exp(-(STATES_z1[i][2]-STATES_z1[0][2])*eV2J/BOLTZMAN/Te);
+  {
+    double prob=exp(-(STATES_z1[i][2]-STATES_z1[0][2])*eV2J/BOLTZMAN/Te);
+    #ifdef DOIPD
+    IPD=IPD1;
+    double Ei=STATES_z1[i][2]*eV2J-IPD;    
+    if(Ei<0) prob=0.0;    
+    #endif    
+    if(Q_z1>0)
+      Ith(y,i+ishift+z0_len)=n1/Q_z1*STATES_z1[i][3]*prob;
+  }
 
   #if MAXLEVEL > 1
   for(i=0;i<z2_len;++i)
-    Ith(y,i+ishift+z0_len+z1_len)=n2/Q_z2*STATES_z2[i][3]*exp(-(STATES_z2[i][2]-STATES_z2[0][2])*eV2J/BOLTZMAN/Te);
+  {
+    double prob=exp(-(STATES_z2[i][2]-STATES_z2[0][2])*eV2J/BOLTZMAN/Te);
+    #ifdef DOIPD
+    IPD=IPD2;
+    double Ei=STATES_z2[i][2]*eV2J-IPD;    
+    if(Ei<0) prob=0.0;    
+    #endif 
+    if(Q_z2>0)       
+      Ith(y,i+ishift+z0_len+z1_len)=n2/Q_z2*STATES_z2[i][3]*prob;
+  }
   #endif
 
   #if MAXLEVEL > 2
   for(i=0;i<z3_len;++i)
-    Ith(y,i+ishift+z0_len+z1_len+z2_len)=n3/Q_z3*STATES_z3[i][3]*exp(-(STATES_z3[i][2]-STATES_z3[0][2])*eV2J/BOLTZMAN/Te);
+  {
+    double prob=exp(-(STATES_z3[i][2]-STATES_z3[0][2])*eV2J/BOLTZMAN/Te);
+    #ifdef DOIPD
+    IPD=IPD3;
+    double Ei=STATES_z3[i][2]*eV2J-IPD;    
+    if(Ei<0) prob=0.0;    
+    #endif            
+    if(Q_z3>0)
+      Ith(y,i+ishift+z0_len+z1_len+z2_len)=n3/Q_z3*STATES_z3[i][3]*prob;
+  }
   #endif
 
   #if MAXLEVEL > 3
   for(i=0;i<z4_len;++i)
-    Ith(y,i+ishift+z0_len+z1_len+z2_len+z3_len)=n4/Q_z4*STATES_z4[i][3]*exp(-(STATES_z4[i][2]-STATES_z4[0][2])*eV2J/BOLTZMAN/Te);
+  {
+    double prob=exp(-(STATES_z4[i][2]-STATES_z4[0][2])*eV2J/BOLTZMAN/Te);
+    #ifdef DOIPD
+    IPD=IPD4;
+    double Ei=STATES_z4[i][2]*eV2J-IPD;    
+    if(Ei<0) prob=0.0;    
+    #endif                
+    if(Q_z4>0)
+      Ith(y,i+ishift+z0_len+z1_len+z2_len+z3_len)=n4/Q_z4*STATES_z4[i][3]*prob;
+  }
   #endif  
+
+ if(myid==0)
+ {
+  for(i=3;i<neq;i++)
+  {
+
+      printf("y[%d]:%.4e\n",i,Ith(y,i));  
+  }  
+ } 
 
 }
 
@@ -1104,13 +1206,19 @@ int colrad_ydot(double t, N_Vector y, N_Vector colrad_ydot, void *user_data)
 
 
   //Pre-Zero <--- MUI IMPORTANTE!!!!
-  //and count totalc for ipd and stark effect  
+  //and count totalc for ipd and stark effect    
   totalc=0.0;
+  // #ifdef OMP
+  // #pragma omp parallel for reduction(+: totalc)
+  // #endif
   for(i=0;i<neq;i++)
   {
-          Ith(colrad_ydot,i)=0.0;
-          if(i>=3) totalc+=Ith(y,i);
+    Ith(colrad_ydot,i)=0.0;
+    if(i>=3) totalc+=Ith(y,i);
   }
+  data->ni=totalc;  
+  if(totalc<0)
+    return 1; // <-- RHS fail
 
   // IPD KRAM
   double IPD0,IPD1,IPD2,IPD3;
@@ -1149,6 +1257,9 @@ int colrad_ydot(double t, N_Vector y, N_Vector colrad_ydot, void *user_data)
     for(j=0;j<z0_len;++j)
     {
       if(j<=i) continue; // MUI IMPORTANTE
+      double engi=STATES_z0[i][2]*eV2J-IPD0;
+      if(engi < 0) continue; //depressed state is continuum
+
       DeltaE=(STATES_z0[j][2]-STATES_z0[i][2])*eV2J;
       kfwd=k_EE_z0_z0[i][j]*Ith(y,i+ishift)*ne;
       krev=k_EE_z0_z0_b[i][j]*Ith(y,j+ishift)*ne;
@@ -1198,6 +1309,9 @@ int colrad_ydot(double t, N_Vector y, N_Vector colrad_ydot, void *user_data)
     for(j=0;j<z1_len;++j)
     {
       if(i<=j) continue; // MUI IMPORTANTE
+      double engi=STATES_z1[i][2]*eV2J-IPD1;
+      if(engi < 0) continue; //depressed state is continuum
+
       DeltaE=(STATES_z1[j][2]-STATES_z1[i][2])*eV2J;
       kfwd=k_EE_z1_z1[i][j]*Ith(y,i+ishift+shift2)*ne;
       krev=k_EE_z1_z1_b[i][j]*Ith(y,j+ishift+shift2)*ne;
@@ -1245,6 +1359,9 @@ int colrad_ydot(double t, N_Vector y, N_Vector colrad_ydot, void *user_data)
     for(j=0;j<z2_len;++j)
     {
       if(j<=i) continue; // MUI IMPORTANTE
+      double engi=STATES_z2[i][2]*eV2J-IPD2;
+      if(engi < 0) continue; //depressed state is continuum
+
       DeltaE=(STATES_z2[j][2]-STATES_z2[i][2])*eV2J;
       kfwd=k_EE_z2_z2[i][j]*Ith(y,i+ishift+shift2)*ne;
       krev=k_EE_z2_z2_b[i][j]*Ith(y,j+ishift+shift2)*ne;
@@ -1295,6 +1412,9 @@ int colrad_ydot(double t, N_Vector y, N_Vector colrad_ydot, void *user_data)
     for(j=0;j<z2_len;++j)
     {
       if(j<=i) continue; // MUI IMPORTANTE
+      double engi=STATES_z3[i][2]*eV2J-IPD3;
+      if(engi < 0) continue; //depressed state is continuum
+
       DeltaE=(STATES_z3[j][2]-STATES_z3[i][2])*eV2J;
       kfwd=k_EE_z3_z3[i][j]*Ith(y,i+ishift+shift2)*ne;
       krev=k_EE_z3_z3_b[i][j]*Ith(y,j+ishift+shift2)*ne;
@@ -1344,7 +1464,8 @@ int colrad_ydot(double t, N_Vector y, N_Vector colrad_ydot, void *user_data)
   {
     for(j=0;j<z4_len;++j)
     {
-      if(j<=i) continue; // MUI IMPORTANTE
+      if(j<=i) continue; // MUI IMPORTANTE      
+
       DeltaE=(STATES_z4[j][2]-STATES_z4[i][2])*eV2J;
       kfwd=k_EE_z4_z4[i][j]*Ith(y,i+ishift+shift2)*ne;
       krev=k_EE_z4_z4_b[i][j]*Ith(y,j+ishift+shift2)*ne;
@@ -1399,6 +1520,7 @@ int colrad_ydot(double t, N_Vector y, N_Vector colrad_ydot, void *user_data)
       DeltaE=(STATES_z1[j][2]-STATES_z0[i][2])*eV2J-IPD0;
 
 #ifdef DOIPD
+      if(DeltaE<0) continue;
       DeltaE=MAX(0.0,DeltaE);
 #endif
       //COLL IONIZ
@@ -1436,7 +1558,7 @@ int colrad_ydot(double t, N_Vector y, N_Vector colrad_ydot, void *user_data)
 #endif
 
 //ACHTUNG: Diskussion ob MPI sich überhaupt für Potential-Lowering interessiert...?
-if(DeltaE-IPD0 >0 )
+if(DeltaE >0 ) //DeltaE ist bereits abzgl. IPD
 {
       kfwd= k_MPI_z0_z1[i][j][0]*Ith(y,i+shift1); // Einheit: k_MPI = 1/s
       kfwd2=k_MPI_z0_z1[i][j][1]*Ith(y,i+shift1); // *wup;   // 2 photon- and 3-photon ionization!
@@ -1454,11 +1576,11 @@ if(DeltaE-IPD0 >0 )
       Ith(colrad_ydot,2)-=krev;
 
       // für 2 photonen und rad.recomb
-      P_E_MPI2  += kfwd* (2.0*planck*LASERFREQ-(DeltaE-IPD0)); //kein heating durch rad.recomb->Photon verschwindet (bisher ohne self-absorption)
+      P_E_MPI2  += kfwd* (2.0*planck*LASERFREQ-(DeltaE)); //kein heating durch rad.recomb->Photon verschwindet (bisher ohne self-absorption)
       //jetzt für 3 photonen
-      P_E_MPI3  += kfwd2*(3.0*planck*LASERFREQ-(DeltaE-IPD0));
+      P_E_MPI3  += kfwd2*(3.0*planck*LASERFREQ-(DeltaE));
       //jetzt rad recomb
-      P_E_RAD_RECOMB  -= krev*(DeltaE-IPD0)*escape_factor;      //Radiative cooling, c.f. http://www.astronomy.ohio-state.edu/~dhw/A825/notes8.pdf S.2
+      P_E_RAD_RECOMB  -= krev*(DeltaE)*escape_factor;      //Radiative cooling, c.f. http://www.astronomy.ohio-state.edu/~dhw/A825/notes8.pdf S.2
 }
 #endif
 
@@ -1485,6 +1607,7 @@ if(DeltaE-IPD0 >0 )
       DeltaE=(STATES_z2[j][2]-STATES_z1[i][2])*eV2J-IPD1;
 
 #ifdef DOIPD
+      if(DeltaE<0) continue;
       DeltaE=MAX(0.0,DeltaE);
 #endif
       //COLL IONIZ
@@ -1520,7 +1643,7 @@ if(DeltaE-IPD0 >0 )
       }
 #endif
 
-if(DeltaE-IPD1 >0)
+if(DeltaE >0)
 {
       kfwd= k_MPI_z1_z2[i][j][0]*Ith(y,i+shift1); // *wup;
       kfwd2=k_MPI_z1_z2[i][j][1]*Ith(y,i+shift1); // *wup;   // 2 photon- and 3-photon ionization!
@@ -1538,11 +1661,11 @@ if(DeltaE-IPD1 >0)
       Ith(colrad_ydot,2)-=krev;
 
       // für 2 photonen und rad.recomb
-      P_E_MPI2  += kfwd* (2.0*planck*LASERFREQ-(DeltaE-IPD1)); //kein heating durch rad.recomb->Photon verschwindert (bisher ohne self-absorption)
+      P_E_MPI2  += kfwd* (2.0*planck*LASERFREQ-(DeltaE)); //kein heating durch rad.recomb->Photon verschwindert (bisher ohne self-absorption)
       //jetzt für 3 photonen
-      P_E_MPI3  += kfwd2*(3.0*planck*LASERFREQ-(DeltaE-IPD1));
+      P_E_MPI3  += kfwd2*(3.0*planck*LASERFREQ-(DeltaE));
       //jetzt rad recomb
-      P_E_RAD_RECOMB  -= krev*(DeltaE-IPD1)*escape_factor;
+      P_E_RAD_RECOMB  -= krev*(DeltaE)*escape_factor;
 }
 #endif
 
@@ -1570,6 +1693,7 @@ if(DeltaE-IPD1 >0)
       DeltaE=(STATES_z3[j][2]-STATES_z2[i][2])*eV2J-IPD2;
 
 #ifdef DOIPD
+      if(DeltaE<0) continue;
       DeltaE=MAX(0.0,DeltaE);
 #endif
       //COLL IONIZ
@@ -1605,7 +1729,7 @@ if(DeltaE-IPD1 >0)
       }
 #endif
 
-if(DeltaE-IPD2 >0)
+if(DeltaE >0)
 {
       kfwd= k_MPI_z2_z3[i][j][0]*Ith(y,i+shift1); // *wup;
       kfwd2=k_MPI_z3_z2[i][j][1]*Ith(y,i+shift1); // *wup;   // 2 photon- and 3-photon ionization!
@@ -1623,11 +1747,11 @@ if(DeltaE-IPD2 >0)
       Ith(colrad_ydot,2)-=krev;
 
       // für 2 photonen und rad.recomb
-      P_E_MPI2  += kfwd* (2.0*planck*LASERFREQ-(DeltaE-IPD1)); //kein heating durch rad.recomb->Photon verschwindert (bisher ohne self-absorption)
+      P_E_MPI2  += kfwd* (2.0*planck*LASERFREQ-(DeltaE)); //kein heating durch rad.recomb->Photon verschwindert (bisher ohne self-absorption)
       //jetzt für 3 photonen
-      P_E_MPI3  += kfwd2*(3.0*planck*LASERFREQ-(DeltaE-IPD2));
+      P_E_MPI3  += kfwd2*(3.0*planck*LASERFREQ-(DeltaE));
       //jetzt rad recomb
-      P_E_RAD_RECOMB  -= krev*(DeltaE-IPD2)*escape_factor;
+      P_E_RAD_RECOMB  -= krev*(DeltaE)*escape_factor;
 }
 #endif
 
@@ -1654,6 +1778,7 @@ if(DeltaE-IPD2 >0)
     {
       DeltaE=(STATES_z4[j][2]-STATES_z3[i][2])*eV2J-IPD3;
 #ifdef DOIPD
+      if(DeltaE<0) continue;
       DeltaE=MAX(0.0,DeltaE);
 #endif
       //COLL IONIZ
@@ -1690,7 +1815,7 @@ if(DeltaE-IPD2 >0)
       }
 #endif
 
-if(DeltaE-IPD3 >0)
+if(DeltaE >0)
 {
       kfwd= k_MPI_z3_z4[i][j][0]*Ith(y,i+shift1); // *wup;
       kfwd2=k_MPI_z4_z3[i][j][1]*Ith(y,i+shift1); // *wup;   // 2 photon- and 3-photon ionization!
@@ -1708,11 +1833,11 @@ if(DeltaE-IPD3 >0)
       Ith(colrad_ydot,2)-=krev;
 
       // für 2 photonen und rad.recomb
-      P_E_MPI2  += kfwd* (2.0*planck*LASERFREQ-(DeltaE-IPD3)); //kein heating durch rad.recomb->Photon verschwindert (bisher ohne self-absorption)
+      P_E_MPI2  += kfwd* (2.0*planck*LASERFREQ-(DeltaE)); //kein heating durch rad.recomb->Photon verschwindert (bisher ohne self-absorption)
       //jetzt für 3 photonen
-      P_E_MPI3  += kfwd2*(3.0*planck*LASERFREQ-(DeltaE-IPD3));
+      P_E_MPI3  += kfwd2*(3.0*planck*LASERFREQ-(DeltaE));
       //jetzt rad recomb
-      P_E_RAD_RECOMB  -= krev*(DeltaE-IPD1)*escape_factor;
+      P_E_RAD_RECOMB  -= krev*(DeltaE)*escape_factor;
 }
 #endif
 
@@ -1742,7 +1867,8 @@ if(DeltaE-IPD3 >0)
   //BEI PRE-EQUILIBRIERUNG T=CONST !
   if(initial_equi==false)
   {
-    double cvinv=  1.0/EOS_cve_from_r_te(data->dens, Te);
+    //double cvinv=  1.0/EOS_cve_from_r_te(data->dens, Te);
+    double cvinv=  1.0/Cv(Te/11604.5, ne);
     Ith(colrad_ydot,0) =  cvinv*P_E_TOTAL;
   }
   else
@@ -1810,149 +1936,131 @@ int colrad_GetCoeffs(N_Vector y,double It,void *user_data)
   int fail=0;
 
   double pow_two_pi_me_kT_hsq_tmp1= pow(two_pi_me_kT_hsq,1.5);
-  //pre-zero k_EE's
-#ifdef OMP
-// #pragma omp parallel for schedule(static) collapse(2)
-#endif   
-  for(i=0;i<z0_len;i++)
-  {
-          for(j=0;j<z0_len;j++)
-          {
-                  k_EE_z0_z0[i][j]=0.0;
-                  k_EE_z0_z0_b[i][j]=0.0;
-          }
-  }
 
-#ifdef OMP
-// #pragma omp parallel for schedule(static) collapse(2)
-#endif 
-  for(i=0;i<z1_len;i++)
-  {
-          for(j=0;j<z1_len;j++)
-          {
-                  k_EE_z1_z1[i][j]=0.0;
-                  k_EE_z1_z1_b[i][j]=0.0;
-          }
-  }
-
-  #if MAXLEVEL > 1
-#ifdef OMP
-// #pragma omp parallel for schedule(static) collapse(2)
-#endif   
-  for(i=0;i<z2_len;i++)
-  {
-          for(j=0;j<z2_len;j++)
-          {
-                  k_EE_z2_z2[i][j]=0.0;
-                  k_EE_z2_z2_b[i][j]=0.0;
-          }
-  }
-  #endif
-
-  #if MAXLEVEL > 2
-#ifdef OMP
-//#pragma omp parallel for schedule(static) collapse(2)
-#endif   
-  for(i=0;i<z3_len;i++)
-  {
-          for(j=0;j<z3_len;j++)
-          {
-                  k_EE_z3_z3[i][j]=0.0;
-                  k_EE_z3_z3_b[i][j]=0.0;
-          }
-  }
-  #endif
-
-#if MAXLEVEL > 3
-#ifdef OMP
-// #pragma omp parallel for schedule(static) collapse(2)
-#endif   
-  for(i=0;i<z4_len;i++)
-  {
-          for(j=0;j<z4_len;j++)
-          {
-                  k_EE_z4_z4[i][j]=0.0;
-                  k_EE_z4_z4_b[i][j]=0.0;
-          }
-  }
+#ifdef MULTIPHOTON
+  double twophoton_energy=2.0*planck*LASERFREQ*J2eV;
+  double threephoton_energy=3.0*planck*LASERFREQ*J2eV;
+  double nu_div_hnu_sq=LASERFREQ/pow(planck*LASERFREQ,2.0);
+  double nu_div_nu_div_hnu_cub=LASERFREQ/LASERFREQ/pow(planck*LASERFREQ,3.0);
 #endif
-
-
-  //pre-zero k_MPI's
-#ifdef OMP
-// #pragma omp parallel for schedule(static) collapse(2)
-#endif    
-  for(i=0;i<z0_len;i++)
+  //PREZERO RATE-COEFFS CODEBLOCK 
   {
-          for(j=0;j<z1_len;j++)
-          {
-                  k_EI_z0_z1[i][j]=0.0;
-                  k_EE_z1_z1[i][j]=0.0;
-                  for(k=0;k<2;k++)
-                  {
-                    k_MPI_z0_z1[i][j][k]=0.0;
-                    k_MPI_z1_z0[i][j][k]=0.0;
-                  }
-          }
-  }
+    //pre-zero k_EE's
+    for(i=0;i<z0_len;i++)
+    {
+            for(j=0;j<z0_len;j++)
+            {
+                    k_EE_z0_z0[i][j]=0.0;
+                    k_EE_z0_z0_b[i][j]=0.0;
+            }
+    }
 
-#if MAXLEVEL > 1
-#ifdef OMP
-// #pragma omp parallel for schedule(static) collapse(2)
-#endif    
-  for(i=0;i<z1_len;i++)
-  {
-          for(j=0;j<z2_len;j++)
-          {
-                  k_EI_z1_z2[i][j]=0.0;
-                  k_EI_z2_z1[i][j]=0.0;
-                  for(k=0;k<2;k++)
-                  {
-                    k_MPI_z1_z2[i][j][k]=0.0;
-                    k_MPI_z2_z1[i][j][k]=0.0;
-                  }
-          }
-  }
-  #endif
+    for(i=0;i<z1_len;i++)
+    {
+            for(j=0;j<z1_len;j++)
+            {
+                    k_EE_z1_z1[i][j]=0.0;
+                    k_EE_z1_z1_b[i][j]=0.0;
+            }
+    }
 
-#if MAXLEVEL > 2
-#ifdef OMP
-// #pragma omp parallel for schedule(static) collapse(2)
-#endif    
-   for(i=0;i<z2_len;i++)
-  {
-          for(j=0;j<z3_len;j++)
-          {
-                  k_EI_z2_z3[i][j]=0.0;
-                  k_EI_z3_z2[i][j]=0.0;
-                  for(k=0;k<2;k++)
-                  {
-                    k_MPI_z2_z3[i][j][k]=0.0;
-                    k_MPI_z3_z2[i][j][k]=0.0;
-                  }
-          }
-  }
-#endif  
+    #if MAXLEVEL > 1
+    for(i=0;i<z2_len;i++)
+    {
+            for(j=0;j<z2_len;j++)
+            {
+                    k_EE_z2_z2[i][j]=0.0;
+                    k_EE_z2_z2_b[i][j]=0.0;
+            }
+    }
+    #endif
 
-#if MAXLEVEL > 3  
-#ifdef OMP
-// #pragma omp parallel for schedule(static) collapse(2)
-#endif  
-  for(i=0;i<z3_len;i++)
-  {
-          for(j=0;j<z4_len;j++)
-          {
-                  k_EI_z3_z4[i][j]=0.0;
-                  k_EI_z4_z3[i][j]=0.0;
-                  for(k=0;k<2;k++)
-                  {
-                    k_MPI_z3_z4[i][j][k]=0.0;
-                    k_MPI_z4_z3[i][j][k]=0.0;
-                  }
-          }
-  }
-#endif
+    #if MAXLEVEL > 2 
+    for(i=0;i<z3_len;i++)
+    {
+            for(j=0;j<z3_len;j++)
+            {
+                    k_EE_z3_z3[i][j]=0.0;
+                    k_EE_z3_z3_b[i][j]=0.0;
+            }
+    }
+    #endif
 
+    #if MAXLEVEL > 3
+    for(i=0;i<z4_len;i++)
+    {
+            for(j=0;j<z4_len;j++)
+            {
+                    k_EE_z4_z4[i][j]=0.0;
+                    k_EE_z4_z4_b[i][j]=0.0;
+            }
+    }
+    #endif
+
+
+    //pre-zero k_MPI's
+    for(i=0;i<z0_len;i++)
+    {
+            for(j=0;j<z1_len;j++)
+            {
+                    k_EI_z0_z1[i][j]=0.0;
+                    k_EE_z1_z1[i][j]=0.0;
+                    for(k=0;k<2;k++)
+                    {
+                      k_MPI_z0_z1[i][j][k]=0.0;
+                      k_MPI_z1_z0[i][j][k]=0.0;
+                    }
+            }
+    }
+
+    #if MAXLEVEL > 1  
+    for(i=0;i<z1_len;i++)
+    {
+            for(j=0;j<z2_len;j++)
+            {
+                    k_EI_z1_z2[i][j]=0.0;
+                    k_EI_z2_z1[i][j]=0.0;
+                    for(k=0;k<2;k++)
+                    {
+                      k_MPI_z1_z2[i][j][k]=0.0;
+                      k_MPI_z2_z1[i][j][k]=0.0;
+                    }
+            }
+    }
+    #endif
+
+    #if MAXLEVEL > 2 
+     for(i=0;i<z2_len;i++)
+    {
+            for(j=0;j<z3_len;j++)
+            {
+                    k_EI_z2_z3[i][j]=0.0;
+                    k_EI_z3_z2[i][j]=0.0;
+                    for(k=0;k<2;k++)
+                    {
+                      k_MPI_z2_z3[i][j][k]=0.0;
+                      k_MPI_z3_z2[i][j][k]=0.0;
+                    }
+            }
+    }
+    #endif  
+
+    #if MAXLEVEL > 3  
+    for(i=0;i<z3_len;i++)
+    {
+            for(j=0;j<z4_len;j++)
+            {
+                    k_EI_z3_z4[i][j]=0.0;
+                    k_EI_z4_z3[i][j]=0.0;
+                    for(k=0;k<2;k++)
+                    {
+                      k_MPI_z3_z4[i][j][k]=0.0;
+                      k_MPI_z4_z3[i][j][k]=0.0;
+                    }
+            }
+    }
+    #endif
+  }
   ///////////////////////////////
   // Elec. excitation for Z=0
   ///////////////////////////////
@@ -1993,7 +2101,9 @@ if(expint==-1)
 if(fail==1)
   return -1;
 
-  //Now reverse rate (seperate loop because rev.rate needs koeff. of fwd. rate
+  // *********************     
+  // * NOW REVERSE RATE  *
+  // *********************
 #ifdef OMP
 //#pragma omp parallel for   schedule(dynamic,1) collapse(2) private(kronecker,tmp0,tmp1,tmp2) num_threads(num_threads)
 #pragma omp for schedule(static) private(j,kronecker,tmp0,tmp2)
@@ -2060,7 +2170,9 @@ if(expint==-1)
     }
   if(fail==1) return -1;
 
-  //NOW REVERSE RATE
+  // *********************     
+  // * NOW REVERSE RATE  *
+  // *********************
 #ifdef OMP
 //#pragma omp parallel for   schedule(dynamic,1) collapse(2) private(kronecker,tmp0,tmp1,tmp2) num_threads(num_threads)
 #pragma omp for schedule(static) private(j,kronecker,tmp0,tmp2)
@@ -2130,7 +2242,9 @@ if(expint==-1)
     }
   if(fail==1) return -1;
 
-    //NOW REVERSE RATE
+  // *********************     
+  // * NOW REVERSE RATE  *
+  // *********************
 #ifdef OMP
 //#pragma omp parallel for   schedule(dynamic,1) collapse(2) private(kronecker,tmp0,tmp1,tmp2) num_threads(num_threads)
 #pragma omp for schedule(static) private(j,kronecker,tmp0,tmp2)  
@@ -2203,7 +2317,9 @@ if(expint==-1)
     }
   if(fail==1)
           return -1;
-  //NOW REVERSE RATE
+  // *********************     
+  // * NOW REVERSE RATE  *
+  // *********************
   #ifdef OMP
   //#pragma omp parallel for   schedule(dynamic,1) collapse(2) private(kronecker,tmp0,tmp1,tmp2) num_threads(num_threads)
   #pragma omp for schedule(static) private(j,kronecker,tmp0,tmp2)        
@@ -2274,7 +2390,9 @@ if(expint==-1)
   if(fail==1)
           return -1;
 
-  //NOW REVERSE RATE
+  // *********************     
+  // * NOW REVERSE RATE  *
+  // *********************
 #ifdef OMP
 //#pragma omp parallel for   schedule(dynamic,1) collapse(2) private(kronecker,tmp0,tmp1,tmp2) num_threads(num_threads)
 #pragma omp for schedule(static) private(j,kronecker,tmp0,tmp2)        
@@ -2323,10 +2441,16 @@ if(expint==-1)
         kronecker=1.0;
 
       DeltaE=(STATES_z1[j][2]-STATES_z0[i][2])-IPD0;
+if(DeltaE <0 )
+  continue;
+
 #ifdef DOIPD
       DeltaE=MAX(0.0,DeltaE);
 #endif      
       a=DeltaE/kbTe;
+
+//printf("myid:%d, dE:%.4e, a:%.4e\n",myid,DeltaE,a);
+
       expint=ExpInt(a);
 
 
@@ -2342,22 +2466,29 @@ if(expint==-1)
       k_EI_z0_z1[i][j]=v_e*four_pi_a0_sq*alpha_i*E_ion_H_div_kTe_sq*I_2;
 
 #ifdef MULTIPHOTON
-      //MPI 2 PHOTONS
-      if(2.0*planck*LASERFREQ >= DeltaE-IPD0 && DeltaE-IPD0 > 0.0 )
+      // *******************
+      // * MPI 2 PHOTONS   *
+      // *******************
+      double dE_SI=DeltaE*eV2J; 
+      if(twophoton_energy >= DeltaE-IPD0 && DeltaE-IPD0 > 0.0 )
       {
-        sigma1=sigma_tmp*pow(DeltaE,2.5)/sqrt(DeltaE);
-        sigma_MPI_2=sigma1*sigma1/LASERFREQ/pow(planck*LASERFREQ,2.0);
+        sigma1=sigma_tmp*pow(dE_SI,2.5)/sqrt(dE_SI);
+        sigma_MPI_2=sigma1*sigma1/nu_div_hnu_sq;
         k_MPI_z0_z1[i][j][0]=sigma_MPI_2*I_sq;
       }
-      //MPI 3 PHOTONS      
-      if(3.0*planck*LASERFREQ>=DeltaE) 
+      // *******************
+      // * MPI 3 PHOTONS   *
+      // *******************   
+      if(threephoton_energy >= DeltaE-IPD0 && DeltaE-IPD0 >0.0 ) 
       {
-        sigma1=sigma_tmp*pow(DeltaE,2.5)/sqrt(DeltaE);
-        sigma_MPI_3=sigma1*sigma1*sigma1/2.0/LASERFREQ/LASERFREQ/pow(planck*LASERFREQ,3.0);
+        sigma1=sigma_tmp*pow(dE_SI,2.5)/sqrt(dE_SI);
+        sigma_MPI_3=sigma1*sigma1*sigma1/2.0/nu_div_nu_div_hnu_cub;
         k_MPI_z0_z1[i][j][1]=sigma_MPI_3*I_cu;//*prob*beta_pi(Te,mu,DeltaE);
       }
 #endif      
-      //RAD RECOMB
+      // ***************
+      // * RAD RECOMB  *
+      // ***************
       if(DeltaE>0)
       {
         if(expint > 0 )
@@ -2370,11 +2501,13 @@ if(expint==-1)
           k_MPI_z1_z0[i][j][0]=0.0; //EXPR(a) kann +Inf werden--> unsinnige rate coeff.. wenn einer der faktoren=0 --> rest egal
         }
       }
-      //3-body recomb
+      // ******************
+      // * 3-body recomb  *
+      // ******************
       kronecker=0;
       tmp0=2*STATES_z1[j][3]/STATES_z0[i][3];
       // tmp1=3.0*(1.0-kronecker)/2.0;
-      tmp2=EXPR(-DeltaE/kbTe);
+      tmp2=EXPR(-(DeltaE-IPD0)/kbTe);
       if(k_EI_z0_z1[i][j]==0) //wohl wichtig
         k_EI_z1_z0[i][j]=0; 
       else       
@@ -2403,6 +2536,10 @@ if(expint==-1)
         kronecker=1.0;
 
       DeltaE=(STATES_z2[j][2]-STATES_z1[i][2])-IPD1;
+
+if(DeltaE <0 )
+  continue;
+
 #ifdef DOIPD
       DeltaE=MAX(0.0,DeltaE);
 #endif            
@@ -2422,22 +2559,29 @@ if(expint==-1)
       k_EI_z1_z2[i][j]=v_e*four_pi_a0_sq*alpha_i*E_ion_H_div_kTe_sq*I_2;
 
 #ifdef MULTIPHOTON
-      //MPI 2 PHOTONS
-      if(2.0*planck*LASERFREQ >= DeltaE)
+      double dE_SI=DeltaE*eV2J; 
+      // *******************
+      // * MPI 2 PHOTONS   *
+      // *******************
+      if(twophoton_energy >= DeltaE - IPD1)
       {
-        sigma1=sigma_tmp*pow(DeltaE,2.5)/sqrt(DeltaE);
-        sigma_MPI_2=sigma1*sigma1/LASERFREQ/pow(planck*LASERFREQ,2.0);
+        sigma1=sigma_tmp*pow(dE_SI,2.5)/sqrt(dE_SI);
+        sigma_MPI_2=sigma1*sigma1/nu_div_hnu_sq;
         k_MPI_z1_z2[i][j][0]=sigma_MPI_2*I_sq;
       }
-      //MPI 3 PHOTONS
-      if(3.0*planck*LASERFREQ > DeltaE)
+      // *******************
+      // * MPI 3 PHOTONS   *
+      // *******************  
+      if(threephoton_energy > DeltaE - IPD1)
       {
-        sigma1=sigma_tmp*pow(DeltaE,2.5)/sqrt(DeltaE);
-        sigma_MPI_3=sigma1*sigma1*sigma1/2.0/LASERFREQ/LASERFREQ/pow(planck*LASERFREQ,3.0);
+        sigma1=sigma_tmp*pow(dE_SI,2.5)/sqrt(dE_SI);
+        sigma_MPI_3=sigma1*sigma1*sigma1/2.0/nu_div_nu_div_hnu_cub;
         k_MPI_z1_z2[i][j][1]=sigma_MPI_3*I_cu;//*prob*beta_pi(Te,mu,DeltaE);
       }
 #endif      
-      //RAD RECOMB
+      // **************
+      // * RAD RECOMB *
+      // **************
       if(DeltaE>0)
       {
         if(expint > 0 )
@@ -2449,11 +2593,13 @@ if(expint==-1)
           k_MPI_z2_z1[i][j][0]=0.0; //EXPR(a) kann +Inf werden--> unsinnige rate coeff.. wenn einer der faktoren=0 --> rest egal
         }      
       }
-      //3-body recomb            
+      // ******************
+      // * 3-body recomb  *
+      // ******************        
       kronecker=0;
       tmp0=2*STATES_z2[j][3]/STATES_z1[i][3];
       // tmp1=3.0*(1.0-kronecker)/2.0;
-      tmp2=EXPR(-DeltaE/kbTe);
+      tmp2=EXPR(-(DeltaE-IPD1)/kbTe);
       if(k_EI_z1_z2[i][j]==0) //wohl wichtig
         k_EI_z2_z1[i][j]=0; 
       else             
@@ -2468,7 +2614,7 @@ if(expint==-1)
 
 
 
-   /////////////////
+  /////////////////
   // Ioniz. 2->3
   ///////////////// 
 #if MAXLEVEL > 2
@@ -2487,6 +2633,10 @@ if(expint==-1)
       kronecker=1.0;
 
       DeltaE=(STATES_z3[j][2]-STATES_z2[i][2])-IPD2;
+
+if(DeltaE <0 )
+  continue;
+
 #ifdef DOIPD
       DeltaE=MAX(0.0,DeltaE);
 #endif            
@@ -2506,22 +2656,29 @@ if(expint==-1)
       k_EI_z2_z3[i][j]=v_e*four_pi_a0_sq*alpha_i*E_ion_H_div_kTe_sq*I_2;
 
 #ifdef MULTIPHOTON
-      //MPI 2 PHOTONS
-      if(2.0*planck*LASERFREQ > DeltaE)
+      double dE_SI=DeltaE*eV2J;
+      // *******************
+      // * MPI 2 PHOTONS   *
+      // *******************
+      if(twophoton_energy > DeltaE - IPD2)
       {
-        sigma1=sigma_tmp*pow(DeltaE,2.5)/sqrt(DeltaE);
-        sigma_MPI_2=sigma1*sigma1/LASERFREQ/pow(planck*LASERFREQ,2.0);
+        sigma1=sigma_tmp*pow(dE_SI,2.5)/sqrt(dE_SI);
+        sigma_MPI_2=sigma1*sigma1/nu_div_hnu_sq;
         k_MPI_z2_z3[i][j][0]=sigma_MPI_2*I_sq;
       }
-      //MPI 3 PHOTONS
-      if(3.0*planck*LASERFREQ > DeltaE)
+      // *******************
+      // * MPI 3 PHOTONS   *
+      // *******************  
+      if(threephoton_energy > DeltaE -IPD2)
       {
-        sigma1=sigma_tmp*pow(DeltaE,2.5)/sqrt(DeltaE);
-        sigma_MPI_3=sigma1*sigma1*sigma1/2.0/LASERFREQ/LASERFREQ/pow(planck*LASERFREQ,3.0);
+        sigma1=sigma_tmp*pow(dE_SI,2.5)/sqrt(dE_SI);
+        sigma_MPI_3=sigma1*sigma1*sigma1/2.0/nu_div_nu_div_hnu_cub;
         k_MPI_z2_z3[i][j][1]=sigma_MPI_3*I_cu;//*prob*beta_pi(Te,mu,DeltaE);
       }
 #endif      
-      //RAD RECOMB
+      // **************
+      // * RAD RECOMB *
+      // **************
       if(DeltaE>0)
       {
         if(expint > 0)
@@ -2535,11 +2692,13 @@ if(expint==-1)
         
       }
       
-      //3-body recomb            
+      // ******************
+      // * 3-body recomb  *
+      // ******************         
       kronecker=0;
       tmp0=2*STATES_z3[j][3]/STATES_z2[i][3];
       // tmp1=3.0*(1.0-kronecker)/2.0;
-      tmp2=EXPR(-DeltaE/kbTe);
+      tmp2=EXPR(-(DeltaE-IPD2)/kbTe);
 
       if(k_EI_z2_z3[i][j] > 0)
       {
@@ -2575,11 +2734,15 @@ if(expint==-1)
       kronecker=1.0;
 
       DeltaE=(STATES_z4[j][2]-STATES_z3[i][2])-IPD3;
+
+if(DeltaE <0 )
+  continue;      
+
 #ifdef DOIPD
       DeltaE=MAX(0.0,DeltaE);
 #endif            
       a=DeltaE/kbTe;
-         expint=ExpInt(a);
+      expint=ExpInt(a);
 
 if(expint==-1)
 #ifndef OMP
@@ -2594,22 +2757,29 @@ if(expint==-1)
       k_EI_z3_z4[i][j]=v_e*four_pi_a0_sq*alpha_i*E_ion_H_div_kTe_sq*I_2;
 
 #ifdef MULTIPHOTON
-      //MPI 2 PHOTONS
-      if(2.0*planck*LASERFREQ > DeltaE)
+      double dE_SI=DeltaE*eV2J;
+      // *******************
+      // * MPI 2 PHOTONS   *
+      // *******************
+      if(twophoton_energy> DeltaE - IPD3)
       {
-        sigma1=sigma_tmp*pow(DeltaE,2.5)/sqrt(DeltaE);
-        sigma_MPI_2=sigma1*sigma1/LASERFREQ/pow(planck*LASERFREQ,2.0);
+        sigma1=sigma_tmp*pow(dE_SI,2.5)/sqrt(dE_SI);
+        sigma_MPI_2=sigma1*sigma1/nu_div_hnu_sq;
         k_MPI_z3_z4[i][j][0]=sigma_MPI_2*I_sq;
       }
-      //MPI 3 PHOTONS
-      if(3.0*planck*LASERFREQ > DeltaE)
-      {
-        sigma1=sigma_tmp*pow(DeltaE,2.5)/sqrt(DeltaE);
-        sigma_MPI_3=sigma1*sigma1*sigma1/2.0/LASERFREQ/LASERFREQ/pow(planck*LASERFREQ,3.0);
+      // *******************
+      // * MPI 3 PHOTONS   *
+      // *******************  
+      if(threephoton_energy > DeltaE - IPD3)
+      {        
+        sigma1=sigma_tmp*pow(dE_SI,2.5)/sqrt(dE_SI);
+        sigma_MPI_3=sigma1*sigma1*sigma1/2.0/nu_div_nu_div_hnu_cub;
         k_MPI_z3_z4[i][j][1]=sigma_MPI_3*I_cu;//*prob*beta_pi(Te,mu,DeltaE);
       }
 #endif
-      //RAD RECOMB
+      // **************
+      // * RAD RECOMB *
+      // **************
       if(DeltaE>0)
       {
         if(expint>0)
@@ -2622,13 +2792,14 @@ if(expint==-1)
         }       
         
       }
-      
-      //3-body recomb
+      // ******************
+      // * 3-body recomb  *
+      // ******************
       //if(DeltaE>0.0)
       kronecker=0;
       tmp0=2*STATES_z4[j][3]/STATES_z3[i][3];
       // tmp1=3.0*(1.0-kronecker)/2.0;
-      tmp2=EXPR(-DeltaE/kbTe);
+      tmp2=EXPR(-(DeltaE-IPD3)/kbTe);
       if(k_EI_z3_z4[i][j] >9 )
       {
         k_EI_z4_z3[i][j]=k_EI_z3_z4[i][j]/tmp0/pow_two_pi_me_kT_hsq_tmp1/tmp2;
@@ -3023,8 +3194,7 @@ int colrad_read(int number)
 
     char **tokens;
     size_t numtokens;
-    int MAX_LINE_LENGTH=3000; //Hängt davon ab wieviele states betrachtet werden
-                             //sollte dynamisch berechnet werden
+
     char line[MAX_LINE_LENGTH];
     int linenr=1;
     for(i=1; i < local_fd_dim.x-1; i++)
@@ -3047,10 +3217,7 @@ int colrad_read(int number)
           for(l=0;l<neq;l++)
           {
 
-
-            sscanf(tokens[l+3], "%lf",  &tmp);
-                     
-  printf("i:%d,j:%d,k:%d,l:%d, tmp:%.4e\n",i,j,k,l,tmp);          
+            sscanf(tokens[l+3], "%lf",  &tmp);                              
             Ith(l1[i][j][k].y,l)=tmp;
             
           }

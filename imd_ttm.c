@@ -57,7 +57,7 @@ void calc_ttm()
 
   
   update_fd();
-  do_ADV(1.0);
+  //do_ADV(1.0);
   do_cell_activation();
 #ifdef COLRAD
   do_colrad(timestep*10.18*1.0e-15);
@@ -79,25 +79,25 @@ void calc_ttm()
     }
 
 //Calc internal eng and updt new U after diff
-tot_elec_energy_local =0;
-for (i=1; i<local_fd_dim.x-1; ++i)
-{
-for (j=1; j<local_fd_dim.y-1; ++j)
-{
-for (k=1; k<local_fd_dim.z-1; ++k)
-{
-      if(node.natoms >= 1)
-      {
-        //node.U =EOS_ee_from_r_te(node.dens, node.temp * 11604.5) * 26.9815 * AMU * J2eV; //eV/Atom      
-        tot_elec_energy_local += node.U*((double) node.natoms);
-      }      
-      else
-      {
-        node.U=0.0; //node2.U=0.0;
-      }
-}
-}
-}
+// tot_elec_energy_local =0;
+// for (i=1; i<local_fd_dim.x-1; ++i)
+// {
+// for (j=1; j<local_fd_dim.y-1; ++j)
+// {
+// for (k=1; k<local_fd_dim.z-1; ++k)
+// {
+//       if(node.natoms >= 1)
+//       {
+//         //node.U =EOS_ee_from_r_te(node.dens, node.temp * 11604.5) * 26.9815 * AMU * J2eV; //eV/Atom      
+//         tot_elec_energy_local += node.U*((double) node.natoms);
+//       }      
+//       else
+//       {
+//         node.U=0.0; //node2.U=0.0;
+//       }
+// }
+// }
+// }
 
 MPI_Reduce(&Eabs_local, &Eabs_global, 1, MPI_DOUBLE, MPI_SUM, 0, cpugrid);
 
@@ -424,7 +424,7 @@ if (node.dens == 0) //in step 0...noch keine neigh list?
 
 
 
-//node.dens= node2.dens = (double) node.natoms * atomic_weight / fd_vol * 1660.53907;       
+node.dens= node2.dens = (double) node.natoms * atomic_weight / fd_vol * 1660.53907;       
 
 
           node.vcomx /= tot_mass;
@@ -511,23 +511,23 @@ node.md_temp /= 3.0 * node.natoms;
           {
             node.temp = node2.temp = node.md_temp;
 
-node.U =EOS_ee_from_r_te(node.dens, node.temp * 11604.5) * 26.9815 * AMU * J2eV; // eV/Atom
-node2.U=node.U;
+// node.U =EOS_ee_from_r_te(node.dens, node.temp * 11604.5) * 26.9815 * AMU * J2eV; // eV/Atom
+// node2.U=node.U;
 
 
   //PLAUSIBILITY EOS CHECK:
-  double echeck= EOS_ee_from_r_te(node.dens, node.temp * 11604.5)*26.9815 * AMU * J2eV;
-  double tcheck = EOS_te_from_r_ee(node.dens, echeck/26.9815/AMU * eV2J) / 11604.5;
-  double tinit=node.temp;
+// double echeck= EOS_ee_from_r_te(node.dens, node.temp * 11604.5)*26.9815 * AMU * J2eV;
+// double tcheck = EOS_te_from_r_ee(node.dens, echeck/26.9815/AMU * eV2J) / 11604.5;
+// double tinit=node.temp;
 
-  if(ABS(tcheck -tinit) > tinit*0.01) // 1% unterschied
-  {
-    char errstr[255];
+  // if(ABS(tcheck -tinit) > tinit*0.01) // 1% unterschied
+  // {
+  //   char errstr[255];
 
-    sprintf(errstr,"ERROR: EOS Plausibility check failed, TfromU != Tinit. Tinit:%.4e, TfromU:%.4e\n"
-                    "Maybe Interpolation table too sparse or increase tolerance",tinit,tcheck); 
-    error(errstr);
-  }
+  //   sprintf(errstr,"ERROR: EOS Plausibility check failed, TfromU != Tinit. Tinit:%.4e, TfromU:%.4e\n"
+  //                   "Maybe Interpolation table too sparse or increase tolerance",tinit,tcheck); 
+  //   error(errstr);
+  // }
   
 
           }
@@ -599,8 +599,8 @@ void do_FILLMESH(void)
           //////////////////////////////////////////////////////////////          
           //                      Wärmekapazität
           //////////////////////////////////////////////////////////////      
-          node.Ce = EOS_cve_from_r_te(node.dens, node.temp * 11604.5); //Interpol.Tabelle          
-          //node.Ce = Cv(node.temp, node.ne);
+          //node.Ce = EOS_cve_from_r_te(node.dens, node.temp * 11604.5); //Interpol.Tabelle                    
+node.Ce = Cv(node.temp, node.ne);
           node2.Ce=node.Ce;
 
 #if DEBUG_LEVEL>0
@@ -1281,8 +1281,8 @@ neighvol = pow(sqrt(pair_pot.end[0]), 3.0) * 4.0 / 3.0 * M_PI;
   // read_bc_interp(&QfromT_interp,"EOS_QfromT.txt");
   // read_bc_interp(&CfromT_interp,"EOS_CfromT.txt"); //für CFL maxdt
 
-nn_read_table(&intp_cve_from_r_te, "EOS_cve_from_r_te.txt");
-nn_read_table(&intp_ee_from_r_tesqrt, "EOS_ee_from_r_tesqrt.txt");
+// nn_read_table(&intp_cve_from_r_te, "EOS_cve_from_r_te.txt");
+// nn_read_table(&intp_ee_from_r_tesqrt, "EOS_ee_from_r_tesqrt.txt");
 
   //read_tricub_interp(&kappa_interp,"kappa.txt"); //Hardcoding ist schneller
   //Lese Drude-Lorentz Interpolationstabellen
@@ -1627,7 +1627,7 @@ void do_cell_activation(void)
             } //isnan ....
             //Interne Energie muss noch geupdatet werden (Falls fallback auf altes Schema)
 
-node.U = node2.U= EOS_ee_from_r_te(node.dens, node.temp * 11604.5) * 26.9815 * AMU * J2eV; // eV/Atom
+// node.U = node2.U= EOS_ee_from_r_te(node.dens, node.temp * 11604.5) * 26.9815 * AMU * J2eV; // eV/Atom
           } // endif isnan(temp) || temp<=0
 
         } // endif ..new cell activated...
@@ -2691,7 +2691,12 @@ double getKappa(double Te, double Ti, double Ne, double Z) //POVAR
 }
 
 /*************************************************************
-* MY MOD: Auxiliary function for string Parsing in TTM-Read  *
+* MY MOD: Auxiliary function for string Parsing in TTM-Read  
+* WIESO MACHE ICH MIR DEN AUFWAND? -->
+* Diese routine ist extrem praktisch wenn man dataen einliest,
+* von denen man vorher nicht weiss wie genau die struktur aussieht
+* Siehe z.b. auch colrad_read, wo die Zahl der spalten davon abhängt,
+* wieviele energie-zustände man haben möchte
 **************************************************************/
 char **strsplit(const char* str, const char* delim, size_t* numtokens) {
   // copy the original string so that we don't overwrite parts of it
