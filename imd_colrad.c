@@ -9,9 +9,9 @@
 // ****************************************************
 
 
-//#define USEFLOAT  // hauptsächlich in der funktion genexptint. Profiling zeigte, dass
+#define USEFLOAT  // hauptsächlich in der funktion genexptint. Profiling zeigte, dass
                   // hier die meiste zeit verbraucht wird -> float verdoppelt performance
-//#define OMP
+#define OMP
 #define LAPACK
 //#define MULTIPHOTON
 // #define SPONT  //<-- spontante emission, Kaum effekt 
@@ -83,7 +83,8 @@ int num_threads;
 
 typedef struct {
   realtype It; //Intesity
-  realtype IPD0,IPD1,IPD2,IPD3;
+  realtype IPD0,IPD1,IPD2,IPD3,IPD4;
+  double EF;
   realtype P_EE,P_EI,P_MPI2,P_MPI3,P_RR;
   double P_TOTAL; //komplette colrad-Leistungsdichte, für eng-filge
   double dens; //weil cv F(dens,temp) 
@@ -883,6 +884,7 @@ void do_Saha(double Te,double totalc,double ne,N_Vector y) //Bei init
   double n0,n1,n2,n3,n4,n5;
   double p; //probability
 
+
   int i;
 
 
@@ -890,6 +892,7 @@ void do_Saha(double Te,double totalc,double ne,N_Vector y) //Bei init
 
 
   Zav=ne/totalc;
+  double EF=fermi_E(ne);
   //Debye=sqrt(BOLTZMAN*Te/4.0/pi/ECHARGE/ECHARGE/ne/(Zav+1));
   tmp=pow(2.0*pi*EMASS*BOLTZMAN*Te,1.5)/planck/planck/planck;
   #ifdef DOIPD
@@ -918,12 +921,18 @@ void do_Saha(double Te,double totalc,double ne,N_Vector y) //Bei init
     #ifdef DOIPD
     IPD=IPD0;
     #endif
-    double Ei=STATES_z0[i][2]*eV2J-IPD;
+    double Ei=STATES_z0[i][2]*eV2J-IPD+EF;
     double qi=STATES_z0[i][3]*exp(-(STATES_z0[i][2]-0.0)*eV2J/BOLTZMAN/Te); 
     if(Ei<0) //depressed state- > truncate partiation function 
       qi=0;
 
     Q_z0+=qi; //Mit Energien, relativ zum Grundzustand (level=0) dieses Ions
+
+// if(myid==0)
+// printf("Z0, qi:%.4e, exp:%.4e, gi:%.4e,Q:%.4e\n", qi, 
+//         exp(-(STATES_z0[i][2]-0.0)*eV2J/BOLTZMAN/Te),
+//         STATES_z0[i][3], Q_z0);
+
   }
 
   for(i=0;i<z1_len;++i)
@@ -931,10 +940,17 @@ void do_Saha(double Te,double totalc,double ne,N_Vector y) //Bei init
     #ifdef DOIPD
     IPD=IPD0;
     #endif
-    double Ei=STATES_z1[i][2]*eV2J-IPD;
+    double Ei=STATES_z1[i][2]*eV2J-IPD+EF;
     double qi=STATES_z1[i][3]*exp(-(STATES_z1[i][2]-STATES_z1[0][2])*eV2J/BOLTZMAN/Te);     
     if(Ei<0) qi=0;
+
     Q_z1+=qi;
+
+// if(myid==0)
+// printf("Z1, qi:%.4e, exp:%.4e, gi:%.4e,Q:%.4e\n", qi, 
+//         exp(-(STATES_z1[i][2]-STATES_z1[0][2])*eV2J/BOLTZMAN/Te),
+//         STATES_z1[i][3],Q_z1);
+
   }
 
   #if MAXLEVEL > 1
@@ -943,10 +959,16 @@ void do_Saha(double Te,double totalc,double ne,N_Vector y) //Bei init
     #ifdef DOIPD
     IPD=IPD1;
     #endif
-    double Ei=STATES_z2[i][2]*eV2J-IPD;
+    double Ei=STATES_z2[i][2]*eV2J-IPD+EF;
     double qi=STATES_z2[i][3]*exp(-(STATES_z2[i][2]-STATES_z2[0][2])*eV2J/BOLTZMAN/Te);     
     if(Ei<0) qi=0;
+
     Q_z2+=qi;
+
+// if(myid==0)
+// printf("Z2, qi:%.4e, exp:%.4e, gi:%.4e,Q:%.4e\n", qi, 
+//         exp(-(STATES_z2[i][2]-STATES_z2[0][2])*eV2J/BOLTZMAN/Te),
+//         STATES_z2[i][3], Q_z2);    
   }
   #endif
 
@@ -956,10 +978,16 @@ void do_Saha(double Te,double totalc,double ne,N_Vector y) //Bei init
     #ifdef DOIPD
     IPD=IPD2;
     #endif
-    double Ei=STATES_z3[i][2]*eV2J-IPD;
+    double Ei=STATES_z3[i][2]*eV2J-IPD+EF;
     double qi=STATES_z3[i][3]*exp(-(STATES_z3[i][2]-STATES_z3[0][2])*eV2J/BOLTZMAN/Te);     
     if(Ei<0) qi=0;
+
     Q_z3+=qi;
+
+// if(myid==0)
+// printf("Z3, qi:%.4e, exp:%.4e, gi:%.4e,Q:%.4e\n", qi, 
+//         exp(-(STATES_z3[i][2]-STATES_z3[0][2])*eV2J/BOLTZMAN/Te),
+//         STATES_z3[i][3],Q_z3);        
   }
   #endif
 
@@ -969,11 +997,17 @@ void do_Saha(double Te,double totalc,double ne,N_Vector y) //Bei init
     #ifdef DOIPD
     IPD=IPD3;
     #endif
-    double Ei=STATES_z4[i][2]*eV2J-IPD;
+    double Ei=STATES_z4[i][2]*eV2J-IPD+EF;
     double qi=STATES_z4[i][3]*exp(-(STATES_z4[i][2]-STATES_z4[0][2])*eV2J/BOLTZMAN/Te);     
     if(Ei<0) qi=0;
-
+ 
      Q_z4+=qi;
+
+// if(myid==0)
+// printf("Z4, qi:%.4e, exp:%.4e, gi:%.4e,Q:%.4e\n", qi, 
+//         exp(-(STATES_z4[i][2]-STATES_z4[0][2])*eV2J/BOLTZMAN/Te),
+//         STATES_z4[i][3],Q_z4 );
+
    }
   #endif
 
@@ -992,12 +1026,21 @@ void do_Saha(double Te,double totalc,double ne,N_Vector y) //Bei init
   IPD=IPD0;
   #endif
 
-  DeltaE=(STATES_z1[0][2]-0.0)*eV2J-IPD;
-  DeltaE=fmax(0.0,DeltaE);
+  DeltaE=(STATES_z1[0][2]-0.0)*eV2J-IPD+EF;
+  // DeltaE=fmax(0.0,DeltaE);
   p=exp(-DeltaE/BOLTZMAN/Te);
-  r10=2.0/ne*tmp*Q_z1/Q_z0*p; //r10= ratio of ion-concentrations n(Z=1)/n(Z=0); g_e=2 (statistical weight of electron)
+  // r10=2.0/ne*tmp*Q_z1/Q_z0*p; //r10= ratio of ion-concentrations n(Z=1)/n(Z=0); g_e=2 (statistical weight of electron)
+  r10=Q_z1/Q_z0*p;
+  // double r01=Q_z0/Q_z1*p;
   //printf("IPD0:%f\n",IPD*J2eV);
-  //printf("p:%.2e\n",p);
+  // if(isnan(r10)!=0 || isinf(r10)!=0)
+  // {
+  //   char errstr[255];
+  //   sprintf(errstr,"ERROR in Saha-Init: r10 is inf or nan:  p0:%.4e,Q_z1:%.4e,Q_z0:%.4e\n",p,Q_z1,Q_z0);
+  //   error(errstr);
+  // }
+  // if(myid==0)
+  //   printf("ERROR in Saha-Init: r10 is inf or nan:  p0:%.4e,Q_z1:%.4e,Q_z0:%.4e\n",p,Q_z1,Q_z0);
 
 
   ////////////
@@ -1011,12 +1054,20 @@ void do_Saha(double Te,double totalc,double ne,N_Vector y) //Bei init
     // IPD=3.0*z*ECHARGE*ECHARGE/2.0/r0/4.0/pi/ECONST;  //Ion-Sphere model
     IPD=IPD1;
   #endif  
-    DeltaE=(STATES_z2[0][2]-STATES_z1[0][2])*eV2J-IPD;
-    DeltaE=fmax(0.0,DeltaE);
+    DeltaE=(STATES_z2[0][2]-STATES_z1[0][2])*eV2J-IPD+EF;
+    // DeltaE=fmax(0.0,DeltaE);
     p=exp(-DeltaE/BOLTZMAN/Te);
-    r21=2.0/ne*tmp*Q_z2/Q_z1*p;
-  #endif
-
+    // p=exp(DeltaE/BOLTZMAN/Te);
+    // r21=2.0/ne*tmp*Q_z2/Q_z1*p;
+    r21=Q_z2/Q_z1*p;
+    // double r12=Q_z1/Q_z2*p;
+  // if(isnan(r21)!=0 || isinf(r21)!=0)
+  // {
+  //   char errstr[255];
+  //   sprintf(errstr,"ERROR in Saha-Init: r21 is inf or nan:  p2:%.4e,Q_z2:%.4e,Q_z1:%.4e\n",p,Q_z2,Q_z1);
+  //   error(errstr);
+  // }
+#endif
   // ////////////
   // // Z=2->3 //
   // ////////////
@@ -1026,10 +1077,19 @@ void do_Saha(double Te,double totalc,double ne,N_Vector y) //Bei init
     // IPD=3.0*z*ECHARGE*ECHARGE/2.0/r0/4.0/pi/ECONST;  //Ion-Sphere model
     IPD=IPD2;
   #endif  
-    DeltaE=(STATES_z3[0][2]-STATES_z2[0][2])*eV2J-IPD;
-    DeltaE=fmax(0.0,DeltaE);
+    DeltaE=(STATES_z3[0][2]-STATES_z2[0][2])*eV2J-IPD+EF;
+    // DeltaE=fmax(0.0,DeltaE);
     p=exp(-DeltaE/BOLTZMAN/Te);
-    r32=2.0/ne*tmp*Q_z3/Q_z2*p;
+    // p=exp(DeltaE/BOLTZMAN/Te);
+    // r32=2.0/ne*tmp*Q_z3/Q_z2*p;
+    r32=Q_z3/Q_z2*p;
+    // double r23=Q_z2/Q_z3*p;
+  if(isnan(r32)!=0 || isinf(r32)!=0)
+  {
+    char errstr[255];
+    sprintf(errstr,"ERROR in Saha-Init: r32 is inf or nan:  p3:%.4e,Q_z3:%.4e,Q_z2:%.4e\n",p,Q_z3,Q_z2);
+    error(errstr);
+  }
   #endif  
   // ////////////
   // // Z=3->4 //
@@ -1040,20 +1100,53 @@ void do_Saha(double Te,double totalc,double ne,N_Vector y) //Bei init
   // IPD=3.0*z*ECHARGE*ECHARGE/2.0/r0/4.0/pi/ECONST;  //Ion-Sphere model
   IPD=IPD3;
   #endif  
-  DeltaE=(STATES_z4[0][2]-STATES_z3[0][2])*eV2J-IPD;
-  DeltaE=fmax(0.0,DeltaE);
+  DeltaE=(STATES_z4[0][2]-STATES_z3[0][2])*eV2J-IPD+EF;
+  // DeltaE=fmax(0.0,DeltaE);
   p=exp(-DeltaE/BOLTZMAN/Te);
-  r43=2.0/ne*tmp*Q_z4/Q_z3*p;
-  #endif
-
+  // p=exp(DeltaE/BOLTZMAN/Te);
+  // r43=2.0/ne*tmp*Q_z4/Q_z3*p;
+  r43=Q_z4/Q_z3*p;
+  // double r34=Q_z3/Q_z4*p;
+// printf("r34:%.4e,p:%.4e,DeltaE/kT:%.4e\n",r34,p,DeltaE/BOLTZMAN/Te);
+  // if(isnan(r43)!=0 || isinf(r43)!=0)
+  // {
+  //   char errstr[255];
+  //   sprintf(errstr,"ERROR in Saha-Init: r43 is inf or nan:  p4:%.4e,Q_z4:%.4e,Q_z3:%.4e\n",p,Q_z4,Q_z3);
+  //   error(errstr);
+  // }
+#endif
   //concentrations from ratios and totalc
-  n0=totalc/(r54*r43*r32*r21*r10+r43*r32*r21*r10+r32*r21*r10+r21*r10+r10+1.0);
+
+  n0=totalc/(r43*r32*r21*r10+r32*r21*r10+r21*r10+r10+1.0); // ?
+  //n0=totalc*Zav/(4*r43*r32*r21*r10 + 3*r32*r21*r10+ 2*r21*r10+1.0);
   n1=r10*n0;
+  
+  //D.h. Neutrals komplett druck-ionisiert
+  if(Q_z0==0)
+  {
+    n0=0.0;
+    // n1=totalc*Zav/(4*r43*r32*r21 + 3*r32*r21+ 2*r21+1.0);
+    n1=totalc/(r43*r32*r21 + r32*r21+ r21+1.0);
+  }
+
   n2=r21*n1;
   n3=r32*n2;
   n4=r43*n3;
   n5=r54*n4;
-  Zav=(1*n1+4*n2+9*n3+16*n4+25*n5)/(1*n1+2*n2+3*n3+4*n4+5*n5);
+  // Zav=(1*n1+4*n2+9*n3+16*n4+25*n5)/(1*n1+2*n2+3*n3+4*n4+5*n5);
+
+  // n4=Zav*totalc/(r12*r23*r34+2*r23*r34+3*r34+4);
+  // n3=r34*n4;
+  // n2=r23*n3;
+  // n1=r12*n2;
+  // n0=r01*n1;
+
+// if(myid==0)
+// {
+  // printf("n0:%.4e,n1:%.4e,n2:%.4e,n3:%.4e,n4:%.4e\n",n0,n1,n2,n3,n4);
+  // printf("r10:%.4e,r21:%.4e,r32:%.4e,r43:%.4e\n",r10,r21,r32,r43);
+  // printf("Qz4:%.4e,Qz3:%.4e,Qz2:%.4e,Qz1:%.4e,Qz0:%.4e\n",Q_z4, Q_z3,Q_z2,Q_z1,Q_z0);
+// }
 
 
   /*
@@ -1071,81 +1164,185 @@ void do_Saha(double Te,double totalc,double ne,N_Vector y) //Bei init
   */
 
 
+  // ************************
+  // *  FILL Z0 STATES
+  // ************************
   int ishift=3;
   //Now fill states
   for(i=0;i<z0_len;++i)
-  {
-    double prob=exp(-STATES_z0[i][2]*eV2J/BOLTZMAN/Te);
+  {  
+    DeltaE=(STATES_z0[i][2]-0)*eV2J; // bzgl. ground state
+    double Ei=0.0;
+    double prob=exp(-DeltaE/BOLTZMAN/Te);
     #ifdef DOIPD
     IPD=IPD0;
-    double Ei=STATES_z0[i][2]*eV2J-IPD;    
+    Ei=STATES_z0[i][2]*eV2J-IPD+EF;    
     if(Ei<0) prob=0.0;    
     #endif
     if(Q_z0>0)
+    {
       Ith(y,i+ishift)=n0/Q_z0*STATES_z0[i][3]*prob;
+      // printf("ITH(%d):%.4e,prob:%.4e,Q_z0:%.4e,dE:%.4e\n",
+      //   i+ishift,Ith(y,i+ishift), prob, Q_z0, DeltaE);
+    }
+
+    if(isnan(Ith(y,i+ishift))!=0 || isinf(Ith(y,i+ishift))!=0)
+    {
+      char errstr[255];
+      sprintf(errstr,"ERROR in do_Saha z0: y is inf or nan! prob:%.4e, Ei:%.4e,DeltaE:%.4e\n", 
+        prob,Ei,DeltaE);
+      error(errstr);
+    }
   }
+    // ************************
+    // *  FILL Z1 STATES
+    // ************************
   for(i=0;i<z1_len;++i)
   {
-    double prob=exp(-(STATES_z1[i][2]-STATES_z1[0][2])*eV2J/BOLTZMAN/Te);
+    // DeltaE=(STATES_z1[i][2]-STATES_z1[0][2])*eV2J-IPD0+EF;
+    // DeltaE=(STATES_z1[i][2]-STATES_z1[0][2])*eV2J-IPD1+EF;
+    DeltaE=(STATES_z1[i][2]-STATES_z1[0][2])*eV2J;
+    double Ei=0.0;
+    double prob=exp(-DeltaE/BOLTZMAN/Te);
     #ifdef DOIPD
     IPD=IPD1;
-    double Ei=STATES_z1[i][2]*eV2J-IPD;    
+    // Ei=(STATES_z1[i][2]-STATES_z1[0][2])*eV2J-IPD0+EF;    
+    // Ei=(STATES_z1[i][2]-STATES_z1[0][2])*eV2J-IPD1+EF;   
+    Ei=(STATES_z1[i][2])*eV2J-IPD0+EF;   
     if(Ei<0) prob=0.0;    
     #endif    
     if(Q_z1>0)
       Ith(y,i+ishift+z0_len)=n1/Q_z1*STATES_z1[i][3]*prob;
-  }
 
+    if(isnan(Ith(y,i+ishift+z0_len))!=0 || isinf(Ith(y,i+ishift+z0_len))!=0)
+    {
+      char errstr[255];
+      sprintf(errstr,"ERROR in do_Saha z1: y is inf or nan! prob:%.4e, Ei:%.4e,DeltaE:%.4e\n", 
+        prob,Ei,DeltaE);
+      error(errstr);
+    }    
+  }
+  // ************************
+  // *  FILL Z2 STATES
+  // ************************
   #if MAXLEVEL > 1
   for(i=0;i<z2_len;++i)
   {
-    double prob=exp(-(STATES_z2[i][2]-STATES_z2[0][2])*eV2J/BOLTZMAN/Te);
+    DeltaE=(STATES_z2[i][2]-STATES_z2[0][2])*eV2J;//-IPD2+EF;
+    double Ei=0.0;    
+    double prob=exp(-DeltaE/BOLTZMAN/Te);
     #ifdef DOIPD
     IPD=IPD2;
-    double Ei=STATES_z2[i][2]*eV2J-IPD;    
+    Ei=STATES_z2[i][2]*eV2J-IPD1+EF;    
     if(Ei<0) prob=0.0;    
     #endif 
     if(Q_z2>0)       
       Ith(y,i+ishift+z0_len+z1_len)=n2/Q_z2*STATES_z2[i][3]*prob;
+
+    if(isnan(Ith(y,i+ishift+z0_len+z1_len))!=0 || isinf(Ith(y,i+ishift+z0_len+z1_len))!=0)
+    {
+      char errstr[255];
+      sprintf(errstr,"ERROR in do_Saha z2: y is inf or nan! prob:%.4e, Ei:%.4e,DeltaE:%.4e\n", 
+        prob,Ei,DeltaE);
+      error(errstr);
+    }
+
   }
   #endif
-
+  // ************************
+  // *  FILL Z3 STATES
+  // ************************  
   #if MAXLEVEL > 2
   for(i=0;i<z3_len;++i)
   {
-    double prob=exp(-(STATES_z3[i][2]-STATES_z3[0][2])*eV2J/BOLTZMAN/Te);
+    DeltaE=(STATES_z3[i][2]-STATES_z3[0][2])*eV2J;//-IPD3+EF;
+    double Ei=0.0;    
+    double prob=exp(-DeltaE/BOLTZMAN/Te);
     #ifdef DOIPD
     IPD=IPD3;
-    double Ei=STATES_z3[i][2]*eV2J-IPD;    
+    Ei=STATES_z3[i][2]*eV2J-IPD2+EF;    
     if(Ei<0) prob=0.0;    
     #endif            
     if(Q_z3>0)
       Ith(y,i+ishift+z0_len+z1_len+z2_len)=n3/Q_z3*STATES_z3[i][3]*prob;
+
+    if(isnan(Ith(y,i+ishift+z0_len+z1_len+z2_len))!=0 || isinf(Ith(y,i+ishift+z0_len+z1_len+z2_len))!=0)
+    {
+      char errstr[255];
+      sprintf(errstr,"ERROR in do_Saha z3: y is inf or nan! prob:%.4e, Ei:%.4e,DeltaE:%4.e\n", 
+        prob,Ei,DeltaE);
+      error(errstr);
+    }    
   }
   #endif
-
+  // ************************
+  // *  FILL Z4 STATES
+  // ************************
   #if MAXLEVEL > 3
   for(i=0;i<z4_len;++i)
   {
-    double prob=exp(-(STATES_z4[i][2]-STATES_z4[0][2])*eV2J/BOLTZMAN/Te);
+    DeltaE=(STATES_z4[i][2]-STATES_z4[0][2])*eV2J;//-IPD4+EF;
+    double prob=exp(-DeltaE/BOLTZMAN/Te);
+    double Ei=0.0;    
     #ifdef DOIPD
     IPD=IPD4;
-    double Ei=STATES_z4[i][2]*eV2J-IPD;    
+    Ei=STATES_z4[i][2]*eV2J-IPD3+EF;    
     if(Ei<0) prob=0.0;    
     #endif                
     if(Q_z4>0)
       Ith(y,i+ishift+z0_len+z1_len+z2_len+z3_len)=n4/Q_z4*STATES_z4[i][3]*prob;
+
+    if(isnan(Ith(y,i+ishift+z0_len+z1_len+z2_len+z3_len))!=0 || isinf(Ith(y,i+ishift+z0_len+z1_len+z2_len+z3_len))!=0)
+    {
+      char errstr[255];
+      sprintf(errstr,"ERROR in do_Saha z4: y is inf or nan! prob:%.4e, Ei:%.4e,DeltaE:%4.e\n", 
+        prob,Ei,DeltaE);
+      error(errstr);
+    }
+
   }
   #endif  
 
- if(myid==0)
- {
+  double totalc_check=0.0;
+  double n0_check=0.0;
+  double n1_check=0.0;
+  double n2_check=0.0;
+  double n3_check=0.0;
+  double n4_check=0.0;
+
   for(i=3;i<neq;i++)
   {
+    totalc_check+=Ith(y,i);
+    if(i-3 < z0_len)
+      n0_check+=Ith(y,i);
+    
+    if(i-3 >= z0_len && i-3-z0_len < z1_len)
+      n1_check+=Ith(y,i);
 
-      printf("y[%d]:%.4e\n",i,Ith(y,i));  
-  }  
- } 
+    if(i-3 >= z0_len+z1_len && i-3-z0_len-z1_len < z2_len)
+      n2_check+=Ith(y,i);
+
+    if(i-3 >= z0_len+z1_len+z2_len && i-3-z0_len-z1_len-z2_len < z3_len)
+      n3_check+=Ith(y,i);    
+
+    if(i-3 >= z0_len+z1_len+z2_len + z3_len && i-3-z0_len-z1_len-z2_len - z3_len < z4_len)
+      n4_check+=Ith(y,i);      
+
+    // if(myid==0) printf("y[%d]:%.4e\n",i,Ith(y,i));
+  } 
+
+  if(ABS(totalc-totalc_check) > 0.01*totalc || ABS(n0_check-n0) > 0.01* n0 || 
+     ABS(n1_check-n1) > 0.01* n1 || ABS(n2_check-n2) > 0.01* n2 || ABS(n3_check-n3) > 0.01* n3 ||
+     ABS(n4_check-n4) > 0.01* n4 )
+  if(myid==0)
+  {
+    char errstr[400];
+    sprintf(errstr,"Inconsistency in do_Saha: totalc_check= %.4e, and totalc=%.4e,sum_n:%.4e,"
+                    "n0:%.4e, n1:%.4e,n2:%.4e,n3:%.4e, n4:%.4e\n"
+                    "n0_check:%.4e, n1_check:%.4e,n2_check:%.4e,n3_check:%.4e, n4_check:%.4e\n",
+      totalc_check,totalc,n1+n2+n3+n4, n0, n1, n2, n3, n4,n0_check,n1_check,n2_check,n3_check,n4_check);
+    error(errstr);
+  }
 
 }
 
@@ -1221,9 +1418,10 @@ int colrad_ydot(double t, N_Vector y, N_Vector colrad_ydot, void *user_data)
     return 1; // <-- RHS fail
 
   // IPD KRAM
-  double IPD0,IPD1,IPD2,IPD3;
+  double IPD0,IPD1,IPD2,IPD3,IPD4;
   IPD0=IPD1=IPD2=IPD3=0.0;
-
+  double EF=fermi_E(ne);
+  data->EF=EF;
 #ifdef DOIPD
   double r0,debye;
   r0=pow(3.0/4.0/pi/totalc,1.0/3.0);
@@ -1233,10 +1431,15 @@ int colrad_ydot(double t, N_Vector y, N_Vector colrad_ydot, void *user_data)
   IPD1=2.0*3.0/2.0/r0*ECHARGE*ECHARGE*(pow(1.0+pow(debye/r0,3.0),2.0/3.0)-pow(debye/r0,2.0))/4.0/pi/ECONST;
   IPD2=3.0*3.0/2.0/r0*ECHARGE*ECHARGE*(pow(1.0+pow(debye/r0,3.0),2.0/3.0)-pow(debye/r0,2.0))/4.0/pi/ECONST;
   IPD3=4.0*3.0/2.0/r0*ECHARGE*ECHARGE*(pow(1.0+pow(debye/r0,3.0),2.0/3.0)-pow(debye/r0,2.0))/4.0/pi/ECONST;
+  IPD4=5.0*3.0/2.0/r0*ECHARGE*ECHARGE*(pow(1.0+pow(debye/r0,3.0),2.0/3.0)-pow(debye/r0,2.0))/4.0/pi/ECONST;
+
   data->IPD0=IPD0;
   data->IPD1=IPD1;
   data->IPD2=IPD2;
   data->IPD3=IPD3;
+  data->IPD4=IPD4;
+if(isnan(IPD0)!=0)
+printf("IPD0 is NaN! r0:%.4e, totalc:%.4e, ne:%.4e\n",r0,totalc,ne);
 
 #endif
 
@@ -1257,7 +1460,7 @@ int colrad_ydot(double t, N_Vector y, N_Vector colrad_ydot, void *user_data)
     for(j=0;j<z0_len;++j)
     {
       if(j<=i) continue; // MUI IMPORTANTE
-      double engi=STATES_z0[i][2]*eV2J-IPD0;
+      double engi=STATES_z0[i][2]*eV2J-IPD0+EF;
       if(engi < 0) continue; //depressed state is continuum
 
       DeltaE=(STATES_z0[j][2]-STATES_z0[i][2])*eV2J;
@@ -1309,7 +1512,7 @@ int colrad_ydot(double t, N_Vector y, N_Vector colrad_ydot, void *user_data)
     for(j=0;j<z1_len;++j)
     {
       if(i<=j) continue; // MUI IMPORTANTE
-      double engi=STATES_z1[i][2]*eV2J-IPD1;
+      double engi=STATES_z1[i][2]*eV2J-IPD0+EF;            
       if(engi < 0) continue; //depressed state is continuum
 
       DeltaE=(STATES_z1[j][2]-STATES_z1[i][2])*eV2J;
@@ -1359,7 +1562,7 @@ int colrad_ydot(double t, N_Vector y, N_Vector colrad_ydot, void *user_data)
     for(j=0;j<z2_len;++j)
     {
       if(j<=i) continue; // MUI IMPORTANTE
-      double engi=STATES_z2[i][2]*eV2J-IPD2;
+      double engi=STATES_z2[i][2]*eV2J-IPD1+EF;
       if(engi < 0) continue; //depressed state is continuum
 
       DeltaE=(STATES_z2[j][2]-STATES_z2[i][2])*eV2J;
@@ -1412,7 +1615,7 @@ int colrad_ydot(double t, N_Vector y, N_Vector colrad_ydot, void *user_data)
     for(j=0;j<z2_len;++j)
     {
       if(j<=i) continue; // MUI IMPORTANTE
-      double engi=STATES_z3[i][2]*eV2J-IPD3;
+      double engi=STATES_z3[i][2]*eV2J-IPD2+EF;
       if(engi < 0) continue; //depressed state is continuum
 
       DeltaE=(STATES_z3[j][2]-STATES_z3[i][2])*eV2J;
@@ -1466,7 +1669,7 @@ int colrad_ydot(double t, N_Vector y, N_Vector colrad_ydot, void *user_data)
     {
       if(j<=i) continue; // MUI IMPORTANTE      
 
-      DeltaE=(STATES_z4[j][2]-STATES_z4[i][2])*eV2J;
+      DeltaE=(STATES_z4[j][2]-STATES_z4[i][2])*eV2J-IPD3+EF;
       kfwd=k_EE_z4_z4[i][j]*Ith(y,i+ishift+shift2)*ne;
       krev=k_EE_z4_z4_b[i][j]*Ith(y,j+ishift+shift2)*ne;
 
@@ -1517,7 +1720,7 @@ int colrad_ydot(double t, N_Vector y, N_Vector colrad_ydot, void *user_data)
   {
     for(j=0;j<z1_len;++j)
     {
-      DeltaE=(STATES_z1[j][2]-STATES_z0[i][2])*eV2J-IPD0;
+      DeltaE=(STATES_z1[j][2]-STATES_z0[i][2])*eV2J-IPD0+EF;
 
 #ifdef DOIPD
       if(DeltaE<0) continue;
@@ -1582,7 +1785,7 @@ if(DeltaE >0 ) //DeltaE ist bereits abzgl. IPD
       //jetzt rad recomb
       P_E_RAD_RECOMB  -= krev*(DeltaE)*escape_factor;      //Radiative cooling, c.f. http://www.astronomy.ohio-state.edu/~dhw/A825/notes8.pdf S.2
 }
-#endif
+#endif //MPI
 
     }
   }
@@ -1604,7 +1807,7 @@ if(DeltaE >0 ) //DeltaE ist bereits abzgl. IPD
   {
     for(j=0;j<z2_len;++j)
     {
-      DeltaE=(STATES_z2[j][2]-STATES_z1[i][2])*eV2J-IPD1;
+      DeltaE=(STATES_z2[j][2]-STATES_z1[i][2])*eV2J-IPD1+EF;
 
 #ifdef DOIPD
       if(DeltaE<0) continue;
@@ -1667,7 +1870,7 @@ if(DeltaE >0)
       //jetzt rad recomb
       P_E_RAD_RECOMB  -= krev*(DeltaE)*escape_factor;
 }
-#endif
+#endif //MPI
 
     }
   }
@@ -1690,7 +1893,7 @@ if(DeltaE >0)
   {
     for(j=0;j<z3_len;++j)
     {
-      DeltaE=(STATES_z3[j][2]-STATES_z2[i][2])*eV2J-IPD2;
+      DeltaE=(STATES_z3[j][2]-STATES_z2[i][2])*eV2J-IPD2+EF;
 
 #ifdef DOIPD
       if(DeltaE<0) continue;
@@ -1753,7 +1956,7 @@ if(DeltaE >0)
       //jetzt rad recomb
       P_E_RAD_RECOMB  -= krev*(DeltaE)*escape_factor;
 }
-#endif
+#endif //MPI
 
     }
   }
@@ -1776,7 +1979,7 @@ if(DeltaE >0)
   {
     for(j=0;j<z4_len;++j)
     {
-      DeltaE=(STATES_z4[j][2]-STATES_z3[i][2])*eV2J-IPD3;
+      DeltaE=(STATES_z4[j][2]-STATES_z3[i][2])*eV2J-IPD3+EF;
 #ifdef DOIPD
       if(DeltaE<0) continue;
       DeltaE=MAX(0.0,DeltaE);
@@ -1839,7 +2042,7 @@ if(DeltaE >0)
       //jetzt rad recomb
       P_E_RAD_RECOMB  -= krev*(DeltaE)*escape_factor;
 }
-#endif
+#endif //MPI
 
     }
   }
@@ -1921,6 +2124,8 @@ int colrad_GetCoeffs(N_Vector y,double It,void *user_data)
   double IPD1=data->IPD1*J2eV;
   double IPD2=data->IPD2*J2eV;
   double IPD3=data->IPD3*J2eV;
+  double IPD4=data->IPD4*J2eV;
+  double EF=data->EF*J2eV;
 
   //MPI
   double k_RR_fact1=32*pi*pow(bohr_radius,2.0)/3.0/175700.00067;
@@ -2080,6 +2285,12 @@ int colrad_GetCoeffs(N_Vector y,double It,void *user_data)
             kronecker=1.0;//optically forbidden transition
 
           DeltaE=(STATES_z0[j][2]-STATES_z0[i][2]);
+
+#ifdef DOIPD
+          double Ei=(STATES_z0[i][2])-IPD0+EF;
+          if(Ei<0) continue;
+#endif          
+
           a=DeltaE/kbTe;
           expint=ExpInt(a);
 
@@ -2151,6 +2362,13 @@ if(fail==1)
         {
           if(STATES_z1[i][4]==STATES_z1[j][4])
             kronecker=1.0;
+#ifdef DOIPD
+          //double Ei=(STATES_z1[i][2]-STATES_z1[0][2])-IPD1+EF;
+          double Ei=STATES_z1[i][2]-IPD0+EF;
+          if(Ei<0) continue;
+#endif
+
+
           DeltaE=(STATES_z1[j][2]-STATES_z1[i][2]);
           a=DeltaE/kbTe;
           expint=ExpInt(a);
@@ -2223,6 +2441,13 @@ if(expint==-1)
         {
           if(STATES_z2[i][4]==STATES_z2[j][4])
             kronecker=1.0;
+
+#ifdef DOIPD
+          // double Ei=(STATES_z2[i][2]-STATES_z2[0][2])-IPD2+EF;
+          double Ei=STATES_z2[i][2]-IPD1+EF;
+          if(Ei<0) continue;
+#endif
+
           DeltaE=(STATES_z2[j][2]-STATES_z2[i][2]);
           a=DeltaE/kbTe;
           expint=ExpInt(a);
@@ -2297,6 +2522,13 @@ if(expint==-1)
         {
           if(STATES_z3[i][4]==STATES_z3[j][4])
             kronecker=1.0;
+
+#ifdef DOIPD
+          // double Ei=(STATES_z3[i][2]-STATES_z3[0][2])-IPD3+EF;
+          double Ei=STATES_z3[i][2]-IPD2+EF;
+          if(Ei<0) continue;
+#endif
+
           DeltaE=(STATES_z3[j][2]-STATES_z3[i][2]);
           a=DeltaE/kbTe;
           expint=ExpInt(a);
@@ -2369,6 +2601,11 @@ if(expint==-1)
         {
           if(STATES_z4[i][4]==STATES_z4[j][4])
             kronecker=1.0;
+#ifdef DOIPD
+          // double Ei=(STATES_z4[i][2]-STATES_z4[0][2])-IPD4+EF;
+          double Ei=STATES_z4[i][2]-IPD3+EF;
+          if(Ei<0) continue;
+#endif          
           DeltaE=(STATES_z4[j][2]-STATES_z4[i][2]);
           a=DeltaE/kbTe;
           expint=ExpInt(a);
@@ -2440,7 +2677,7 @@ if(expint==-1)
       if(STATES_z0[i][4]==STATES_z1[j][4])
         kronecker=1.0;
 
-      DeltaE=(STATES_z1[j][2]-STATES_z0[i][2])-IPD0;
+      DeltaE=(STATES_z1[j][2]-STATES_z0[i][2])-IPD0+EF;
 if(DeltaE <0 )
   continue;
 
@@ -2535,7 +2772,7 @@ if(expint==-1)
       if(STATES_z1[i][4]==STATES_z2[j][4])
         kronecker=1.0;
 
-      DeltaE=(STATES_z2[j][2]-STATES_z1[i][2])-IPD1;
+      DeltaE=(STATES_z2[j][2]-STATES_z1[i][2])-IPD1+EF;
 
 if(DeltaE <0 )
   continue;
@@ -2632,7 +2869,7 @@ if(expint==-1)
       if(STATES_z2[i][4]==STATES_z3[j][4])
       kronecker=1.0;
 
-      DeltaE=(STATES_z3[j][2]-STATES_z2[i][2])-IPD2;
+      DeltaE=(STATES_z3[j][2]-STATES_z2[i][2])-IPD2+EF;
 
 if(DeltaE <0 )
   continue;
@@ -2733,7 +2970,7 @@ if(expint==-1)
       if(STATES_z3[i][4]==STATES_z4[j][4])
       kronecker=1.0;
 
-      DeltaE=(STATES_z4[j][2]-STATES_z3[i][2])-IPD3;
+      DeltaE=(STATES_z4[j][2]-STATES_z3[i][2])-IPD3+EF;
 
 if(DeltaE <0 )
   continue;      
@@ -3236,3 +3473,5 @@ int colrad_read(int number)
   fclose(infile);
   return 0;
 }
+
+
