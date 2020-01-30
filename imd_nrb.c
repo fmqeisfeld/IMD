@@ -689,7 +689,11 @@ if(pbc_dirs.y==1)
     else if(imdrestart>0 && nrb_readfile==0) nrb_readrestart(nrb_restart_file);  //d.h. nrb_input_file hat vorrang über restart-file
 							       //was in den meisten fällen jedoch keinen sinn macht!
 
-    nrb_send_cells(copy_nrb_max,pack_nrb,unpack_nrb_max); //acumm. results
+#ifdef LOADBALANCE
+sync_cells_direct(copy_nrb_max,pack_nrb,unpack_nrb_max,0); //acumm. results
+#else
+nrb_send_cells(copy_nrb_max,pack_nrb,unpack_nrb_max); //acumm. results
+#endif
     //nrb_inverse_send_cells(copy_nrb_max,pack_nrb,unpack_nrb_max);
 
     nrb_build_ifromid();
@@ -796,6 +800,9 @@ int nrb_forces(void)
           U_self.y=ORT(p,i,Y)-REF_POS(p,i,Y);
           U_self.z=ORT(p,i,Z)-REF_POS(p,i,Z);
           U_self.z=MINIMGZ(U_self.z);
+if(pbc_dirs.y==1)          
+          U_self.y=MINIMGY(U_self.y);
+
 	  if(NRBBND(p,i)==1)
 	  {
             U_dot.x=-nrbk*4.0*U_self.x; //muss 
@@ -894,6 +901,8 @@ printf("myid:%d,steps:%d, DOFORCE2, ind:%d, bnd:%d, dpx:%f dpy:%f dpz:%f px:%f p
           U[r].z=ORT(neighcell,neighi,Z)-REF_POS(neighcell,neighi,Z);
  
           U[r].z=MINIMGZ(U[r].z); //ACHTUNG: Bei 1D-Simulation, muss U[r].y auch mittels MINIMGY berechnet werden!
+if(pbc_dirs.y==1)          
+          U[r].y=MINIMGY(U[r].y);
 
           //velocities
 //          V[r].x=IMPULS(neighcell,neighi,X)/mass;

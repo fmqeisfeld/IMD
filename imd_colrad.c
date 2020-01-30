@@ -894,7 +894,8 @@ void do_Saha(double Te,double totalc,double ne,N_Vector y) //Bei init
   Zav=ne/totalc;
   double EF=fermi_E(ne);
   //Debye=sqrt(BOLTZMAN*Te/4.0/pi/ECHARGE/ECHARGE/ne/(Zav+1));
-  tmp=pow(2.0*pi*EMASS*BOLTZMAN*Te,1.5)/planck/planck/planck;
+  tmp=pow(2.0*pi*EMASS*BOLTZMAN*Te,1.5)/planck/planck/planck; //ACHTUNG: Das ist wieder thermal-de brogilie Lambda
+                                                              //Nutze richtiges chempot!!!!
   #ifdef DOIPD
   double IPD0,IPD1,IPD2,IPD3,IPD4;
   double z; //DOI after ionization (e.g.=1 for Al0)
@@ -2140,8 +2141,10 @@ int colrad_GetCoeffs(N_Vector y,double It,void *user_data)
   double I_cu=I_sq*It; // for 3-photon-ioniz.
   int fail=0;
 
-  double pow_two_pi_me_kT_hsq_tmp1= pow(two_pi_me_kT_hsq,1.5);
-
+  double pow_two_pi_me_kT_hsq_tmp1= pow(two_pi_me_kT_hsq,1.5); //ACHTUNG: Das ist thermal De-Broglie Lambda
+                                                               //Ich muss das für die rückwärts-raten irgendie 
+                                                               //durch chempot ersetzen sonst pass das net
+                                                               //Ebenso in Saha
 #ifdef MULTIPHOTON
   double twophoton_energy=2.0*planck*LASERFREQ*J2eV;
   double threephoton_energy=3.0*planck*LASERFREQ*J2eV;
