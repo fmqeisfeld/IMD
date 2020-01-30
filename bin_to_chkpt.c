@@ -1,6 +1,8 @@
 // #######################################
 // # ZWECK: Konvertieren von binären output-files, 
 // # generiert mittels mpiio ins imd chkpt-format
+// # anwenden einfach mittels 
+// # bintochkpt inputfile.mpiio outputfile.chkpt
 // #############################################
 
 

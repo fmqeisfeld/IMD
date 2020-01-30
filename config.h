@@ -246,7 +246,7 @@
 *
 ******************************************************************************/
 
-#if defined(MPI) && (MPI_VERSION==2)
+#if defined(MPI) && (MPI_VERSION>=2)
 #define MPI2
 #endif
 

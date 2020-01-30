@@ -1,4 +1,3 @@
-
 /******************************************************************************
 *
 * IMD -- The ITAP Molecular Dynamics Program
@@ -327,20 +326,7 @@ void calc_forces(int steps)
   vir_zx = 0.0;
   nfc++;
 
-// #ifdef TTM
-//   int iglobal,ilocal,jglobal,jlocal,kglobal,klocal;
-//   int j;
-//   for(i=0;i<local_fd_dim.x-1;i++)
-//   {
-//       for(j=0;j<local_fd_dim.y-1;j++)
-//       {
-//           for(k=0;k<local_fd_dim.z-1;k++)
-//           {
-//             l1[i][j][k].natoms=l2[i][j][k].natoms=0;
-//           }
-//       }
-//   }
-// #endif
+
 
   /* clear per atom accumulation variables, also in buffer cells */
   for (k=0; k<nallcells; k++) 
@@ -395,6 +381,9 @@ void calc_forces(int steps)
 
 //MYMOD
 #ifdef TTM
+      // int iglobal,jglobal,kglobal;
+      // int ilocal,jlocal,klocal;
+
       // iglobal = (int)floor(ORT(p,i,X)/fd_h.x);
       // ilocal  = iglobal+1-my_coord.x*(local_fd_dim.x-2);
 
@@ -404,8 +393,8 @@ void calc_forces(int steps)
       // kglobal = (int)floor(ORT(p,i,Z)/fd_h.z);
       // klocal  = kglobal+1-my_coord.z*(local_fd_dim.z-2);
 
-      // l1[ilocal][jlocal][klocal].natoms++;
-      // l2[ilocal][jlocal][klocal].natoms++;
+      // l1[ilocal][jlocal][klocal].neighcount++;
+      // l2[ilocal][jlocal][klocal].neighcount++;
 
       NUMNEIGHS(p,i)=0;
 #endif
@@ -444,6 +433,9 @@ void calc_forces(int steps)
       real   ee = 0.0;
       real   eam_r = 0.0, eam_p = 0.0;
       int    m, it, nb = 0;
+#ifdef TTM
+      int nbttm=0;
+#endif 
       // positon of 1st atom
       d1.x = ORT(p,i,X);
       d1.y = ORT(p,i,Y);
@@ -479,8 +471,9 @@ void calc_forces(int steps)
 #ifdef TTM
 if(r2 <= pair_pot.end[0])
 {        
-  NUMNEIGHS(p,i)++;
+  nbttm++;
   NUMNEIGHS(q,j)++;
+  
 }
 #endif
 //ENDOF MYMOD
@@ -667,6 +660,9 @@ if(r2 <= pair_pot.end[0])
       NBANZ(p,i)    += nb;
 #endif
 
+#ifdef TTM
+NUMNEIGHS(p,i) += nbttm;
+#endif
       n++;
     }//loop over i
   }//loop over k

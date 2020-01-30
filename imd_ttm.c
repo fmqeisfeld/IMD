@@ -57,7 +57,7 @@ void calc_ttm()
 
   
   update_fd();
-  //do_ADV(1.0);
+  do_ADV(1.0);
   do_cell_activation();
 #ifdef COLRAD
   do_colrad(timestep*10.18*1.0e-15);
@@ -354,6 +354,7 @@ node.natoms += p->n; // <-- nach imd_forces_nbl.c verschoben
 
           for (l = 0; l < p->n; l++) //loop over atoms
           {
+            // tot_neighs += NBANZ(p, l);
             tot_neighs += NUMNEIGHS(p, l);
 
 
@@ -415,6 +416,14 @@ node.natoms += p->n; // <-- nach imd_forces_nbl.c verschoben
         if (node.natoms > 0)
         {
           node.dens = node2.dens = (double) tot_neighs / ((double)node.natoms) * atomic_weight / neighvol * 1660.53907; //kg/m^3
+  
+  // if(i_global==17)
+  //  printf("myid:%d,ig:%d, atoms:%d, neighs:%d, cnt:%d, neighs/cnt:%f, dens:%f\n",
+  //           myid,i_global, node.natoms,
+  //           tot_neighs,node.neighcount,
+  //           ((double) tot_neighs)/((double) node.neighcount),
+  //           node.dens);
+
 
 
 if (node.dens == 0) //in step 0...noch keine neigh list?
@@ -424,7 +433,7 @@ if (node.dens == 0) //in step 0...noch keine neigh list?
 
 
 
-node.dens= node2.dens = (double) node.natoms * atomic_weight / fd_vol * 1660.53907;       
+// node.dens= node2.dens = (double) node.natoms * atomic_weight / fd_vol * 1660.53907;       
 
 
           node.vcomx /= tot_mass;
@@ -516,18 +525,18 @@ node.md_temp /= 3.0 * node.natoms;
 
 
   //PLAUSIBILITY EOS CHECK:
-// double echeck= EOS_ee_from_r_te(node.dens, node.temp * 11604.5)*26.9815 * AMU * J2eV;
-// double tcheck = EOS_te_from_r_ee(node.dens, echeck/26.9815/AMU * eV2J) / 11604.5;
-// double tinit=node.temp;
+double echeck= EOS_ee_from_r_te(node.dens, node.temp * 11604.5)*26.9815 * AMU * J2eV;
+double tcheck = EOS_te_from_r_ee(node.dens, echeck/26.9815/AMU * eV2J) / 11604.5;
+double tinit=node.temp;
 
-  // if(ABS(tcheck -tinit) > tinit*0.01) // 1% unterschied
-  // {
-  //   char errstr[255];
+  if(ABS(tcheck -tinit) > tinit*0.01) // 1% unterschied
+  {
+    char errstr[255];
 
-  //   sprintf(errstr,"ERROR: EOS Plausibility check failed, TfromU != Tinit. Tinit:%.4e, TfromU:%.4e\n"
-  //                   "Maybe Interpolation table too sparse or increase tolerance",tinit,tcheck); 
-  //   error(errstr);
-  // }
+    sprintf(errstr,"ERROR: EOS Plausibility check failed, TfromU != Tinit. Tinit:%.4e, TfromU:%.4e\n"
+                    "Maybe Interpolation table too sparse or increase tolerance",tinit,tcheck); 
+    error(errstr);
+  }
   
 
           }
@@ -599,8 +608,8 @@ void do_FILLMESH(void)
           //////////////////////////////////////////////////////////////          
           //                      Wärmekapazität
           //////////////////////////////////////////////////////////////      
-          //node.Ce = EOS_cve_from_r_te(node.dens, node.temp * 11604.5); //Interpol.Tabelle                    
-node.Ce = Cv(node.temp, node.ne);
+          node.Ce = EOS_cve_from_r_te(node.dens, node.temp * 11604.5); //Interpol.Tabelle                    
+// node.Ce = Cv(node.temp, node.ne);
           node2.Ce=node.Ce;
 
 #if DEBUG_LEVEL>0
@@ -1060,11 +1069,6 @@ void init_ttm()
   max_dt_ttm = timestep / ((double) fd_n_timesteps); //nur zu beginn...im weiteren verlauf adaptiv
 
   //neighvol needed for per-atom density calc. only for single-species simulations
-// #ifdef NBL
-//   neighvol = pow(cellsz, 1.5) * 4.0 / 3.0 * M_PI;
-// #else
-//   neighvol = pow(sqrt(pair_pot.end[0]), 3.0) * 4.0 / 3.0 * M_PI;
-// #endif
 neighvol = pow(sqrt(pair_pot.end[0]), 3.0) * 4.0 / 3.0 * M_PI;
 
   /* Check if cell_dim and fd_ext are commensurate */
@@ -1187,8 +1191,7 @@ neighvol = pow(sqrt(pair_pot.end[0]), 3.0) * 4.0 / 3.0 * M_PI;
           node2.dens = node.dens = 0.0;
           node2.natoms = node.natoms = 0;
           node2.natoms_old = node.natoms_old = 0;
-          node2.U = node.U = 0.0;
-         
+          node2.U = node.U = 0.0;               
 #ifdef FDTD
           int bar;
           for (bar = 0; bar < 6; bar++)
@@ -1281,8 +1284,8 @@ neighvol = pow(sqrt(pair_pot.end[0]), 3.0) * 4.0 / 3.0 * M_PI;
   // read_bc_interp(&QfromT_interp,"EOS_QfromT.txt");
   // read_bc_interp(&CfromT_interp,"EOS_CfromT.txt"); //für CFL maxdt
 
-// nn_read_table(&intp_cve_from_r_te, "EOS_cve_from_r_te.txt");
-// nn_read_table(&intp_ee_from_r_tesqrt, "EOS_ee_from_r_tesqrt.txt");
+nn_read_table(&intp_cve_from_r_te, "EOS_cve_from_r_te.txt");
+nn_read_table(&intp_ee_from_r_tesqrt, "EOS_ee_from_r_tesqrt.txt");
 
   //read_tricub_interp(&kappa_interp,"kappa.txt"); //Hardcoding ist schneller
   //Lese Drude-Lorentz Interpolationstabellen

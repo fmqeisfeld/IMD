@@ -2,8 +2,8 @@
 
 # NORMAL
 # make clean
-# make -j8 imd_mpi_eam_ttm_tmm_nbl_colrad
-# exit 1
+make -j8 imd_mpi_eam_ttm_tmm_nbl
+exit 1
 
 # #CUSTOM MAKE MIT OPENMP ABER NUR FUER COLRAD
  # optflags=" -funroll-loops -march=corei7-avx -mtune=corei7-avx -mavx2 -ftree-vectorize -m64 -ffast-math"

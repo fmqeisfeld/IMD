@@ -15,8 +15,8 @@
 ******************************************************************************/
 
 /******************************************************************************
-* $Revision: 1.12 $
-* $Date: 2006/08/07 15:52:22 $
+* $Revision$
+* $Date$
 ******************************************************************************/
 
 #define INDEXED_ACCESS
@@ -35,9 +35,7 @@
 
 void fix_cells(void)
 {
-  //printf("proc:%d,steps:%d entered fix_cells\n",myid,steps);
-
-  int i,j,k,l,clone,to_cpu;
+  int i,j,k,l,clone,to_cpu, ii;
   minicell *p, *q;
   ivektor coord, lcoord;
   msgbuf *buf;
@@ -55,17 +53,23 @@ void fix_cells(void)
       for (k=cellmin.z; k < cellmax.z; ++k) {
 
 	p = PTR_3D_V(cell_array, i, j, k, cell_dim);
+#ifdef LOADBALANCE
+	/* Only check content in real cells */
+	if (p->lb_cell_type != LB_REAL_CELL) continue;
+#endif
 	/* loop over atoms in cell */
 	l=0;
 	while( l<p->n ) {
-          coord  = cell_coord( ORT(p,l,X), ORT(p,l,Y), ORT(p,l,Z) );
+
+    coord  = cell_coord( ORT(p,l,X), ORT(p,l,Y), ORT(p,l,Z) );
 	  lcoord = local_cell_coord( coord );
+
 #ifdef FILTER
 
-	  //if (ORT(p,l,X) < filter_min_x || ORT(p,l,X) > filter_max_x)
+    //if (ORT(p,l,X) < filter_min_x || ORT(p,l,X) > filter_max_x)
     if(FILTERME(p,l)==1)
-	  {
-//printf("\n WARNING myid:%d,steps:%d,deleting nr:%d, x:%f, y:%f, z:%f \n",myid,steps,NUMMER(p,l),ORT(p,l,X),ORT(p,l,Y),ORT(p,l,Z));	    
+    {
+//printf("\n WARNING myid:%d,steps:%d,deleting nr:%d, x:%f, y:%f, z:%f \n",myid,steps,NUMMER(p,l),ORT(p,l,X),ORT(p,l,Y),ORT(p,l,Z));      
             to_cpu = cpu_coord(coord);
             buf    = NULL;
               buf = &dump_buf;
@@ -77,19 +81,37 @@ void fix_cells(void)
 
             if (buf != NULL) {
               copy_one_atom( buf, to_cpu, p, l, 1);
-#ifdef CLONE
+  #ifdef CLONE
               if (l < p->n-nclones)
                 for (clone=1; clone<nclones; clone++)
                   copy_one_atom( buf, to_cpu, p, l+clone, 1);
               else 
                 for (clone=1; clone<nclones; clone++)
                   copy_one_atom( buf, to_cpu, p, l, 1);
-#endif  //CLONE
+  #endif  //CLONE
             }
-	  }
-	  else //if DELME...
-	  {
+    }
+    else //if DELME...
+    {
 #endif  //FILTER
+
+
+
+#ifdef LOADBALANCE
+  	/* Wrap around pbcs if necessary to get the correct index using the loadbalance scheme*/
+   if (cpu_dim.x >= 2 && pbc_dirs.x == 1) {
+		if (lcoord.x >= global_cell_dim.x) lcoord.x -= global_cell_dim.x;
+		if (lcoord.x < 0) lcoord.x += global_cell_dim.x;
+	}
+	if (cpu_dim.y >= 2 && pbc_dirs.y == 1) {
+		if (lcoord.y >= global_cell_dim.y) lcoord.y -= global_cell_dim.y;
+		if (lcoord.y < 0) lcoord.y += global_cell_dim.y;
+	}
+	if (cpu_dim.z >= 2 && pbc_dirs.z == 1) {
+		if (lcoord.z >= global_cell_dim.z) lcoord.z -= global_cell_dim.z;
+		if (lcoord.z < 0) lcoord.z += global_cell_dim.z;
+	}
+#endif
 
  	  /* see if atom is in wrong cell */
 	  if ((lcoord.x == i) && (lcoord.y == j) && (lcoord.z == k)) {
@@ -97,7 +119,17 @@ void fix_cells(void)
           } 
           else {
 
+#ifdef LOADBALANCE
+        	  if (lcoord.x< 0 || lcoord.x >= cell_dim.x ||
+        			  lcoord.y < 0 || lcoord.y >= cell_dim.y ||
+        			  lcoord.z < 0 || lcoord.z >= cell_dim.z ||
+        			  (PTR_VV(cell_array,lcoord,cell_dim))->lb_cell_type == LB_EMPTY_CELL) {
+        		  error("LB: Illegal cell accessed, Atom jumped multiple CPUs");
+        	  }
+        	  to_cpu = (PTR_VV(cell_array,lcoord,cell_dim))->lb_cpu_affinity;
+#else
             to_cpu = cpu_coord(coord);
+#endif
             buf    = NULL;
 
             /* atom is on my cpu */
@@ -114,6 +146,11 @@ void fix_cells(void)
 #endif
             }
 #ifdef MPI
+#ifdef LOADBALANCE
+	    else {
+			buf = &lb_send_buf[(PTR_VV(cell_array,lcoord,cell_dim))->lb_neighbor_index];
+	    }
+#else
             /* west */
             else if ((cpu_dim.x>1) && 
                ((to_cpu==nbwest) || (to_cpu==nbnw)  || (to_cpu==nbws) ||
@@ -153,16 +190,7 @@ void fix_cells(void)
             }
             
             else {
-#if defined(SHOCK)||defined(MULTIJUMP)
-
-          // MY MOD: FD-Cell infos
-              int fd_i,fd_j,fd_k;
-
-              fd_i=p->fd_cell_idx.x;
-              fd_j=p->fd_cell_idx.y;
-              fd_k=p->fd_cell_idx.z;
-
-
+#ifdef SHOCK
               /* remove atom from simulation */
               buf = &dump_buf;
               dump_buf.n = 0;
@@ -171,28 +199,11 @@ void fix_cells(void)
               num_sort [ SORTE(p,l)] -= nclones;
               num_vsort[VSORTE(p,l)] -= nclones;
               warning("Atom jumped multiple CPUs");
-	      //printf("Atom %d at %f %f %f with speed %f %f %f removed\n",NUMMER(p,l),
-	 	//ORT(p,l,X), ORT(p,l,Y), ORT(p,l,Z), IMPULS(p,l,X) / MASSE(p,l),
-		//IMPULS(p,l,Y) / MASSE(p,l), IMPULS(p,l,Z) / MASSE(p,l) );
-              printf("proc:%d, steps:%d,Atom %d at %f %f %f removed,laser-active:%d,temp:%f,md-temp:%f,natoms:%d\n",
-                myid,steps,l,ORT(p,l,X), ORT(p,l,Y), ORT(p,l,Z),laser_active,l1[fd_i][fd_j][fd_k].temp,l1[fd_i][fd_j][fd_k].md_temp,l1[fd_i][fd_j][fd_k].natoms );
-
-
-#elif defined(VCLAMP)
-	      printf("\n\nAtom %d in cell %d %d %d at %f %f %f jumped multiple CPUs\n"
-		"parameters(speed, mass): %f %f %f %f\n",
-		l, i, j, k, ORT(p,l,X), ORT(p,l,Y), ORT(p,l,Z),
-		IMPULS(p,l,X) / MASSE(p,l), IMPULS(p,l,Y) / MASSE(p,l),
-		IMPULS(p,l,Z) / MASSE(p,l), MASSE(p,l) );
-              error("Atom jumped multiple CPUs");
 #else
-              printf("ERROR on cpu:%d at step:%d: Atom %d jumped multiple CPUs. px:%f,py:%f,pz:%f,fx:%f,fy:%f,fz:%f,x:%f,y:%f,z:%f\n",
-		      myid,steps,NUMMER(p,i),
-		     IMPULS(p,i,X),IMPULS(p,i,Y),IMPULS(p,i,Z),KRAFT(p,i,X),KRAFT(p,i,Y),KRAFT(p,i,Z),
-		     ORT(p,i,X),ORT(p,i,Y),ORT(p,i,Z));
-	      error("Atom jumped multiple CPUs");
+              error("Atom jumped multiple CPUs");
 #endif
 	    }
+#endif /* not LOADBALANCE*/
 
             if (buf != NULL) {
               copy_one_atom( buf, to_cpu, p, l, 1);
@@ -206,22 +217,17 @@ void fix_cells(void)
 #endif
             }
 #ifdef FILTER
-	  } //if DELME ... else...
+    } //if DELME ... else...
 #endif
+
 #endif /* MPI */
-	  } //for cellmin.x
-	} // for cellmin.y
-      } // for cellmin.z
-
-    //printf("proc:%d,steps:%d done loop(fix cells)\n",myid,steps);
-
+	  }
+	}
+      }
 
 #ifdef MPI
   /* send atoms to neighbbour CPUs */
-  //printf("proc:%d,steps:%d start send atoms (fix cells)\n",myid,steps);
   send_atoms();
-  //printf("proc:%d,steps:%d start done send atoms (fix cells)\n",myid,steps);
-
 #endif
 
 #ifdef NBLIST
@@ -232,6 +238,38 @@ void fix_cells(void)
 }
 
 #ifdef MPI
+
+#ifdef LOADBALANCE
+void send_atoms()
+{
+	int i;
+	MPI_Status stat;
+
+	for (i = 0; i < lb_nTotalComms; ++i) {
+		/*Send data away*/
+		isend_buf(&lb_send_buf[i], lb_commIndexToCpu[i], &lb_req_send[i]);
+		lb_requests[2*i] = lb_req_send[i];
+		lb_request_indices[2*i] = -1; /* Indicates no processing required */
+		/*Start receiving data*/
+		irecv_buf(&lb_recv_buf[i], lb_commIndexToCpu[i], &lb_req_recv[i]);
+		lb_requests[2*i+1] = lb_req_recv[i];
+		lb_request_indices[2*i+1] = i;
+	}
+
+	/*Receive and process data as soon as something is available*/
+	for (i = 2*lb_nTotalComms; i>0; i--){
+		int finished;
+		MPI_Waitany(i, lb_requests, &finished, &stat);
+		int ind = lb_request_indices[finished];
+		if (ind != -1){
+			MPI_Get_count(&stat, REAL, &lb_recv_buf[ind].n);
+			process_buffer( &lb_recv_buf[ind]);
+		}
+		lb_requests[finished] = lb_requests[i-1];
+		lb_request_indices[finished] = lb_request_indices[i-1];
+	}
+}
+#else
 
 #ifdef SR
 
@@ -436,5 +474,7 @@ void send_atoms()
 }
 
 #endif /* not SR */
+
+#endif /* not LOADBALANCE*/
 
 #endif /* MPI */

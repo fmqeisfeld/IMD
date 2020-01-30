@@ -197,6 +197,13 @@ int init_nrb() //nrb_eps=Abstands-toleranz in Angstrom,alat=Lattice const.
     nrb_yhi=ymaxglobal-nrb_alat/4; //-nrb_alat/4.0; 
     nrb_ylo=yminglobal+nrb_alat/4; //+nrb_alat/4.0;
 
+//HOTFIX fuer 1D    
+if(pbc_dirs.y==1)
+{
+  nrb_yhi=10e9;
+  nrb_ylo=-10e9;
+}
+  
     if(myid==0) 
     {
      printf("* nrb_xhi:%.2f, nrb_yhi:%.2f, nrb_ylo:%.2f\n", nrb_xhi,nrb_yhi,nrb_ylo);

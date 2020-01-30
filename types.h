@@ -459,7 +459,6 @@ typedef struct
   real dens;
   real fd_k,fd_g;
   real Z;
-
   //advection
   int flux[8]; //<--23.11.18: Mit dem neuen advection solver brauche ich die atomzahlen nicht
   //real slx,sly,slz; // dafuer aber flux-interface-slopes
@@ -486,7 +485,8 @@ typedef struct
   N_Vector y; //<-enthält: Te,Ti,ne,c0,c1,c2,c3,....
   real P_EE,P_EI,P_MPI2,P_MPI3,P_RR; //Leistungsdichten für TTM-OUTPUT
 #endif
-} ttm_Element;
+
+} ttm_Element;   //ACHTUNG: letztes Element in ttm_Element muss vom typ real sein!
 
 //MYMOD
 //INTERPOL STUFF
