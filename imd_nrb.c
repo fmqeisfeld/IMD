@@ -690,9 +690,9 @@ if(pbc_dirs.y==1)
 							       //was in den meisten fällen jedoch keinen sinn macht!
 
 #ifdef LOADBALANCE
-sync_cells_direct(copy_nrb_max,pack_nrb,unpack_nrb_max,0); //acumm. results
+sync_cells_direct(copy_nrb_max,pack_nrb,unpack_nrb_max,0); //acumm. results //ACHTUNG: sync_cells macht alles kaputt --> NRB und LB nicht kompatibel
 #else
-nrb_send_cells(copy_nrb_max,pack_nrb,unpack_nrb_max); //acumm. results
+nrb_send_cells(copy_nrb_max,pack_nrb,unpack_nrb_max); //acumm. results 
 #endif
     //nrb_inverse_send_cells(copy_nrb_max,pack_nrb,unpack_nrb_max);
 

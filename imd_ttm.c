@@ -433,7 +433,7 @@ if (node.dens == 0) //in step 0...noch keine neigh list?
 
 
 
-// node.dens= node2.dens = (double) node.natoms * atomic_weight / fd_vol * 1660.53907;       
+node.dens= node2.dens = (double) node.natoms * atomic_weight / fd_vol * 1660.53907;       
 
 
           node.vcomx /= tot_mass;
@@ -3148,7 +3148,7 @@ void ttm_create_mpi_datatypes(void)
     MPI_Aint* displs;
     alloc1darr(MPI_Aint, displs, blockcountselements);
 
-    for(i=0;i<blockcountselements-1;i++)
+    for(i=0;i<blockcountselements;i++)
       blockcounts[i]=1;    
 
     //erstmal die blockcount-elemente besetzen, die immer benutzt werden

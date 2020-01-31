@@ -429,7 +429,11 @@ void read_pot_table2(pot_table_t *pt, int ncols, char *filename,
   for (i=0; i<ncols; i++) {
     for (k=0; k<pt->len[i]; k++) {
       if (1 != fscanf(infile,FORMAT1, &val)) {
-        if (0==myid) error_str("wrong format in file %s.", filename);
+        if (0==myid) 
+          {
+            printf("expecting %d lines for column %d\n",pt->len[i],i);
+            error_str("wrong format in file %s.", filename);
+          }
       }
       *PTR_2D(pt->table,k,i,pt->maxsteps,ncols) = val;
     }
