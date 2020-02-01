@@ -528,6 +528,10 @@ typedef struct {
                        //viel schneller als natural
 } nn_interp;  
 
+
+//MYMOD : virtual lattice stuff
+typedef struct {int val; int rank;} vlatmax;
+//ENDOF MYMOD
 #endif /*TTM*/
 
 /* data structure to store a potential table or a function table */

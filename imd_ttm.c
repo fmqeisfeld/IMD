@@ -8,6 +8,7 @@
 #define ADVMODE 2  // 0=NO ADVECTION, 1=GODUNOV SOLVER VIA VCOM, 2=DISCRETE FLUX SOLVER (PREDICT ATOMIC FLUXES)
 //#define ADVMODE2d  // FALLS y dim offen sein soll, müssen atomic-fluxes auch über kanten kommmuniziert werden
 
+#define VLATTICE
 #define DEBUG_LEVEL 1
 
 #include <sys/time.h>
@@ -288,6 +289,10 @@ void update_fd()
     dirichlet_maxx_local[j] = -1;
 #endif
 
+#ifdef VLATTICE
+  last_active_cell_local.val=-5000;
+  last_active_cell_local.rank=myid;
+#endif
 #if ADVMODE==2
 // *********************************************************
 // Clear edges & corners of fluxes &temp (erstmal nur 2D)  *
@@ -415,15 +420,7 @@ node.natoms += p->n; // <-- nach imd_forces_nbl.c verschoben
         //COMPUTE DENSITY OF TTM-CELLS FROM NEIGHBORS PER ATOM in kg/m^3
         if (node.natoms > 0)
         {
-          node.dens = node2.dens = (double) tot_neighs / ((double)node.natoms) * atomic_weight / neighvol * 1660.53907; //kg/m^3
-  
-  // if(i_global==17)
-  //  printf("myid:%d,ig:%d, atoms:%d, neighs:%d, cnt:%d, neighs/cnt:%f, dens:%f\n",
-  //           myid,i_global, node.natoms,
-  //           tot_neighs,node.neighcount,
-  //           ((double) tot_neighs)/((double) node.neighcount),
-  //           node.dens);
-
+          node.dens = node2.dens = (double) tot_neighs / ((double)node.natoms) * atomic_weight / neighvol * 1660.53907; //kg/m^3          
 
 
 if (node.dens == 0) //in step 0...noch keine neigh list?
@@ -487,7 +484,15 @@ node.dens= node2.dens = (double) node.natoms * atomic_weight / fd_vol * 1660.539
         if (node.natoms >= fd_min_atoms)
         {
 
-
+#ifdef VLATTICE
+          //hier wird nicht direkt die letzte aktive zelle gesucht sondern,
+          //die Zelle "N-Pufferzellen" links davon sowie der zugehörige proc
+          //diese wird nach Allreduce zur letzten aktiven Zelle gemacht
+          //und der entsprechende proc kümmert sich in diffusion-loop
+          //um die kopplung
+          if( i- vlat_buffer > 0)
+            last_active_cell_local.val=MAX(last_active_cell_local.val,i_global- vlat_buffer);
+#endif          
 node.md_temp /= 3.0 * node.natoms;          
 //node.md_temp/=3 * node.dens*fd_vol*1e-30/26.9815/AMU;          //SMOOTH TEMP?
 
@@ -553,6 +558,38 @@ double tinit=node.temp;
   MPI_Allreduce(&dirichlet_maxy_local[0], &dirichlet_maxy_global[0], global_fd_dim.x, MPI_INT, MPI_MAX, cpugrid);
   MPI_Allreduce(&dirichlet_miny_local[0], &dirichlet_miny_global[0], global_fd_dim.x, MPI_INT, MPI_MIN, cpugrid);
   MPI_Allreduce(&dirichlet_maxx_local[0], &dirichlet_maxx_global[0], global_fd_dim.y, MPI_INT, MPI_MAX, cpugrid);
+#endif
+
+#ifdef VLATTICE
+  MPI_Status vlatstatus;  
+  MPI_Allreduce(&last_active_cell_local, &last_active_cell_global, 1, MPI_2INT, MPI_MAXLOC, cpugrid);
+  cur_vlattice_proc=last_active_cell_global.rank;
+
+printf("oldvlat:%d,nuvlat:%d, lastcell:%d\n",old_vlattice_proc, cur_vlattice_proc, last_active_cell_global.val);
+  
+  
+  if(cur_vlattice_proc != old_vlattice_proc) //last-filled cell is now on other proc --> send to new proc
+  {
+    //MPI_Bcast(&vlattice1[0], vlattice_dim, mpi_element2, last_active_cell_global.rank, cpugrid);       
+    if(steps>0) //Beim 0-ten step macht das keinen sinn!
+       MPI_Sendrecv(&vlattice1[0], vlattice_dim, mpi_element2, cur_vlattice_proc, 101010, 
+                    &vlattice1[0], vlattice_dim, mpi_element2, old_vlattice_proc, 101010, cpugrid, &vlatstatus);       
+       //MPI_Sendrecv(const void *sendbuf, int sendcount, MPI_Datatype sendtype, int dest, int sendtag, 
+       // void *recvbuf, int recvcount, MPI_Datatype recvtype, int source, int recvtag, MPI_Comm comm, MPI_Status *status)
+  }
+
+
+  old_vlattice_proc=cur_vlattice_proc;
+
+  //Jetzt müssen noch die zellen deaktiviert werden, die als "puffer" dienen
+  for (i = 1; i < local_fd_dim.x - 1; ++i)
+  {
+    i_global =  ((i - 1) + my_coord.x * (local_fd_dim.x - 2));
+    if(i_global > last_active_cell_global.val)
+      l1[i][1][1].natoms=l2[i][1][1].natoms=-1;  //So erkenne ich deaktivierte Zellen
+  }
+  //Für weitere Verwendung wird last_active_cell umgerechnet um den puffer nicht jedes mal explizit abziehen zu müssen
+
 #endif
 
 }
@@ -693,6 +730,27 @@ void do_FILLMESH(void)
       } // for k ....
     }   // for j
   }     // for i
+
+#ifdef VLATTICE
+        if(last_active_cell_global.rank==myid) // I own last active cell        
+        {
+          
+          for(i=0;i<vlattice_dim;i++)
+          {
+            vlattice1[i].Z= MeanCharge(vlattice1[i].temp*11604.5, vlattice1[i].dens, atomic_charge, atomic_weight,i,1,1);
+            vlattice1[i].ne= vlattice1[i].Z * vlattice1[i].dens / (atomic_weight * AMU);
+            vlattice1[i].fd_k = getKappa(vlattice1[i].temp,vlattice1[i].md_temp, vlattice1[i].ne, vlattice1[i].Z); 
+            vlattice1[i].Ce = EOS_cve_from_r_te(vlattice1[i].dens, vlattice1[i].temp * 11604.5);
+            vlattice1[i].fd_g= getGamma(vlattice1[i].temp, vlattice1[i].md_temp, vlattice1[i].ne, vlattice1[i].Z); 
+
+            vlattice2[i].Z=vlattice1[i].Z;
+            vlattice2[i].ne=vlattice1[i].ne;
+            vlattice2[i].fd_k=vlattice1[i].fd_k;
+            vlattice2[i].fd_g=vlattice1[i].fd_g;
+          }
+        }
+#endif    
+
 
 #if DEBUG_LEVEL>1
   printf("steps:%d,proc:%d,FILLMESH complete\n", steps, myid);
@@ -1069,7 +1127,7 @@ void init_ttm()
   max_dt_ttm = timestep / ((double) fd_n_timesteps); //nur zu beginn...im weiteren verlauf adaptiv
 
   //neighvol needed for per-atom density calc. only for single-species simulations
-neighvol = pow(sqrt(pair_pot.end[0]), 3.0) * 4.0 / 3.0 * M_PI;
+  neighvol = pow(sqrt(pair_pot.end[0]), 3.0) * 4.0 / 3.0 * M_PI;
 
   /* Check if cell_dim and fd_ext are commensurate */
   if ( fd_one_d == 1 || fd_one_d == 0 )
@@ -1118,10 +1176,24 @@ neighvol = pow(sqrt(pair_pot.end[0]), 3.0) * 4.0 / 3.0 * M_PI;
   /* Allocate memory for two lattices */
   lattice1 = (ttm_Element*) malloc(
                (local_fd_dim.x) * (local_fd_dim.y) * (local_fd_dim.z) * sizeof(ttm_Element));
+
   lattice2 = (ttm_Element*) malloc(
                (local_fd_dim.x) * (local_fd_dim.y) * (local_fd_dim.z) * sizeof(ttm_Element));
+
   l1 = (ttm_Element***) malloc( local_fd_dim.x * sizeof(ttm_Element**) );
   l2 = (ttm_Element***) malloc( local_fd_dim.x * sizeof(ttm_Element**) );
+
+  #ifdef VLATTICE //NUR 1D!!! (global_fd_dim.y und global_fd_dim.z=1)
+  vlattice1= (ttm_Element*) malloc(sizeof(ttm_Element)* vlattice_dim);
+  vlattice2= (ttm_Element*) malloc(sizeof(ttm_Element)* vlattice_dim);
+  for(i=0;i<vlattice_dim;i++)
+  {
+    vlattice1[i].dens=vlattice2[i].dens=vlatdens;
+    vlattice1[i].temp=vlattice2[i].temp=0.0258;
+    vlattice1[i].md_temp=vlattice2[i].md_temp=0.0258;    
+  }
+  #endif
+
   for (i = 0; i < local_fd_dim.x; i++)
   {
     l1[i] = (ttm_Element**) malloc( local_fd_dim.y * sizeof(ttm_Element*) );
@@ -1683,6 +1755,7 @@ void do_DIFF(double tau)
   ///////////////////////////
   for (i = 1; i < local_fd_dim.x - 1; i++)
   {
+     
     i_global =  ((i - 1) + my_coord.x * (local_fd_dim.x - 2));
     for (j = 1; j < local_fd_dim.y - 1; j++)
     {
@@ -1713,7 +1786,7 @@ void do_DIFF(double tau)
         if (l1[i][j + 1][k].natoms < fd_min_atoms) ymax = j; else  ymax = j + 1;
         if (l1[i][j][k - 1].natoms < fd_min_atoms) zmin = k; else zmin = k - 1;
         if (l1[i][j][k + 1].natoms < fd_min_atoms)  zmax = k; else zmax = k + 1;
-
+   
         xmaxTe = l1[xmax][j][k].temp;
         xminTe = l1[xmin][j][k].temp;
         ymaxTe = l1[i][ymax][k].temp;
@@ -1727,6 +1800,14 @@ void do_DIFF(double tau)
         ymink = l1[i][ymin][k].fd_k;
         zmaxk = l1[i][j][zmax].fd_k;
         zmink = l1[i][j][zmin].fd_k;
+
+#ifdef VLATTICE
+        if(last_active_cell_global.rank==myid) // I own last active cell        
+        {
+          xmaxTe = vlattice1[0].temp;
+          xmaxk  = vlattice1[0].fd_k;
+        }
+#endif          
 
         /////////////////////////////////////////
         //dirichlet cases for outermost cells  //
@@ -1860,10 +1941,52 @@ void do_DIFF(double tau)
     } // for j
   } //for i
 
+
+
+#ifdef VLATTICE
+        if(last_active_cell_global.rank==myid) // I own last active cell        
+        {
+
+          int ilocal= last_active_cell_global.val+1-my_coord.x*(local_fd_dim.x-2);
+          xminTe = l1[ilocal][1][1].temp;
+          xmink  = l1[ilocal][1][1].fd_k;
+          // AUS GEOS: 2.665655433e+03 3.000000000e+02 8.589449886e+02           
+          double Ci=8.589449886e+02;
+          Ci *= vlatdens; // J/(K*kg) --> J/K/m^3
+          Ci *= 11604.5; // -->J/eV/m^3
+          Ci *= 1e-30; // --> J/eV/Angs^3
+          Ci *= J2eV; // --> eV/eV/A^3
+          for(i=0;i<vlattice_dim;i++)
+          {
+            // Te-diffusion
+            Ce = vlattice1[i].Ce;                        
+            vlattice2[i].temp=tau/Ce*
+            //first diffusion terms
+            ( 
+              // dK/dx * d^2 T/dx^2
+              ((vlattice1[i].fd_k+xmaxk)/2 * (xmaxTe- vlattice1[i].temp)*invxsq)
+             -((vlattice1[i].fd_k+xmink)/2 * (vlattice1[i].temp-xminTe)*invxsq)
+            
+              //now coupling+source term
+              -vlattice1[i].fd_g*(vlattice1[i].temp- vlattice1[i].md_temp)
+            ) +vlattice1[i].temp;            
+
+            //lattice
+            double dT=tau/Ci*vlattice1[i].fd_g*(vlattice1[i].temp- vlattice1[i].md_temp);
+            vlattice2[i].md_temp=vlattice1[i].md_temp + dT;          
+          }
+        }
+#endif   
+
+
   /* take care - l1 must always be the updated lattice */
   l3 = l1;
   l1 = l2;
   l2 = l3;
+
+  vlattice3=vlattice1;
+  vlattice1=vlattice2;
+  vlattice2=vlattice3;
 
 #if DEBUG_LEVEL>1
 // if(DEBUG_LEVEL>0)
@@ -2019,6 +2142,25 @@ void ttm_writeout(int number)
   assert(nlocal == n / num_cpus);
 #endif
 
+
+#ifdef VLATTICE
+    MPI_Status vlatstatus;
+    if(steps>0)
+    {
+      if(myid==cur_vlattice_proc)
+      {
+        MPI_Send(&vlattice1[0], vlattice_dim, mpi_element2, 0, 101011, cpugrid);
+      }
+
+      if(myid==0)
+      {
+        MPI_Recv(&vlattice1[0], vlattice_dim, mpi_element2, cur_vlattice_proc, 101011, cpugrid, &vlatstatus);
+      }        
+       // MPI_Sendrecv(&vlattice1[0], vlattice_dim, mpi_element2, 0, 101011, 
+       //              &vlattice1[0], vlattice_dim, mpi_element2, cur_vlattice_proc, 101011, cpugrid, &vlatstatus);            
+    }
+#endif 
+
 #ifdef MPI2
   MPI_Alloc_mem ( nlocal * sizeof(ttm_Element), MPI_INFO_NULL, &llocal );
 #else
@@ -2040,6 +2182,7 @@ void ttm_writeout(int number)
   }
 
 #ifdef MPI
+
   if (myid == 0)
   {
 #ifdef MPI2
@@ -2058,6 +2201,7 @@ void ttm_writeout(int number)
 #else /* no MPI */
   lglobal = llocal;
 #endif /* MPI */
+  
 
   if (myid == 0)
   {
@@ -2116,7 +2260,7 @@ void ttm_writeout(int number)
                   lglobal[index].fd_k, lglobal[index].fd_g,
                   lglobal[index].Z, lglobal[index].proc, lglobal[index].Ce);
 
-#ifdef FDTF
+#ifdef FDTD
           fprintf(outfile, " %e %e %e %e %e %e %e %e %e %e",
                   lglobal[index].Ezx, lglobal[index].Ezy, lglobal[index].Hx, lglobal[index].Hy,
                   lglobal[index].sigmax, lglobal[index].sigmay,
@@ -2131,6 +2275,31 @@ void ttm_writeout(int number)
         }
       }
     }
+
+#ifdef VLATTICE
+    for(i=0;i<vlattice_dim;i++)
+    {
+
+          fprintf(outfile, "%d %d %d %d %e %e %e %e %e %e %e %e %e %e %e %e %d %f",                  
+                  i + last_active_cell_global.val+1, 0, 0, 
+                  -2, //daran erkenne ich virtual-lattice im output file                  
+                  vlattice1[i].temp,
+                  vlattice1[i].md_temp,
+                  0.0, //u
+                  0.0, //xi
+                  0.0, //source
+                  vlatdens,
+                  0.0,0.0,0.0, //vcom's
+                  vlattice1[i].fd_k,
+                  vlattice1[i].fd_g,
+                  vlattice1[i].Z,
+                  last_active_cell_global.rank,
+                  vlattice1[i].Ce);
+          fprintf(outfile,"\n");
+    }
+#endif 
+
+
     fclose(outfile);
   }
 
