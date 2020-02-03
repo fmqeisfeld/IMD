@@ -1,4 +1,5 @@
 #include "imd.h"
+#include <gsl/gsl_integration.h>
 
 
 // ***************************************************
@@ -11,7 +12,7 @@
 
 #define USEFLOAT  // hauptsächlich in der funktion genexptint. Profiling zeigte, dass
                   // hier die meiste zeit verbraucht wird -> float verdoppelt performance
-#define OMP
+//#define OMP
 #define LAPACK
 //#define MULTIPHOTON
 // #define SPONT  //<-- spontante emission, Kaum effekt 
@@ -41,6 +42,7 @@ double fak(double t, double x, double j,double s); //aux. function for genexpint
 double genexpint(double x,double ss,double j);
 #endif
 double ExpInt(double x);        //gsl hat keine float-variante für expint
+double chempot(double ne,double Te);
 
 
 const int MAX_LINE_LENGTH=3000; //wird von colrad_read benuthzt
@@ -62,6 +64,7 @@ const double planck=6.62607004E-34; // J/s
 const double bohr_radius=0.52917721067E-10; // m
 const int MAXLINE = 255;
 const double  pi=3.141592653589793;
+const double E_ion_H=13.6; // eV
 
 const double colrad_tequi=1e-3;//TEST// 1e-12; //bei initial equi ohne Temperatur-variation erst einmal 
                                 //die Saha-besetzungsdichten equilibrieren
@@ -78,9 +81,30 @@ int num_threads;
 //const double  ECHARGE=1.60217662e-19;  // C
 //const double  AMU=1.66053904020e-27;   // atomic mass unit
 
+// ******************************************************************************
+// *                CROSS SECTION INTEGRATION STUFF
+// ******************************************************************************
+
+gsl_integration_workspace * winteg_inner=NULL;
+gsl_integration_workspace * winteg_outer=NULL;
+
+struct my_f_params { double ne; double T;double mu; double E;double DeltaE; double (*fun_ptr)(double,double); };
+struct my_f_params fparams_inner; //For inner integrand
+struct my_f_params fparams_outer; //outer integrand
+
+double inner_integrand_ionization(double x, void *p); // integrate along E'
+double outer_integrand_ionization(double x,void *p);  // integrate along E
+double double_integral_ionization(double ne,double T, double mu, double DeltaE); //evaluates double integral
+
+const double integ_reltol  =1e-7;
+const int    integ_meshdim =1000;
+// double integrand_cross_section (double x, void * params);
+// double cross_section_ionization(double E,double DeltaE);
 
 
-
+// *********************************************************
+//             CVODE-STRUCT FOR SOLVER PARAMS
+// *********************************************************
 typedef struct {
   realtype It; //Intesity
   realtype IPD0,IPD1,IPD2,IPD3,IPD4;
@@ -257,6 +281,9 @@ if(myid==0)
 // *********************************************************
 void colrad_init(void)
 {
+  winteg_inner= gsl_integration_workspace_alloc (integ_meshdim); //Integration workspace allocation  
+  winteg_outer= gsl_integration_workspace_alloc (integ_meshdim); //Integration workspace allocation  
+
 	HBAR=planck/2.0/pi;
 	LASERFREQ=LIGHTSPEED/lambda;
 	SUNMatrix A;
@@ -2151,6 +2178,13 @@ int colrad_GetCoeffs(N_Vector y,double It,void *user_data)
   double nu_div_hnu_sq=LASERFREQ/pow(planck*LASERFREQ,2.0);
   double nu_div_nu_div_hnu_cub=LASERFREQ/LASERFREQ/pow(planck*LASERFREQ,3.0);
 #endif
+
+
+  double mu=chempot(ne,Te);
+  
+
+
+
   //PREZERO RATE-COEFFS CODEBLOCK 
   {
     //pre-zero k_EE's
@@ -2786,6 +2820,7 @@ if(DeltaE <0 )
       a=DeltaE/kbTe;
       expint=ExpInt(a);
 
+
 if(expint==-1)
 #ifndef OMP
         return -1;
@@ -2797,6 +2832,9 @@ if(expint==-1)
       I_1=EXPR(-a)/a - expint;
       I_2=I_1*log54_beta_i+expint/a-G2;
       k_EI_z1_z2[i][j]=v_e*four_pi_a0_sq*alpha_i*E_ion_H_div_kTe_sq*I_2;
+
+double vgl=(ne,Te, mu, DeltaE*eV2J);
+printf("kei:%.4e,vgl:%.4e\n",k_EI_z1_z2[i][j],vgl);
 
 #ifdef MULTIPHOTON
       double dE_SI=DeltaE*eV2J; 
@@ -2824,6 +2862,10 @@ if(expint==-1)
       // **************
       if(DeltaE>0)
       {
+
+
+// printf("kei:%.4e, integ:%.4e\n", k_EI_z1_z2[i][j], integ_result);
+
         if(expint > 0 )
         {
           k_MPI_z2_z1[i][j][0]=v_e*k_RR_fact1*4.0*k_RR_fact2*pow((DeltaE)/STATES_z2[j][2],1.5)*expint*EXPR(a);          
@@ -3379,7 +3421,9 @@ double EinsteinCoeff(double n1,double n2,double g2,double DeltaE)
   */
   return A21;
 }
-
+// ********************************************************************
+// * WRITE COLRAD CONCENTRATIONS TO FILE FOR RESTART
+// ********************************************************************
 int colrad_write(int number)
 {
     FILE *outfile;
@@ -3414,6 +3458,9 @@ int colrad_write(int number)
   return 0; //alles ok
 }
 
+// ********************************************************************
+// * READ COLRAD CONCENTRATIONS FOR RESTART
+// ********************************************************************
 int colrad_read(int number)
 {
   FILE *infile;
@@ -3450,10 +3497,7 @@ int colrad_read(int number)
             sprintf(errstr,"Error Reading colrad-input-file: %s in line %d.\n", fname,linenr);
             error(errstr);
           }
-
           tokens = strsplit(line, ", \t\n", &numtokens); //strsplit in imd_ttm.char
-
-
           for(l=0;l<neq;l++)
           {
 
@@ -3475,6 +3519,129 @@ int colrad_read(int number)
     }  
   fclose(infile);
   return 0;
+}
+
+// **************************************************************************
+// *  CHEMICAL POTENTIAL FROM SOMMERFELD EXPANSION
+// *  TODO: BRENT ROOT-FINDING --> CHEMPOT FROM NORMALIZATION CONDITION
+// **************************************************************************
+double chempot(double ne,double Te)
+{
+  double EF= HBAR * HBAR * pow(3.0 * M_PI * M_PI * ne, 2.0 / 3.0) / 2.0 / EMASS;
+  double mu=EF*(1.0-1.0/3.0*pow(pi*BOLTZMAN*Te/2/EF,2.0));
+  return mu;
+}
+
+
+// double integrand_cross_section (double x, void * p) 
+// {
+//   //TODO: Konstanten zusammenfassen
+//   //float wo möglich
+
+//   struct my_f_params * params = (struct my_f_params *)p;
+//   double eng=x;
+//   double ne=params->ne;
+//   double T=params->T;
+//   double mu=params->mu;  
+//   double DeltaE = params->DeltaE;
+  
+//   double (*cross_func)(double,double) = params->fun_ptr;
+//   //n_FERMI=@(eng,ne,T) (2*emass)^1.5/2/ne/hbar^3/pi^2 *sqrt(eng).*fermi(eng,ne,T); %identisch  
+//   double fermi_fun=1.0/(1.0+exp((eng-mu)/BOLTZMAN/T));
+//   double vel=sqrt(2.0*eng/EMASS);
+//   double sigma=cross_func(eng,DeltaE);
+//   double f=pow(2.0*EMASS,1.5)/2.0/ne/pow(HBAR,3.0)/M_PI/M_PI*sqrt(eng)*fermi_fun*vel*sigma;
+//   return f;
+// }
+
+// double cross_section_ionization(double E,double DeltaE)
+// {
+//   double alpha=0.05;
+//   double beta=4.0;
+//   double y=E/DeltaE;
+//   double sigma=4.0*M_PI*pow(bohr_radius,2.0)* pow(E_ion_H*eV2J/DeltaE ,2.0) * alpha * (y-1.0)/y/y*log(5/4*beta*y);
+//   return sigma;
+// }
+
+double inner_integrand_ionization(double x, void *p) // x=E_strich
+{
+  struct my_f_params * params = (struct my_f_params *)p;
+  double E_prime=x;
+  double ne=params->ne;
+  double T=params->T;
+  double mu=params->mu;  
+  double DeltaE = params->DeltaE;  
+  double E=params->E; //brauche ich nachher für E''=E-E'-DELTAE
+  double E_prime_prime=E-E_prime-DeltaE;
+
+  double Pauli_E_prime=1.0-1.0/(1.0+exp((E_prime-mu)/BOLTZMAN/T));
+  double Pauli_E_prime_prime=1.0-1.0/(1.0+exp((E_prime_prime-mu)/BOLTZMAN/T));
+
+  double alpha=0.05;
+  double beta=4.0;
+
+  double c1=4.0*M_PI* gsl_pow_2(bohr_radius)* gsl_pow_2(E_ion_H*eV2J/DeltaE)*DeltaE;
+  double c2=5.0/4.0*beta/DeltaE;  
+  double sigma_deriv=c1*((2*DeltaE-E_prime)*log(c2*E_prime)-DeltaE+E_prime)/gsl_pow_3(E_prime);
+  double f=sigma_deriv*Pauli_E_prime*Pauli_E_prime_prime;
+  return f;
+}
+
+double outer_integrand_ionization(double x,void *p)
+{
+  struct my_f_params * params = (struct my_f_params *)p;
+  double eng=x;
+  double DeltaE = params->DeltaE;  
+  double ne=params->ne;
+  double T=params->T;
+  double mu=params->mu;  
+
+  double vel=sqrt(2.0*eng/EMASS);
+  double fermi_fun=1.0/(1.0+exp((eng-mu)/BOLTZMAN/T));
+  double F=pow(2.0*EMASS,1.5)/2.0/ne/pow(HBAR,3.0)/M_PI/M_PI*sqrt(eng)*fermi_fun*vel;  
+
+  fparams_inner.T=T;
+  fparams_inner.ne=ne;
+  fparams_inner.mu=mu;
+  fparams_inner.DeltaE=DeltaE;
+  fparams_inner.E=eng;
+
+  gsl_function gslfun_inner;
+  gslfun_inner.function=&inner_integrand_ionization;
+  gslfun_inner.params=&fparams_inner;  
+
+  double integ_inner;
+  double integ_err;
+
+  gsl_integration_qags (&gslfun_inner, DeltaE, 10*mu, 0, integ_reltol, integ_meshdim,
+                        winteg_inner, &integ_inner, &integ_err);    
+
+  return F*integ_inner;
+
+}
+
+double double_integral_ionization(double ne,double T, double mu, double DeltaE)
+{
+
+  gsl_function gslfun_outer;
+  gslfun_outer.function = &outer_integrand_ionization;
+
+  fparams_outer.T=T;
+  fparams_outer.ne=ne;
+  fparams_outer.mu=mu;
+  fparams_outer.DeltaE=DeltaE;
+
+  gslfun_outer.params = &fparams_outer;
+
+  double integ_outer=0;
+  double integ_err=0;
+
+
+  gsl_integration_qags (&gslfun_outer, 0, 10*mu, 0, integ_reltol, integ_meshdim,
+                        winteg_outer, &integ_outer, &integ_err);    
+
+  return integ_outer;
+
 }
 
 
