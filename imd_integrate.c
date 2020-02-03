@@ -685,20 +685,20 @@ void move_atoms_ttm(void)
 */
 //MYMOD: Pdecay (mode=3) an dieser stelle um zusaetzliche loop zu vermeiden
 #ifdef PDECAY
-     if( ORT(p,i,X) > ramp_start )     
-        KRAFT(p,i,X) -=  ( IMPULS(p,i,X)/MASSE(p,i)) * xipdecay * a * ( ORT(p,i,X) - ramp_start ) * ( ORT(p,i,X) - ramp_start );     
+ if( ORT(p,i,X) > ramp_start )     
+    KRAFT(p,i,X) -=  ( IMPULS(p,i,X)/MASSE(p,i)) * xipdecay * a * ( ORT(p,i,X) - ramp_start ) * ( ORT(p,i,X) - ramp_start );     
 
-#ifdef FDTD2D
-//HOTIFX fuer +/- y bnd
-//ACHTUNG: Ablatiertes Material nicht kuehlen!
-if(ORT(p,i,X)>=pdecay_surfx)
-{
-     if( ORT(p,i,Y) > ramp_y1min )
-        KRAFT(p,i,Y) -=  ( IMPULS(p,i,Y)/MASSE(p,i)) * xipdecay * ay1 * ( ORT(p,i,Y) - ramp_y1min ) * ( ORT(p,i,Y) - ramp_y1min );
-     else if(ORT(p,i,Y)< ramp_y0max)
-        KRAFT(p,i,Y) -=  ( IMPULS(p,i,Y)/MASSE(p,i)) * xipdecay * ay0 * ( ramp_y0max -ORT(p,i,Y) ) * ( ramp_y0max-ORT(p,i,Y) );
-}
-#endif
+  #ifdef FDTD2D
+  //HOTIFX fuer +/- y bnd
+  //ACHTUNG: Ablatiertes Material nicht kuehlen!
+    if(ORT(p,i,X)>=pdecay_surfx)
+    {
+       if( ORT(p,i,Y) > ramp_y1min )
+          KRAFT(p,i,Y) -=  ( IMPULS(p,i,Y)/MASSE(p,i)) * xipdecay * ay1 * ( ORT(p,i,Y) - ramp_y1min ) * ( ORT(p,i,Y) - ramp_y1min );
+       else if(ORT(p,i,Y)< ramp_y0max)
+          KRAFT(p,i,Y) -=  ( IMPULS(p,i,Y)/MASSE(p,i)) * xipdecay * ay0 * ( ramp_y0max -ORT(p,i,Y) ) * ( ramp_y0max-ORT(p,i,Y) );
+    }
+  #endif
 #endif
       IMPULS(p,i,X) += timestep * ( KRAFT(p,i,X) + fd_xi * MASSE(p,i) * ( IMPULS(p,i,X)/MASSE(p,i) - l1[fd_i][fd_j][fd_k].vcomx) );
       IMPULS(p,i,Y) += timestep * ( KRAFT(p,i,Y) + fd_xi * MASSE(p,i) * ( IMPULS(p,i,Y)/MASSE(p,i) - l1[fd_i][fd_j][fd_k].vcomy) );

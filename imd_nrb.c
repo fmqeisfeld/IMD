@@ -48,11 +48,12 @@
 //	   VORTEIL:  Es funktioniert endlich
 //	   NACHTEIL: Wahrscheinlich nicht sonderlich performant + Kommunikationsmonster (alle NRB-infos werden JEDEN step kommuniziert. send_cells vor der kraftschleife und send_forces danach)
 //********************************************************************************************************************************************************************************
-#define DEBUG_LEVEL 1
-#define WATCHME 72800 //ECKATOM
+#define DEBUG_LEVEL 0
+#define WATCHME 23402 
 //#define WATCH ( (NUMMER(bndcell,bndi)==38400) || (NUMMER(bndcell,bndi)==38084) )
 //#define WATCH ( (NUMMER(bndcell,bndi)==9764) )
 #define PRINTSTEP 1
+
 //13189
 //#define nrb_xhi  140  // alles rechts davon sind +x-bnd-atome
 /*
@@ -800,21 +801,22 @@ int nrb_forces(void)
           U_self.y=ORT(p,i,Y)-REF_POS(p,i,Y);
           U_self.z=ORT(p,i,Z)-REF_POS(p,i,Z);
           U_self.z=MINIMGZ(U_self.z);
-if(pbc_dirs.y==1)          
-          U_self.y=MINIMGY(U_self.y);
 
-	  if(NRBBND(p,i)==1)
-	  {
+          if(pbc_dirs.y==1)          
+            U_self.y=MINIMGY(U_self.y);
+
+          if(NRBBND(p,i)==1)
+          {
             U_dot.x=-nrbk*4.0*U_self.x; //muss 
             U_dot.y=-nrbk*dblsqrt2*U_self.y;
             U_dot.z=-nrbk*dblsqrt2*U_self.z;
-	  }
-	  else if(NRBBND(p,i)==2 || NRBBND(p,i)==3)
-	  {
-	    U_dot.x=-nrbk*dblsqrt2*U_self.x; //muss 
+          }
+          else if(NRBBND(p,i)==2 || NRBBND(p,i)==3)
+          {
+            U_dot.x=-nrbk*dblsqrt2*U_self.x; //muss 
             U_dot.y=-nrbk*U_self.y*4;
             U_dot.z=-nrbk*dblsqrt2*U_self.z;
-	  }
+          }
 
           IMPULS(p,i,X)+=U_dot.x*MASSE(p,i);
           IMPULS(p,i,Y)+=U_dot.y*MASSE(p,i);
@@ -833,8 +835,8 @@ printf("myid:%d,steps:%d, DOFORCE2, ind:%d, bnd:%d, dpx:%f dpy:%f dpz:%f px:%f p
         U_dot.z*MASSE(p,i),
 
         IMPULS(p,i,X),IMPULS(p,i,Y),IMPULS(p,i,Z),
-	ORT(p,i,X),ORT(p,i,Y),ORT(p,i,Z),
-	REF_POS(p,i,X),REF_POS(p,i,Y),REF_POS(p,i,Z));
+	      ORT(p,i,X),ORT(p,i,Y),ORT(p,i,Z),
+	      REF_POS(p,i,X),REF_POS(p,i,Y),REF_POS(p,i,Z));
 //        KRAFT(p,i,X),KRAFT(p,i,Y),KRAFT(p,i,Z));
 #endif
 
