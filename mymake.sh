@@ -1,12 +1,13 @@
 #!/bin/bash
 
 # NORMAL
-#make clean
+# make clean
 #make -j8 imd_mpi_eam_nve_nbl_nrb_loadbalance
 #make -j8 imd_mpi_eam_ttm_tmm_nbl
 #make -j8 imd_mpi_eam_ttm_tmm_nbl
 #make -j8 imd_mpi_eam_nve_nbl_nrb_stress
 make -j8 imd_mpi_eam_ttm_tmm_colrad
+mv imd_mpi_eam_ttm_tmm_colrad ~/bin/
 exit 1
 
 # #CUSTOM MAKE MIT OPENMP ABER NUR FUER COLRAD
