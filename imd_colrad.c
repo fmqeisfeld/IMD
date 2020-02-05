@@ -1,6 +1,6 @@
 #include "imd.h"
 #include <gsl/gsl_integration.h>
-
+#include <gsl/gsl_errno.h>
 
 // ***************************************************
 // * TODO:
@@ -106,12 +106,13 @@ double eval_excitation_integral(double ne,double T,double mu, double DeltaE, int
 
 double fermi_integrand(double x, void *p);
 double eval_fermi_integrand(double ne,double T, double mu);
-const double integ_reltol = 1e-7;
+const double integ_reltol = 1e-6;
 const double integ_abstol = 1e-30;
 const int    integ_meshdim =1000;
 
 #define muINF (20*mu)
 #define MINRATE 1e-200  //damit krev berechnet werden kann, darf kwfd nicht beliebig klein werden!
+#define MINCONC 1e-40   //im Saha-init sollen zu kleine konzentrationen ignoriert werden
 // double integrand_cross_section (double x, void * params);
 // double cross_section_ionization(double E,double DeltaE);
 
@@ -128,6 +129,7 @@ typedef struct {
   double dens; //weil cv F(dens,temp) 
   double ni; //für Z=ne/ni
   bool initial_equi;
+  double Tinit; //initial Temp. during equi must not change!
 } *colrad_UserData;
 colrad_UserData  cdata;
 
@@ -177,7 +179,8 @@ void do_colrad(double dt)
           double Zmean=MeanCharge(Te0, rho0, atomic_charge, atomic_weight,i,j,k);          
           ne0= Zmean* l1[i][j][k].dens / (atomic_weight * AMU);          
           l1[i][j][k].ne=ne0; //Saha init greift darauf zu
-          colrad_Saha_init(i, j, k);                  
+          colrad_Saha_init(i, j, k); 
+          cdata->Tinit=Te0;                 
         }
         else //NORMAL
         {
@@ -379,7 +382,7 @@ if(myid==0)
        	  Ith(abstol,i) = colrad_abstol;//fmax(Ith(colrad_y,i)*1e-6,10.0);
 
      	}
-      Ith(abstol,0)=2.0; //Temp
+      Ith(abstol,0)=5.0; //Temp
 
 	// *************************  //
 	// *   SOLVER & CVODE INIT *
@@ -722,7 +725,11 @@ void colrad_read_states(void)
       sscanf(line, "%lf\t%lf\t%lf\t%lf\t%lf\t%lf",
              &STATES_z3[lcnt][0], &STATES_z3[lcnt][1], &STATES_z3[lcnt][2],
              &STATES_z3[lcnt][3], &STATES_z3[lcnt][4], &STATES_z3[lcnt][5]);
+
+
+
       lcnt++;
+
     }
     z3_len = lcnt;
     fclose(fin);
@@ -1229,6 +1236,9 @@ void do_Saha(double Te,double totalc,double ne,N_Vector y) //Bei init
     if(Q_z0>0)
     {
       Ith(y,i+ishift)=n0/Q_z0*STATES_z0[i][3]*prob;
+      if(Ith(y,i+ishift) < MINCONC)
+        Ith(y,i+ishift)=0.0;
+
       // printf("ITH(%d):%.4e,prob:%.4e,Q_z0:%.4e,dE:%.4e\n",
       //   i+ishift,Ith(y,i+ishift), prob, Q_z0, DeltaE);
     }
@@ -1261,6 +1271,9 @@ void do_Saha(double Te,double totalc,double ne,N_Vector y) //Bei init
     if(Q_z1>0)
       Ith(y,i+ishift+z0_len)=n1/Q_z1*STATES_z1[i][3]*prob;
 
+    if(Ith(y,i+ishift+z0_len) < MINCONC)
+      Ith(y,i+ishift+z0_len)=0.0;
+
     if(isnan(Ith(y,i+ishift+z0_len))!=0 || isinf(Ith(y,i+ishift+z0_len))!=0)
     {
       char errstr[255];
@@ -1285,6 +1298,9 @@ void do_Saha(double Te,double totalc,double ne,N_Vector y) //Bei init
     #endif 
     if(Q_z2>0)       
       Ith(y,i+ishift+z0_len+z1_len)=n2/Q_z2*STATES_z2[i][3]*prob;
+
+    if(Ith(y,i+ishift+z0_len+z1_len) < MINCONC)
+      Ith(y,i+ishift+z0_len+z1_len)=0.0;
 
     if(isnan(Ith(y,i+ishift+z0_len+z1_len))!=0 || isinf(Ith(y,i+ishift+z0_len+z1_len))!=0)
     {
@@ -1313,6 +1329,9 @@ void do_Saha(double Te,double totalc,double ne,N_Vector y) //Bei init
     if(Q_z3>0)
       Ith(y,i+ishift+z0_len+z1_len+z2_len)=n3/Q_z3*STATES_z3[i][3]*prob;
 
+    if(Ith(y,i+ishift+z0_len+z1_len+z2_len) < MINCONC)
+      Ith(y,i+ishift+z0_len+z1_len+z2_len)=0.0;
+
     if(isnan(Ith(y,i+ishift+z0_len+z1_len+z2_len))!=0 || isinf(Ith(y,i+ishift+z0_len+z1_len+z2_len))!=0)
     {
       char errstr[255];
@@ -1338,6 +1357,9 @@ void do_Saha(double Te,double totalc,double ne,N_Vector y) //Bei init
     #endif                
     if(Q_z4>0)
       Ith(y,i+ishift+z0_len+z1_len+z2_len+z3_len)=n4/Q_z4*STATES_z4[i][3]*prob;
+
+    if(Ith(y,i+ishift+z0_len+z1_len+z2_len+z3_len) < MINCONC)
+      Ith(y,i+ishift+z0_len+z1_len+z2_len+z3_len)=0.0;
 
     if(isnan(Ith(y,i+ishift+z0_len+z1_len+z2_len+z3_len))!=0 || isinf(Ith(y,i+ishift+z0_len+z1_len+z2_len+z3_len))!=0)
     {
@@ -1663,9 +1685,9 @@ printf("myid:%d, Te:%.4e\n",myid,Te);
 //  #pragma omp parallel for schedule(dynamic,1) collapse(2) private(DeltaE,kfwd,krev,lambda0,Ajk,escape_factor,Eexc) num_threads(num_threads)
   #pragma omp for nowait schedule(static) private(j,DeltaE,kfwd,krev,lambda0,Ajk,escape_factor,Eexc)
 #endif
-  for(i=0;i<z2_len;++i)
+  for(i=0;i<z3_len;++i)
   {
-    for(j=0;j<z2_len;++j)
+    for(j=0;j<z3_len;++j)
     {
       if(j<=i) continue; // MUI IMPORTANTE
       double engi=STATES_z3[i][2]*eV2J-IPD2+EF;
@@ -1686,6 +1708,11 @@ printf("myid:%d, Te:%.4e\n",myid,Te);
 
       Eexc= (-kfwd+krev)*DeltaE;
       P_E_EE+=Eexc;
+
+// if(Ith(y,i+ishift+shift2) >0 || Ith(y,j+ishift+shift2)>0)
+//   printf("myid:%d, i:%d,j:%d,kEE3:%.4e, kEE3b:%.4e,kfwd:%.4e,krev:%.4e,ni:%.4e,nj:%.4e,ne:%.4e\n",myid,i,j,
+//   k_EE_z3_z3[i][j],k_EE_z3_z3_b[i][j],kfwd,krev,
+//   Ith(y,i+ishift+shift2),Ith(y,j+ishift+shift2),ne );
 
 #ifdef SPONT
       // ********SPONT EMISSION ********* //
@@ -1755,12 +1782,14 @@ printf("myid:%d, Te:%.4e\n",myid,Te);
     }
   }
 #endif // MAXLEVEL > 3  
+
   // ********************************************************
   //                    NOW IONIZATION RATES
   // ********************************************************
   // ***************************
   //Z=0->Z=1, Ioniz./Recomb.
   // ***************************
+/*  
   shift1=ishift;
   shift2=ishift+z0_len;
 #ifdef OMP
@@ -2100,6 +2129,7 @@ if(DeltaE >0)
     }
   }
 #endif //MAXLEVEL > 3  
+*/
   // ********************** THERMO ******************************************
 
   // double cvinv=1.0/(1.5*BOLTZMAN*ne);
@@ -2132,10 +2162,11 @@ if(DeltaE >0)
     Ith(colrad_ydot,0)=0.0;
   }
 
-for(i=0;i<neq;i++)
-{
-  printf("myid:%d, i:%d, y[i]:%.4e, dot[i]:%.4e\n",myid,i, Ith(y,i), Ith(colrad_ydot,0));
-}
+// for(i=0;i<neq;i++)
+// {
+//   if(Ith(y,i) > 0 || Ith(colrad_ydot,i) != 0)
+//     printf("myid:%d, t:%.4e, i:%d, y[i]:%.4e, dot[i]:%.4e\n",myid,t,i, Ith(y,i), Ith(colrad_ydot,0));
+// }
   return 0; // 0 heisst alles ok
 }
 
@@ -2159,17 +2190,17 @@ int colrad_GetCoeffs(N_Vector y,double It,void *user_data)
   ne=Ith(y,2);
   if(ne <0 || isnan(ne)!=0) return -1;
 
-  double v_e=sqrt(8.0*BOLTZMAN*Te/pi/EMASS);
+  // double v_e=sqrt(8.0*BOLTZMAN*Te/pi/EMASS);
   double E_ion_H=13.6*eV2J;
   double alpha_i=0.05;
   double alpha_e=0.05;
   double beta_i=4.0;
-  double four_pi_a0_sq=4.0*pi*pow(bohr_radius,2.0);
+  // double four_pi_a0_sq=4.0*pi*pow(bohr_radius,2.0);
   
 
-  double E_ion_H_div_kTe_sq=pow((E_ion_H/BOLTZMAN/Te),2.0);
-  double two_pi_me_kT_hsq=2.0*pi*EMASS*BOLTZMAN*Te/pow(planck,2.0);
-  double log54_beta_i=log(5.0/4.0*beta_i);
+  // double E_ion_H_div_kTe_sq=pow((E_ion_H/BOLTZMAN/Te),2.0);
+  // double two_pi_me_kT_hsq=2.0*pi*EMASS*BOLTZMAN*Te/pow(planck,2.0);
+  // double log54_beta_i=log(5.0/4.0*beta_i);
   double kbTe=(BOLTZMAN*Te);
   kbTe=Te/11604.5;
 
@@ -2184,20 +2215,29 @@ int colrad_GetCoeffs(N_Vector y,double It,void *user_data)
   double IPD4=data->IPD4*J2eV;
   double EF=data->EF*J2eV;
 
+  double Tinit=data->Tinit;
+  bool  initial_equi = data->initial_equi;
+
+  if(initial_equi)
+  {
+    if(ABS(Te-Tinit) > Tinit*0.03)  // cvode war zu eifrig und probiert extreme temp. aus
+      return -1;
+  }
+
   //MPI
-  double k_RR_fact1=32*pi*pow(bohr_radius,2.0)/3.0/175700.00067;
-  double k_RR_fact2=pow((E_ion_H/BOLTZMAN/Te),2.0);
-  double sigma_MPI_2;//=sigma1/LASERFREQ/pow(planck*LASERFREQ,2.0); //MPI-cross-sect. (2-photon)
-  double sigma_MPI_3;
-  double sigma1;
+  // double k_RR_fact1=32*pi*pow(bohr_radius,2.0)/3.0/175700.00067;
+  // double k_RR_fact2=pow((E_ion_H/BOLTZMAN/Te),2.0);
+  // double sigma_MPI_2;//=sigma1/LASERFREQ/pow(planck*LASERFREQ,2.0); //MPI-cross-sect. (2-photon)
+  // double sigma_MPI_3;
+  // double sigma1;
 
   //const. zur berechnung von sigma1
-  double sigma_tmp=64.0*pow(pi,4.0)*pow(ECHARGE,10.0)*EMASS/3.0/sqrt(3.0)/pow(4.0*pi*ECONST,5.0)/pow(planck,6.0)/LIGHTSPEED/pow(LASERFREQ,3.0)/pow(13.6*eV2J,2.0);
-  double I_sq=It*It; //for 2-photon-ioniz.
-  double I_cu=I_sq*It; // for 3-photon-ioniz.
+  // double sigma_tmp=64.0*pow(pi,4.0)*pow(ECHARGE,10.0)*EMASS/3.0/sqrt(3.0)/pow(4.0*pi*ECONST,5.0)/pow(planck,6.0)/LIGHTSPEED/pow(LASERFREQ,3.0)/pow(13.6*eV2J,2.0);
+  // double I_sq=It*It; //for 2-photon-ioniz.
+  // double I_cu=I_sq*It; // for 3-photon-ioniz.
   int fail=0;
 
-  double pow_two_pi_me_kT_hsq_tmp1= pow(two_pi_me_kT_hsq,1.5); //ACHTUNG: Das ist thermal De-Broglie Lambda
+  // double pow_two_pi_me_kT_hsq_tmp1= pow(two_pi_me_kT_hsq,1.5); //ACHTUNG: Das ist thermal De-Broglie Lambda
                                                                //Ich muss das für die rückwärts-raten irgendie 
                                                                //durch chempot ersetzen sonst pass das net
                                                                //Ebenso in Saha
@@ -2212,6 +2252,8 @@ int colrad_GetCoeffs(N_Vector y,double It,void *user_data)
   double mu=chempot(ne,Te);
   double mu_eV=mu*J2eV;
   double fermi_factor=eval_fermi_integrand(ne,Te,mu);
+  if(fermi_factor==-1)
+    return -1;
   
 
 
@@ -2358,67 +2400,23 @@ int colrad_GetCoeffs(N_Vector y,double It,void *user_data)
           double Ei=(STATES_z0[i][2])-IPD0+mu_eV;//+EF;
           if(Ei<0) continue;
 #endif          
-
-          // a=DeltaE/kbTe;
-          // expint=ExpInt(a);
-
-// if(expint==-1)
-// #ifndef OMP
-//         return -1;
-// #else
-//         fail=1;
-// #endif
-
-          // G2=genexpint(a,1.0,1.0);
-          // I_1=exp(-a)/a - expint;
-          // I_2=I_1*log54_beta_i+expint/a-G2;
-          // k_EE_z0_z0[i][j]=v_e*four_pi_a0_sq*(kronecker*alpha_e*a*a*I_1 +  (1.0-kronecker)*alpha_i*E_ion_H_div_kTe_sq*I_2);          
+        
           k_EE_z0_z0[i][j]=eval_excitation_integral(ne,Te,mu,DeltaE*eV2J,kronecker); // in m^3/s    
-          if(k_EE_z0_z0[i][j] <= MINRATE)
-          {
-            k_EE_z0_z0[i][j]=0.0;
-            k_EE_z0_z0_b[i][j]=0.0;
-          } 
-          else            
-            k_EE_z0_z0_b[i][j]=k_EE_z0_z0[i][j]*STATES_z0[i][3]/STATES_z0[j][3]*exp(DeltaE/kbTe);      
+          // if(k_EE_z0_z0[i][j] <= MINRATE)
+          // {
+          //   k_EE_z0_z0[i][j]=0.0;
+          //   k_EE_z0_z0_b[i][j]=0.0;
+          // } 
+          // else            
+          //   k_EE_z0_z0_b[i][j]=k_EE_z0_z0[i][j]*STATES_z0[i][3]/STATES_z0[j][3]*exp(DeltaE/kbTe);    
+          k_EE_z0_z0_b[i][j]=k_EE_z0_z0[i][j]*STATES_z0[i][3]/STATES_z0[j][3]*eval_excitation_integral(ne,Te,mu+DeltaE,DeltaE*eV2J,kronecker);
       }
     }
 
 if(fail==1)
   return -1;
 
-  // *********************     
-  // * NOW REVERSE RATE  *
-  // *********************
-// #ifdef OMP
-// //#pragma omp parallel for   schedule(dynamic,1) collapse(2) private(kronecker,tmp0,tmp1,tmp2) num_threads(num_threads)
-// #pragma omp for schedule(static) private(j,kronecker,tmp0,tmp2)
-// #endif
-//   for(i=0;i<z0_len;++i)
-//   {
-//     for(j=0;j<z0_len;++j)
-//     {
-//         if(j<=i ) continue;
-
-//         kronecker=1.0; //Achtung:Im Reverse process ist dies ein anderes kronecker delta
-//         //tmp0=pow(2,(1-kronecker))*STATES_z0[j][3]/STATES_z0[i][3];
-//         tmp0=STATES_z0[j][3]/STATES_z0[i][3];
-
-//         //tmp1=3.0*(1.0-kronecker)/2.0;
-//         tmp1=0.0; //3.0*(1.0-kronecker)/2.0;
-//         tmp2=EXPR(-(STATES_z0[j][2]-STATES_z0[i][2])/kbTe);
-
-//         //k_EE_z0_z0_b[i][j]=k_EE_z0_z0[i][j]/tmp0/(pow(two_pi_me_kT_hsq,tmp1))/tmp2;
-//         if(k_EE_z0_z0[i][j]> 0)
-//         {
-//           k_EE_z0_z0_b[i][j]=k_EE_z0_z0[i][j]/tmp0/tmp2;
-//         }
-//         else
-//         {
-//           k_EE_z0_z0_b[i][j]=0.0;
-//         }
-//     }
-//   }
+ 
   ////////////////////////
   // Elec. exc. for Z=1
   ///////////////////////
@@ -2444,63 +2442,19 @@ if(fail==1)
 #endif
 
         DeltaE=(STATES_z1[j][2]-STATES_z1[i][2]);
-        // a=DeltaE/kbTe;
-        // expint=ExpInt(a);
-
-// if(expint==-1)
-// #ifndef OMP
-//       return -1;
-// #else
-//       fail=1;
-// #endif
-        // G2=genexpint(a,1.0,1.0);
-        // I_1=EXPR(-a)/a - expint;
-        // I_2=I_1*log54_beta_i+expint/a-G2;
-        // k_EE_z1_z1[i][j]=v_e*four_pi_a0_sq*(kronecker*alpha_e*a*a*I_1 +(1-kronecker)*alpha_i*E_ion_H_div_kTe_sq*I_2);
         k_EE_z1_z1[i][j]=eval_excitation_integral(ne,Te,mu,DeltaE*eV2J,kronecker); // in m^3/s
-        if(k_EE_z1_z1[i][j] <= MINRATE)
-        {
-          k_EE_z1_z1[i][j]=0.0;
-          k_EE_z1_z1_b[i][j]=0.0;
-        } 
-        else                    
-          k_EE_z1_z1_b[i][j]=k_EE_z1_z1[i][j]*STATES_z1[i][3]/STATES_z1[j][3]*exp(DeltaE/kbTe); 
+        // if(k_EE_z1_z1[i][j] <= MINRATE)
+        // {
+        //   k_EE_z1_z1[i][j]=0.0;
+        //   k_EE_z1_z1_b[i][j]=0.0;
+        // } 
+        // else                    
+        //   k_EE_z1_z1_b[i][j]=k_EE_z1_z1[i][j]*STATES_z1[i][3]/STATES_z1[j][3]*exp(DeltaE/kbTe); 
+        k_EE_z1_z1_b[i][j]=k_EE_z1_z1[i][j]*STATES_z1[i][3]/STATES_z1[j][3]*eval_excitation_integral(ne,Te,mu+DeltaE,DeltaE*eV2J,kronecker); 
         
       }
     }
   if(fail==1) return -1;
-
-  // *********************     
-  // * NOW REVERSE RATE  *
-  // *********************
-// #ifdef OMP
-// //#pragma omp parallel for   schedule(dynamic,1) collapse(2) private(kronecker,tmp0,tmp1,tmp2) num_threads(num_threads)
-// #pragma omp for schedule(static) private(j,kronecker,tmp0,tmp2)
-// #endif
-//   for(i=0;i<z1_len;++i)
-//   {
-//     for(j=0;j<z1_len;++j)
-//     {
-//         if(i==j || j<i ) continue;
-//         tmp0=STATES_z1[j][3]/STATES_z1[i][3];
-
-//         //tmp1=3.0*(1.0-kronecker)/2.0;
-//         tmp1=0.0; //3.0*(1.0-kronecker)/2.0;
-
-//         tmp2=EXPR(-(STATES_z1[j][2]-STATES_z1[i][2])/kbTe);
-
-//         //k_EE_z0_z0_b[i][j]=k_EE_z0_z0[i][j]/tmp0/(pow(two_pi_me_kT_hsq,tmp1))/tmp2;
-//         if(k_EE_z1_z1[i][j]>0)
-//         {
-//           k_EE_z1_z1_b[i][j]=k_EE_z1_z1[i][j]/tmp0/tmp2;
-//         }
-//         else
-//         {
-//           k_EE_z1_z1_b[i][j]=0.0;
-//         }
-
-//     }
-//   }
 
 
   ////////////////////////
@@ -2531,65 +2485,20 @@ if(fail==1)
 #endif
 
         DeltaE=(STATES_z2[j][2]-STATES_z2[i][2]);
-        // a=DeltaE/kbTe;
-        // expint=ExpInt(a);
-
-// if(expint==-1)
-// #ifndef OMP
-//       return -1;
-// #else
-//       fail=1;
-// #endif
-        // G2=genexpint(a,1.0,1.0);
-        // I_1=EXPR(-a)/a - expint;
-        // I_2=I_1*log54_beta_i+expint/a-G2;
-        // k_EE_z2_z2[i][j]=v_e*four_pi_a0_sq*(kronecker*alpha_e*a*a*I_1 +(1-kronecker)*alpha_i*E_ion_H_div_kTe_sq*I_2);
         k_EE_z2_z2[i][j]=eval_excitation_integral(ne,Te,mu,DeltaE*eV2J,kronecker);         
-        if(k_EE_z2_z2[i][j] <= MINRATE)
-        {
-          k_EE_z2_z2[i][j]=0.0;
-          k_EE_z2_z2_b[i][j]=0.0;
-        } 
-        else                            
-          k_EE_z2_z2_b[i][j]=k_EE_z2_z2[i][j]*STATES_z2[i][3]/STATES_z2[j][3]*exp(DeltaE/kbTe); 
+        // if(k_EE_z2_z2[i][j] <= MINRATE)
+        // {
+        //   k_EE_z2_z2[i][j]=0.0;
+        //   k_EE_z2_z2_b[i][j]=0.0;
+        // } 
+        // else                            
+        //   k_EE_z2_z2_b[i][j]=k_EE_z2_z2[i][j]*STATES_z2[i][3]/STATES_z2[j][3]*exp(DeltaE/kbTe); 
+        k_EE_z2_z2_b[i][j]=k_EE_z2_z2[i][j]*STATES_z2[i][3]/STATES_z2[j][3]*eval_excitation_integral(ne,Te,mu+DeltaE,DeltaE*eV2J,kronecker); 
         
       }
     }
   if(fail==1) return -1;
 
-  // *********************     
-  // * NOW REVERSE RATE  *
-  // *********************
-// #ifdef OMP
-// //#pragma omp parallel for   schedule(dynamic,1) collapse(2) private(kronecker,tmp0,tmp1,tmp2) num_threads(num_threads)
-// #pragma omp for schedule(static) private(j,kronecker,tmp0,tmp2)  
-// #endif
-//   for(i=0;i<z2_len;++i)
-//   {
-//     for(j=0;j<z2_len;++j)
-//     {
-//         if(j<=i ) continue;
-//         tmp0=STATES_z2[j][3]/STATES_z2[i][3];
-
-//         //tmp1=3.0*(1.0-kronecker)/2.0;
-//         tmp1=0.0; //3.0*(1.0-kronecker)/2.0;
-
-//         tmp2=EXPR(-(STATES_z2[j][2]-STATES_z2[i][2])/kbTe);
-//         //ACHTUNG: tmp2 kann -->0 gehen
-//         // --> krev = NaN
-//         // --> prüfe ob fwd-rate nicht sowieso = 0 ist
-
-//         //k_EE_z0_z0_b[i][j]=k_EE_z0_z0[i][j]/tmp0/(pow(two_pi_me_kT_hsq,tmp1))/tmp2;
-//         if(k_EE_z2_z2[i][j] > 0)
-//         {
-//           k_EE_z2_z2_b[i][j]=k_EE_z2_z2[i][j]/tmp0/tmp2;
-//         }
-//         else
-//         {
-//           k_EE_z2_z2_b[i][j]=0.0;
-//         }
-//     }
-//   }
 #endif //MAXLEVEL > 1
 
   ////////////////////////
@@ -2620,65 +2529,26 @@ if(fail==1)
 #endif
 
         DeltaE=(STATES_z3[j][2]-STATES_z3[i][2]);
-//         a=DeltaE/kbTe;
-//         expint=ExpInt(a);
-
-// if(expint==-1)
-// #ifndef OMP
-//       return -1;
-// #else
-//       fail=1;
-// #endif
-
-//         G2=genexpint(a,1.0,1.0);
-//         I_1=EXPR(-a)/a - expint;
-//         I_2=I_1*log54_beta_i+expint/a-G2;
-//         k_EE_z3_z3[i][j]=v_e*four_pi_a0_sq*(kronecker*alpha_e*a*a*I_1 +(1-kronecker)*alpha_i*E_ion_H_div_kTe_sq*I_2);
         k_EE_z3_z3[i][j]=eval_excitation_integral(ne,Te,mu,DeltaE*eV2J,kronecker); 
-        if(k_EE_z3_z3[i][j] <= MINRATE)
-        {
-          k_EE_z3_z3[i][j]=0.0;
-          k_EE_z3_z3_b[i][j]=0.0;
-        } 
-        else                            
-          k_EE_z3_z3_b[i][j]=k_EE_z3_z3[i][j]*STATES_z3[i][3]/STATES_z3[j][3]*exp(DeltaE/kbTe); 
 
-printf("myid:%d,i:%d,j:%d, kEEz3z3, fwd:%.4e, rev:%.4e\n",myid, i,j, k_EE_z3_z3[i][j], k_EE_z3_z3_b[i][j]);
+
+        // if(k_EE_z3_z3[i][j] <= MINRATE)
+        // {
+        //   k_EE_z3_z3[i][j]=0.0;
+        //   k_EE_z3_z3_b[i][j]=0.0;
+        // } 
+        // else                            
+        //   k_EE_z3_z3_b[i][j]=k_EE_z3_z3[i][j]*STATES_z3[i][3]/STATES_z3[j][3]*exp(DeltaE/kbTe); 
+        k_EE_z3_z3_b[i][j]=
+          k_EE_z3_z3[i][j]*STATES_z3[i][3]/STATES_z3[j][3]*eval_excitation_integral(ne,Te,mu+DeltaE,DeltaE*eV2J,kronecker);
+
+// if(i==0)
+// printf("myid:%d, kee:%.4e,keeb:%.4e\n",myid,kronecker, k_EE_z3_z3[i][j],k_EE_z3_z3_b[i][j]);
+
       }
     }
   if(fail==1)
-          return -1;
-  // *********************     
-  // * NOW REVERSE RATE  *
-  // *********************
-  // #ifdef OMP
-  // //#pragma omp parallel for   schedule(dynamic,1) collapse(2) private(kronecker,tmp0,tmp1,tmp2) num_threads(num_threads)
-  // #pragma omp for schedule(static) private(j,kronecker,tmp0,tmp2)        
-  // #endif
-  // for(i=0;i<z3_len;++i)
-  // {
-  //   for(j=0;j<z3_len;++j)
-  //   {
-  //       if(j<=i ) continue;
-  //       tmp0=STATES_z3[j][3]/STATES_z3[i][3];
-
-  //       //tmp1=3.0*(1.0-kronecker)/2.0;
-  //       tmp1=0.0; //3.0*(1.0-kronecker)/2.0;
-
-  //       tmp2=EXPR(-(STATES_z3[j][2]-STATES_z3[i][2])/kbTe);
-  //       //k_EE_z0_z0_b[i][j]=k_EE_z0_z0[i][j]/tmp0/(pow(two_pi_me_kT_hsq,tmp1))/tmp2;
-  //       if(k_EE_z3_z3[i][j] > 0)
-  //       {
-  //         k_EE_z3_z3_b[i][j]=k_EE_z3_z3[i][j]/tmp0/tmp2;
-  //       }
-  //       else
-  //       {
-  //         k_EE_z3_z3_b[i][j]=0.0;
-  //       }
-        
-
-  //   }
-  // }
+          return -1;  
 #endif // MAXLEVEL > 2
   ////////////////////////
   // Elec. exc. for Z=4
@@ -2706,63 +2576,20 @@ printf("myid:%d,i:%d,j:%d, kEEz3z3, fwd:%.4e, rev:%.4e\n",myid, i,j, k_EE_z3_z3[
         if(Ei<0) continue;
 #endif          
         DeltaE=(STATES_z4[j][2]-STATES_z4[i][2]);
-//         a=DeltaE/kbTe;
-//         expint=ExpInt(a);
-
-// if(expint==-1)
-// #ifndef OMP
-//       return -1;
-// #else
-//       fail=1;
-// #endif
-
-//         G2=genexpint(a,1.0,1.0);
-//         I_1=EXPR(-a)/a - expint;
-//         I_2=I_1*log54_beta_i+expint/a-G2;
-//         k_EE_z4_z4[i][j]=v_e*four_pi_a0_sq*(kronecker*alpha_e*a*a*I_1 +(1-kronecker)*alpha_i*E_ion_H_div_kTe_sq*I_2);
         k_EE_z4_z4[i][j]=eval_excitation_integral(ne,Te,mu,DeltaE*eV2J,kronecker); 
-        if(k_EE_z4_z4[i][j] <= MINRATE)
-        {
-          k_EE_z4_z4[i][j]=0.0;
-          k_EE_z4_z4_b[i][j]=0.0;
-        } 
-        else                            
-          k_EE_z4_z4_b[i][j]=k_EE_z4_z4[i][j]*STATES_z4[i][3]/STATES_z4[j][3]*exp(DeltaE/kbTe); 
+        // if(k_EE_z4_z4[i][j] <= MINRATE)
+        // {
+        //   k_EE_z4_z4[i][j]=0.0;
+        //   k_EE_z4_z4_b[i][j]=0.0;
+        // } 
+        // else                            
+        //   k_EE_z4_z4_b[i][j]=k_EE_z4_z4[i][j]*STATES_z4[i][3]/STATES_z4[j][3]*exp(DeltaE/kbTe); 
+        k_EE_z4_z4_b[i][j]=k_EE_z4_z4[i][j]*STATES_z4[i][3]/STATES_z4[j][3]*eval_excitation_integral(ne,Te,mu+DeltaE,DeltaE*eV2J,kronecker);
         
       }
     }
   if(fail==1)
           return -1;
-
-  // *********************     
-  // * NOW REVERSE RATE  *
-  // *********************
-// #ifdef OMP
-// //#pragma omp parallel for   schedule(dynamic,1) collapse(2) private(kronecker,tmp0,tmp1,tmp2) num_threads(num_threads)
-// #pragma omp for schedule(static) private(j,kronecker,tmp0,tmp2)        
-// #endif        
-//   for(i=0;i<z4_len;++i)
-//   {
-//     for(j=0;j<z4_len;++j)
-//     {
-//         if(j<=i ) continue;
-//         tmp0=STATES_z4[j][3]/STATES_z4[i][3];
-
-//         //tmp1=3.0*(1.0-kronecker)/2.0;
-//         tmp1=0.0; //3.0*(1.0-kronecker)/2.0;
-
-//         tmp2=EXPR(-(STATES_z4[j][2]-STATES_z4[i][2])/kbTe);
-//         //k_EE_z0_z0_b[i][j]=k_EE_z0_z0[i][j]/tmp0/(pow(two_pi_me_kT_hsq,tmp1))/tmp2;
-//         if(k_EE_z4_z4[i][j] > 0)
-//         {
-//           k_EE_z4_z4_b[i][j]=k_EE_z4_z4[i][j]/tmp0/tmp2;
-//         }
-//         else
-//         {
-//           k_EE_z4_z4_b[i][j]=0.0;
-//         }        
-//     }
-//   }
 #endif // MAXLEVEL > 3
 
   // *************************************************
@@ -2788,23 +2615,6 @@ printf("myid:%d,i:%d,j:%d, kEEz3z3, fwd:%.4e, rev:%.4e\n",myid, i,j, k_EE_z3_z3[
 if(DeltaE <0 )
   continue;
 
-// #ifdef DOIPD
-//       DeltaE=MAX(0.0,DeltaE);
-// #endif      
-//       a=DeltaE/kbTe;
-//       expint=ExpInt(a);
-
-
-// if(expint==-1)
-// #ifndef OMP
-//         return -1;
-// #else
-//         fail=1;
-// #endif
-//       G2=genexpint(a,1.0,1.0);
-//       I_1=EXPR(-a)/a - expint;
-//       I_2=I_1*log54_beta_i+expint/a-G2;
-      // k_EI_z0_z1[i][j]=v_e*four_pi_a0_sq*alpha_i*E_ion_H_div_kTe_sq*I_2;
       k_EI_z0_z1[i][j]=MAX(0.0,double_integral_ionization(ne,Te, mu, DeltaE*eV2J))*fermi_factor;
 
 #ifdef MULTIPHOTON
@@ -2831,25 +2641,21 @@ if(DeltaE <0 )
       // ***************
       // * RAD RECOMB  *
       // ***************
-      if(DeltaE>0)
-      {
-        if(expint > 0 )
-        {
-          //k_MPI_z1_z0[i][j][0]=v_e*k_RR_fact1*1.0*k_RR_fact2*pow((DeltaE)*J2eV/STATES_z1[j][2],1.5)*expint*EXPR(a);
-          k_MPI_z1_z0[i][j][0]=v_e*k_RR_fact1*1.0*k_RR_fact2*pow((DeltaE)/STATES_z1[j][2],1.5)*expint*EXPR(a);
-        }
-        else 
-        {
-          k_MPI_z1_z0[i][j][0]=0.0; //EXPR(a) kann +Inf werden--> unsinnige rate coeff.. wenn einer der faktoren=0 --> rest egal
-        }
-      }
+      // if(DeltaE>0)
+      // {
+      //   if(expint > 0 )
+      //   {
+      //     //k_MPI_z1_z0[i][j][0]=v_e*k_RR_fact1*1.0*k_RR_fact2*pow((DeltaE)*J2eV/STATES_z1[j][2],1.5)*expint*EXPR(a);
+      //     k_MPI_z1_z0[i][j][0]=v_e*k_RR_fact1*1.0*k_RR_fact2*pow((DeltaE)/STATES_z1[j][2],1.5)*expint*EXPR(a);
+      //   }
+      //   else 
+      //   {
+      //     k_MPI_z1_z0[i][j][0]=0.0; //EXPR(a) kann +Inf werden--> unsinnige rate coeff.. wenn einer der faktoren=0 --> rest egal
+      //   }
+      // }
       // ******************
       // * 3-body recomb  *
       // ******************
-      // kronecker=0;
-      // tmp0=2*STATES_z1[j][3]/STATES_z0[i][3];
-      // // tmp1=3.0*(1.0-kronecker)/2.0;
-      // tmp2=EXPR(-(DeltaE-IPD0)/kbTe);
       if(k_EI_z0_z1[i][j] <= MINRATE) //wohl wichtig
       {
         k_EI_z1_z0[i][j]=0.0; 
@@ -2877,33 +2683,12 @@ if(DeltaE <0 )
   {
     for(j=0;j<z2_len;++j)
     {
-      // kronecker=0.0;
-      // if(STATES_z1[i][4]==STATES_z2[j][4])
-      //   kronecker=1.0;
 
       DeltaE=(STATES_z2[j][2]-STATES_z1[i][2])-IPD1; //+EF;
 
 if(DeltaE <0 )
   continue;
 
-// #ifdef DOIPD
-//       DeltaE=MAX(0.0,DeltaE);
-// #endif            
-//       a=DeltaE/kbTe;
-//       expint=ExpInt(a);
-
-
-// if(expint==-1)
-// #ifndef OMP
-//         return -1;
-// #else
-//         fail=1;
-// #endif
-
-//       G2=genexpint(a,1.0,1.0);
-//       I_1=EXPR(-a)/a - expint;
-//       I_2=I_1*log54_beta_i+expint/a-G2;
-      // k_EI_z1_z2[i][j]=v_e*four_pi_a0_sq*alpha_i*E_ion_H_div_kTe_sq*I_2;
       k_EI_z1_z2[i][j]=MAX(0.0,double_integral_ionization(ne,Te, mu, DeltaE*eV2J))*fermi_factor;
 
 
@@ -2931,28 +2716,21 @@ if(DeltaE <0 )
       // **************
       // * RAD RECOMB *
       // **************
-      if(DeltaE>0)
-      {
+      // if(DeltaE>0)
+      // {
 
-
-// printf("kei:%.4e, integ:%.4e\n", k_EI_z1_z2[i][j], integ_result);
-
-        if(expint > 0 )
-        {
-          k_MPI_z2_z1[i][j][0]=v_e*k_RR_fact1*4.0*k_RR_fact2*pow((DeltaE)/STATES_z2[j][2],1.5)*expint*EXPR(a);          
-        }
-        else 
-        {
-          k_MPI_z2_z1[i][j][0]=0.0; //EXPR(a) kann +Inf werden--> unsinnige rate coeff.. wenn einer der faktoren=0 --> rest egal
-        }      
-      }
+      //   if(expint > 0 )
+      //   {
+      //     k_MPI_z2_z1[i][j][0]=v_e*k_RR_fact1*4.0*k_RR_fact2*pow((DeltaE)/STATES_z2[j][2],1.5)*expint*EXPR(a);          
+      //   }
+      //   else 
+      //   {
+      //     k_MPI_z2_z1[i][j][0]=0.0; //EXPR(a) kann +Inf werden--> unsinnige rate coeff.. wenn einer der faktoren=0 --> rest egal
+      //   }      
+      // }
       // ******************
       // * 3-body recomb  *
       // ******************        
-      // kronecker=0;
-      // tmp0=2*STATES_z2[j][3]/STATES_z1[i][3];
-      // tmp1=3.0*(1.0-kronecker)/2.0;
-      // tmp2=EXPR(-(DeltaE-IPD1)/kbTe);
       if(k_EI_z1_z2[i][j] <=MINRATE) 
       {        
         k_EI_z1_z2[i][j]=0; 
@@ -2969,7 +2747,6 @@ if(DeltaE <0 )
 #endif //MAXLEVEL > 1
 
 
-
   /////////////////
   // Ioniz. 2->3
   ///////////////// 
@@ -2984,32 +2761,13 @@ if(DeltaE <0 )
   {
     for(j=0;j<z3_len;++j)
     {
-      // kronecker=0.0;
-      // if(STATES_z2[i][4]==STATES_z3[j][4])
-      // kronecker=1.0;
 
       DeltaE=(STATES_z3[j][2]-STATES_z2[i][2])-IPD2;//+EF;
 
 if(DeltaE <0 )
   continue;
 
-// #ifdef DOIPD
-//       DeltaE=MAX(0.0,DeltaE);
-// #endif            
-//       a=DeltaE/kbTe;
-//       expint=ExpInt(a);
 
-// if(expint==-1)
-// #ifndef OMP
-//         return -1;
-// #else
-//         fail=1;
-// #endif
-
-//       G2=genexpint(a,1.0,1.0);
-//       I_1=EXPR(-a)/a - expint;
-//       I_2=I_1*log54_beta_i+expint/a-G2;
-      // k_EI_z2_z3[i][j]=v_e*four_pi_a0_sq*alpha_i*E_ion_H_div_kTe_sq*I_2;
       k_EI_z2_z3[i][j]=MAX(0.0,double_integral_ionization(ne,Te, mu, DeltaE*eV2J))*fermi_factor;
 
 #ifdef MULTIPHOTON
@@ -3036,27 +2794,22 @@ if(DeltaE <0 )
       // **************
       // * RAD RECOMB *
       // **************
-      if(DeltaE>0)
-      {
-        if(expint > 0)
-        {
-          k_MPI_z3_z2[i][j][0]=v_e*k_RR_fact1*4.0*k_RR_fact2*pow((DeltaE)/STATES_z3[j][2],1.5)*expint*EXPR(a);  
-        }
-        else
-        {
-          k_MPI_z3_z2[i][j][0]=0.0;
-        }
+      // if(DeltaE>0)
+      // {
+      //   if(expint > 0)
+      //   {
+      //     k_MPI_z3_z2[i][j][0]=v_e*k_RR_fact1*4.0*k_RR_fact2*pow((DeltaE)/STATES_z3[j][2],1.5)*expint*EXPR(a);  
+      //   }
+      //   else
+      //   {
+      //     k_MPI_z3_z2[i][j][0]=0.0;
+      //   }
         
-      }
+      // }
       
       // ******************
       // * 3-body recomb  *
       // ******************         
-      // kronecker=0;
-      // tmp0=2*STATES_z3[j][3]/STATES_z2[i][3];
-      // // tmp1=3.0*(1.0-kronecker)/2.0;
-      // tmp2=EXPR(-(DeltaE-IPD2)/kbTe);
-
       if(k_EI_z2_z3[i][j] <= MINRATE)
       {
         k_EI_z2_z3[i][j]=0.0;
@@ -3088,32 +2841,12 @@ if(DeltaE <0 )
   {
     for(j=0;j<z4_len;++j)
     {
-      // kronecker=0.0;
-      // if(STATES_z3[i][4]==STATES_z4[j][4])
-      // kronecker=1.0;
 
       DeltaE=(STATES_z4[j][2]-STATES_z3[i][2])-IPD3;//+EF;
 
 if(DeltaE <0 )
   continue;      
 
-// #ifdef DOIPD
-//       DeltaE=MAX(0.0,DeltaE);
-// #endif            
-//       a=DeltaE/kbTe;
-//       expint=ExpInt(a);
-
-// if(expint==-1)
-// #ifndef OMP
-//         return -1;
-// #else
-//         fail=1;
-// #endif
-
-//       G2=genexpint(a,1.0,1.0);
-//       I_1=EXPR(-a)/a - expint;
-//       I_2=I_1*log54_beta_i+expint/a-G2;
-//       k_EI_z3_z4[i][j]=v_e*four_pi_a0_sq*alpha_i*E_ion_H_div_kTe_sq*I_2;
       k_EI_z3_z4[i][j]=MAX(0.0,double_integral_ionization(ne,Te, mu, DeltaE*eV2J))*fermi_factor;
 
 #ifdef MULTIPHOTON
@@ -3140,26 +2873,22 @@ if(DeltaE <0 )
       // **************
       // * RAD RECOMB *
       // **************
-      if(DeltaE>0)
-      {
-        if(expint>0)
-        {
-          k_MPI_z4_z3[i][j][0]=v_e*k_RR_fact1*4.0*k_RR_fact2*pow((DeltaE)/STATES_z4[j][2],1.5)*expint*EXPR(a);  
-        }
-        else
-        {
-          k_MPI_z4_z3[i][j][0]=0.0;
-        }       
+      // if(DeltaE>0)
+      // {
+      //   if(expint>0)
+      //   {
+      //     k_MPI_z4_z3[i][j][0]=v_e*k_RR_fact1*4.0*k_RR_fact2*pow((DeltaE)/STATES_z4[j][2],1.5)*expint*EXPR(a);  
+      //   }
+      //   else
+      //   {
+      //     k_MPI_z4_z3[i][j][0]=0.0;
+      //   }       
         
-      }
+      // }
       // ******************
       // * 3-body recomb  *
       // ******************
-      //if(DeltaE>0.0)
-      // kronecker=0;
-      // tmp0=2*STATES_z4[j][3]/STATES_z3[i][3];
-      // // tmp1=3.0*(1.0-kronecker)/2.0;
-      // tmp2=EXPR(-(DeltaE-IPD3)/kbTe);
+
       if(k_EI_z3_z4[i][j] <= MINRATE )
       {
         k_EI_z3_z4[i][j]= 0.0;
@@ -3659,12 +3388,20 @@ double inner_integrand_ionization(double x, void *p) // x=E_strich
   double alpha=0.05;
   double beta=4.0;
 
+  if(E_prime==DeltaE) return 0;
+
+// printf("Puli_E_pr:%.4e, pli_2:%.4e\n",Pauli_E_prime, Pauli_E_prime_prime);
+
   // double c1=alpha*4.0*M_PI* gsl_pow_2(bohr_radius)* gsl_pow_2(E_ion_H*eV2J/DeltaE)*DeltaE;
   // double c2=5.0/4.0*beta/DeltaE;  
   // double sigma_deriv=c1*((2*DeltaE-E_prime)*log(c2*E_prime)-DeltaE+E_prime)/gsl_pow_3(E_prime);
   double sigma_deriv=4.0*M_PI*pow(bohr_radius,2.0)*pow(E_ion_H*eV2J/DeltaE,2.0)*alpha*DeltaE
                      *((2*DeltaE-E_prime)*log(5.0*beta/4.0/DeltaE/E_prime)-DeltaE+E_prime)/pow(E_prime,3.0);
+
+  
+
   double f=sigma_deriv*Pauli_E_prime*Pauli_E_prime_prime;
+  printf("finne:%.4e\n",f);
   return f;
 }
 
@@ -3676,6 +3413,8 @@ double outer_integrand_ionization(double x,void *p)
   double ne=params->ne;
   double T=params->T;
   double mu=params->mu;  
+
+  if(x==0) return 0.0; //weil vel=0 wird
 
   double vel=sqrt(2.0*eng/EMASS);
   double fermi_fun=1.0/(1.0+exp((eng-mu)/BOLTZMAN/T));
@@ -3694,8 +3433,14 @@ double outer_integrand_ionization(double x,void *p)
   double integ_inner;
   double integ_err;
 
-  gsl_integration_qags (&gslfun_inner, DeltaE, muINF, integ_abstol, integ_reltol, integ_meshdim,
-                        winteg_inner, &integ_inner, &integ_err);    
+  // gsl_integration_qags (&gslfun_inner, DeltaE, muINF, integ_abstol, integ_reltol, integ_meshdim,
+  //                       winteg_inner, &integ_inner, &integ_err);    
+
+  gsl_integration_qagiu (&gslfun_inner, DeltaE,0, 1e-12, integ_meshdim,
+                         winteg_inner, &integ_inner, &integ_err);    
+
+if(ABS(F*integ_inner) > 1e-100)
+  printf("F*itneg:%.4e\n",F*integ_inner);
 
   return F*integ_inner;
 
@@ -3718,8 +3463,11 @@ double double_integral_ionization(double ne,double T, double mu, double DeltaE)
   double integ_err=0;
 
 
-  gsl_integration_qags (&gslfun_outer, 0, muINF, integ_abstol, integ_reltol, integ_meshdim,
-                        winteg_outer, &integ_outer, &integ_err);    
+  // gsl_integration_qags (&gslfun_outer, 0, muINF, integ_abstol, integ_reltol, integ_meshdim,
+  //                       winteg_outer, &integ_outer, &integ_err);    
+
+  gsl_integration_qagiu(&gslfun_outer, 0, integ_abstol, integ_reltol, integ_meshdim,
+                        winteg_outer, &integ_outer, &integ_err); 
 
   return MAX(integ_outer,0.0);
 
@@ -3751,10 +3499,19 @@ double eval_fermi_integrand(double ne,double T, double mu)
   double integ_err=0;
   double integ_result=0;
 
-  gsl_integration_qags (&fun, mu, muINF, integ_abstol, integ_reltol, integ_meshdim,
-                        winteg_fermi, &integ_result, &integ_err);   
+  gsl_error_handler_t *old_error_handler=gsl_set_error_handler_off ();
 
-  return integ_result;
+  // int code= gsl_integration_qags (&fun, mu, muINF, integ_abstol, integ_reltol, integ_meshdim,
+  //                       winteg_fermi, &integ_result, &integ_err);   
+
+  int code=gsl_integration_qagiu(&fun, mu, integ_abstol, integ_reltol, integ_meshdim,
+                        winteg_fermi, &integ_result, &integ_err); 
+
+  gsl_set_error_handler(old_error_handler); //reset the error handler 
+
+  return (code==GSL_SUCCESS ? integ_result : -1);  // RHS abbrechen -> neuer versuch
+
+  //return integ_result;
 }
 
 double integrand_excitation(double x,void *p)
@@ -3802,9 +3559,13 @@ double eval_excitation_integral(double ne,double T,double mu, double DeltaE, int
   double integ_err=0;
 
 
-  gsl_integration_qags (&fun, DeltaE, muINF, integ_abstol, integ_reltol, integ_meshdim,
-                        winteg_exc, &integ_result, &integ_err);      
+  // gsl_integration_qags (&fun, DeltaE, muINF, integ_abstol, integ_reltol, integ_meshdim,
+  //                       winteg_exc, &integ_result, &integ_err);    
 
+  gsl_integration_qagiu(&fun, DeltaE, integ_abstol, integ_reltol, integ_meshdim,
+                        winteg_exc, &integ_result, &integ_err);    
+
+  //return integ_result;
   return MAX(integ_result,0.0);
 
 }
