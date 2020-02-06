@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # NORMAL
-# make clean
+#make clean
 #make -j8 imd_mpi_eam_nve_nbl_nrb_loadbalance
 #make -j8 imd_mpi_eam_ttm_tmm_nbl
 #make -j8 imd_mpi_eam_ttm_tmm_nbl
