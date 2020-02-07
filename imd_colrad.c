@@ -121,15 +121,15 @@ double integrand_deexcitation(double x,void *p);
 
 double fermi_integrand(double x, void *p);
 double eval_fermi_integrand(double ne,double T, double mu);
-const double integ_reltol = 1e-6;
-const double integ_abstol = 1e-22;
-const int    integ_meshdim =1000;
+const double integ_reltol = 1e-5;
+const double integ_abstol = 1e-20;
+const int    integ_meshdim =2500;
 
-#define muINF (25*mu)
-#define MINRATE 1e-60  //damit krev berechnet werden kann, darf kwfd nicht beliebig klein werden!
+#define muINF (20*mu)
+#define MINRATE 1e16    //wenn geschätzte max. ioniz.rate kleiner als das --> integrale garnicht erst berechnen 
 #define MINCONC 1e-60   //im Saha-init sollen zu kleine konzentrationen ignoriert werden
 
-
+double k_EE_MAX, k_EI_MAX, k_EE_REV_MAX, k_EI_REV_MAX; //DEBUG PURPOSE
 
 // *********************************************************
 //             CVODE-STRUCT FOR SOLVER PARAMS
@@ -152,6 +152,9 @@ colrad_UserData  cdata;
 // *********************************************************
 void do_colrad(double dt)
 {
+
+  k_EE_MAX= k_EI_MAX= k_EE_REV_MAX= k_EI_REV_MAX=0.0;  
+
   int flag;
   double t;
   double tout=dt;
@@ -220,22 +223,56 @@ void do_colrad(double dt)
           j_global = ((j - 1) + my_coord.y * (local_fd_dim.y - 2));
           k_global =  ((k-1) + my_coord.z*(local_fd_dim.z-2));          
 
+long int nje;
+long int nfe;
+long int nsetups;
+long int nni;
+long int nst;
+long int ncfn;
+long int netf;
+CVodeGetNumJacEvals(cvode_mem, &nje);
+CVodeGetNumRhsEvals(cvode_mem, &nfe);
+CVodeGetNumLinSolvSetups(cvode_mem, &nsetups);
+CVodeGetNumNonlinSolvIters(cvode_mem, &nni);
+CVodeGetNumSteps(cvode_mem, &nst);
+CVodeGetNumNonlinSolvConvFails(cvode_mem, &ncfn);
+CVodeGetNumErrTestFails(cvode_mem, &netf);
 
-printf("myid:%d, COLRAD Cell %d,%d,%d was equilibrated\n",myid,i_global,j_global,k_global);
-        }
+printf("myid:%d, COLRAD Cell %d was equilibrated, nfe:%ld, nje:%ld, nsetups:%ld, nni:%ld,nst:%ld,ncfn:%ld,netf:%ld\n",
+      myid,i_global, nfe,nje,nsetups,nni,nst,ncfn,netf);
+
+
+        } //initial equi
         else //NORMAL
         {
           cdata->dens=l1[i][j][k].dens;
           flag = CVode(cvode_mem, tout, y, &t, CV_NORMAL);
           colrad_ptotal+=(fd_vol)*1e-30*cdata->P_TOTAL; // d.h. ptotal ist Gesamt-Leisung
+
+          int i_global;
+          i_global = ((i - 1) + my_coord.x * (local_fd_dim.x - 2));
+
+long int nje;
+long int nfe;
+long int nsetups;
+long int nni;
+long int nst;
+long int ncfn;
+long int netf;
+CVodeGetNumJacEvals(cvode_mem, &nje);
+CVodeGetNumRhsEvals(cvode_mem, &nfe);
+CVodeGetNumLinSolvSetups(cvode_mem, &nsetups);
+CVodeGetNumNonlinSolvIters(cvode_mem, &nni);
+CVodeGetNumSteps(cvode_mem, &nst);
+CVodeGetNumNonlinSolvConvFails(cvode_mem, &ncfn);
+CVodeGetNumErrTestFails(cvode_mem, &netf);
+
+printf("myid:%d, COLRAD Cell %d step done, nfe:%ld, nje:%ld, nsetups:%ld, nni:%ld,nst:%ld,ncfn:%ld,netf:%ld\n",
+      myid,i_global, nfe,nje,nsetups,nni,nst,ncfn,netf);
+
           //ni0=cdata->ni;
         }
-
-// printf("myid:%d, after i:%d,j:%d,k:%d,Tefin:%.4e,Zfin:%.4e,Zvgl:%.4e,pcell:%.4e,ptot:%.4e\n",
-//     myid,i,j,k, Ith(y,0), Ith(y,2)/ni0,
-//     MeanCharge(Ith(y,0), rho0, atomic_charge, atomic_weight,i,j,k),
-//     cdata->P_TOTAL, colrad_ptotal);
-//printf("myid:%d, i:%d, Delta(Te):%.4e,Zmean:%.4e\n",myid,i, Ith(y,0)-Te0,Ith(y,2)/ni0);      
+ 
 
         //REASSIGN NEW TE AND NE
         l1[i][j][k].temp=Ith(y,0)/11604.5;
@@ -256,17 +293,6 @@ printf("myid:%d, COLRAD Cell %d,%d,%d was equilibrated\n",myid,i_global,j_global
         l2[i][j][k].P_MPI3=l1[i][j][k].P_MPI3;
         l2[i][j][k].P_RR=l1[i][j][k].P_RR;
 
-// if(myid==0)
-// {
-//   int i_global = ((i - 1) + my_coord.x * (local_fd_dim.x - 2));
-//   if (i_global==16 || i_global==17)
-//   {
-//     printf("ig:%d, ne:%.4e, Z:%.4e,natoms:%d, ni0:%.4e,ni:%.4e, rho:%.4e,mpi2:%.4e,mpi3:%.4e\n", 
-//       i_global, l1[i][j][k].ne, l1[i][j][k].Z, l1[i][j][k].natoms, ni0, cdata->ni, l1[i][j][k].dens,
-//       l1[i][j][k].P_MPI2,l1[i][j][k].P_MPI3);
-//   }
-// }
-// printf("myid:%d,COLRAD,i:%d,ne:%.4e,Z:%.4e,temp:%.4e\n", myid,i,l1[i][j][k].ne, l1[i][j][k].Z,l1[i][j][k].temp);
 
         if(l1[i][j][k].temp <0 || isnan(l1[i][j][k].temp) !=0 )        
         {
@@ -305,8 +331,9 @@ printf("myid:%d, COLRAD Cell %d,%d,%d was equilibrated\n",myid,i_global,j_global
     double delta = ((end.tv_sec  - start.tv_sec) * 1000000u + 
              end.tv_usec - start.tv_usec) / 1.e6;
 
-    if(myid==0)
-      printf("t-elapsed:%f,dt:%.4e\n",delta,dt);
+    // if(myid==0)
+    printf("myid:%d, telaps:%f, COLRAD STEP DONE, kee:%.4e,keerev:%.4e, kei:%.4e, keirev:%.4e\n",
+      myid,delta, k_EE_MAX, k_EE_REV_MAX, k_EI_MAX, k_EI_REV_MAX);
  // }
  #endif
   
@@ -1822,7 +1849,6 @@ int colrad_ydot(double t, N_Vector y, N_Vector colrad_ydot, void *user_data)
   // ***************************
   //Z=0->Z=1, Ioniz./Recomb.
   // ***************************
-/*
   shift1=ishift;
   shift2=ishift+z0_len;
 #ifdef OMP
@@ -2162,7 +2188,7 @@ if(DeltaE >0)
     }
   }
 #endif //MAXLEVEL > 3  
-*/
+
   // ********************** THERMO ******************************************
 
   // double cvinv=1.0/(1.5*BOLTZMAN*ne);
@@ -2291,8 +2317,8 @@ int colrad_GetCoeffs(N_Vector y,double It,void *user_data)
   double fermi_factor=eval_fermi_integrand(ne,Te,mu);
   if(fermi_factor==-1)
     return -1;
-  
 
+  double kmax_estim=1e4; 
 
 
   //PREZERO RATE-COEFFS CODEBLOCK 
@@ -2426,6 +2452,7 @@ int colrad_GetCoeffs(N_Vector y,double It,void *user_data)
   #pragma omp for simd schedule(static) private(j,kronecker,DeltaE,a,expint,G2,I_1,I_2)
   // #pragma omp for simd schedule(static) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2)
 #endif
+  
   for(i=0;i<z0_len;++i)
   {
     for(j=0;j<z0_len;++j)
@@ -2444,6 +2471,9 @@ int colrad_GetCoeffs(N_Vector y,double It,void *user_data)
         
           k_EE_z0_z0[i][j]=eval_excitation_integral(ne,Te,mu,DeltaE*eV2J,kronecker); // in m^3/s    
           k_EE_z0_z0_b[i][j]=eval_dexcitation_integral(ne,Te,mu,DeltaE*eV2J,kronecker)*STATES_z0[i][3]/STATES_z0[j][3];
+
+          k_EE_MAX=MAX(k_EE_z0_z0[i][j],k_EE_MAX);
+          k_EE_REV_MAX=MAX(k_EE_z0_z0_b[i][j],k_EE_REV_MAX);          
 
       }
     }
@@ -2479,7 +2509,9 @@ if(fail==1)
         DeltaE=(STATES_z1[j][2]-STATES_z1[i][2]);
         k_EE_z1_z1[i][j]=eval_excitation_integral(ne,Te,mu,DeltaE*eV2J,kronecker); // in m^3/s
         k_EE_z1_z1_b[i][j]=eval_dexcitation_integral(ne,Te,mu,DeltaE*eV2J,kronecker)*STATES_z1[i][3]/STATES_z1[j][3];
-        
+
+        k_EE_MAX=MAX(k_EE_z1_z1[i][j],k_EE_MAX);
+        k_EE_REV_MAX=MAX(k_EE_z1_z1_b[i][j],k_EE_REV_MAX);        
       }
     }
   if(fail==1) return -1;
@@ -2515,6 +2547,9 @@ if(fail==1)
         DeltaE=(STATES_z2[j][2]-STATES_z2[i][2]);
         k_EE_z2_z2[i][j]=eval_excitation_integral(ne,Te,mu,DeltaE*eV2J,kronecker);         
         k_EE_z2_z2_b[i][j]=eval_dexcitation_integral(ne,Te,mu,DeltaE*eV2J,kronecker)*STATES_z2[i][3]/STATES_z2[j][3];
+
+        k_EE_MAX=MAX(k_EE_z2_z2[i][j],k_EE_MAX);
+        k_EE_REV_MAX=MAX(k_EE_z2_z2_b[i][j],k_EE_REV_MAX);        
         
       }
     }
@@ -2552,6 +2587,9 @@ if(fail==1)
         k_EE_z3_z3[i][j]=eval_excitation_integral(ne,Te,mu,DeltaE*eV2J,kronecker); 
         k_EE_z3_z3_b[i][j]=eval_dexcitation_integral(ne,Te,mu,DeltaE*eV2J,kronecker)*STATES_z3[i][3]/STATES_z3[j][3];  
 
+        k_EE_MAX=MAX(k_EE_z3_z3[i][j],k_EE_MAX);
+        k_EE_REV_MAX=MAX(k_EE_z3_z3_b[i][j],k_EE_REV_MAX);
+
 // printf("myid:%d,kfw:%.4e,krev:%.4e,i:%d,j:%d\n",myid,k_EE_z3_z3[i][j],k_EE_z3_z3_b[i][j],i,j);  
       }
     }
@@ -2588,6 +2626,9 @@ if(fail==1)
         DeltaE=(STATES_z4[j][2]-STATES_z4[i][2]);
         k_EE_z4_z4[i][j]=eval_excitation_integral(ne,Te,mu,DeltaE*eV2J,kronecker); 
         k_EE_z4_z4_b[i][j]=eval_dexcitation_integral(ne,Te,mu,DeltaE*eV2J,kronecker);        
+
+        k_EE_MAX=MAX(k_EE_z4_z4[i][j],k_EE_MAX);
+        k_EE_REV_MAX=MAX(k_EE_z4_z4_b[i][j],k_EE_REV_MAX);        
       }
     }
   if(fail==1)
@@ -2616,8 +2657,17 @@ if(fail==1)
 if(DeltaE <0 )
   continue;
 
-      k_EI_z0_z1[i][j]=MAX(0.0,double_integral_ionization(ne,Te, mu, DeltaE*eV2J))*fermi_factor;
-      k_EI_z1_z0[i][j]=STATES_z0[i][3]/STATES_z1[j][3]*double_integral_recombination(ne,Te, mu, DeltaE*eV2J)*fermi_factor;      
+if(kmax_estim*ne*Ith(y,i+3)>MINRATE)
+      k_EI_z0_z1[i][j]=MAX(0.0,double_integral_ionization(ne,Te, mu, DeltaE*eV2J));
+
+if(kmax_estim*ne*ne*Ith(y,j+z0_len+3)>MINRATE)    
+      k_EI_z1_z0[i][j]=STATES_z0[i][3]/STATES_z1[j][3]*double_integral_recombination(ne,Te, mu, DeltaE*eV2J);      
+
+k_EI_MAX=MAX(k_EI_MAX,k_EI_z0_z1[i][j]);
+k_EI_REV_MAX=MAX(k_EI_REV_MAX,k_EI_z1_z0[i][j]);
+  
+      k_EI_z0_z1[i][j]*=fermi_factor;
+      k_EI_z1_z0[i][j]*=fermi_factor;
 
 #ifdef MULTIPHOTON
       // *******************
@@ -2680,8 +2730,19 @@ if(DeltaE <0 )
 if(DeltaE <0 )
   continue;
 
-      k_EI_z1_z2[i][j]=MAX(0.0,double_integral_ionization(ne,Te, mu, DeltaE*eV2J))*fermi_factor;
-      k_EI_z2_z1[i][j]=STATES_z1[i][3]/STATES_z2[j][3]*double_integral_recombination(ne,Te, mu, DeltaE*eV2J)*fermi_factor;
+if(kmax_estim*ne*Ith(y,i+z0_len+3)>MINRATE)
+      k_EI_z1_z2[i][j]=MAX(0.0,double_integral_ionization(ne,Te, mu, DeltaE*eV2J));
+
+if(kmax_estim*ne*ne*Ith(y,j+z0_len+z1_len+3)>MINRATE)
+      k_EI_z2_z1[i][j]=STATES_z1[i][3]/STATES_z2[j][3]*double_integral_recombination(ne,Te, mu, DeltaE*eV2J);
+
+k_EI_MAX=MAX(k_EI_MAX,k_EI_z1_z2[i][j]);
+k_EI_REV_MAX=MAX(k_EI_REV_MAX,k_EI_z2_z1[i][j]);
+
+      k_EI_z1_z2[i][j]*=fermi_factor;
+      k_EI_z2_z1[i][j]*=fermi_factor;
+
+
 
 #ifdef MULTIPHOTON
       double dE_SI=DeltaE*eV2J; 
@@ -2747,9 +2808,17 @@ if(DeltaE <0 )
 if(DeltaE <0 )
   continue;
 
+if(kmax_estim*ne*Ith(y,i+z0_len+z1_len+3)>MINRATE)
+      k_EI_z2_z3[i][j]=MAX(0.0,double_integral_ionization(ne,Te, mu, DeltaE*eV2J));
 
-      k_EI_z2_z3[i][j]=MAX(0.0,double_integral_ionization(ne,Te, mu, DeltaE*eV2J))*fermi_factor;
-      k_EI_z3_z2[i][j]=STATES_z2[i][3]/STATES_z3[j][3]*double_integral_recombination(ne,Te, mu, DeltaE*eV2J)*fermi_factor;
+if(kmax_estim*ne*ne*Ith(y,j+z0_len+z1_len+z2_len+3)>MINRATE)    
+      k_EI_z3_z2[i][j]=STATES_z2[i][3]/STATES_z3[j][3]*double_integral_recombination(ne,Te, mu, DeltaE*eV2J);
+
+k_EI_MAX=MAX(k_EI_MAX,k_EI_z1_z2[i][j]);
+k_EI_REV_MAX=MAX(k_EI_REV_MAX,k_EI_z2_z1[i][j]);
+
+      k_EI_z2_z3[i][j]*=fermi_factor;
+      k_EI_z3_z2[i][j]*=fermi_factor;
 
 #ifdef MULTIPHOTON
       double dE_SI=DeltaE*eV2J;
@@ -2799,8 +2868,18 @@ if(DeltaE <0 )
 if(DeltaE <0 )
   continue;      
 
-      k_EI_z3_z4[i][j]=MAX(0.0,double_integral_ionization(ne,Te, mu, DeltaE*eV2J))*fermi_factor;
-      k_EI_z4_z3[i][j]=STATES_z3[i][3]/STATES_z4[j][3]*double_integral_recombination(ne,Te, mu, DeltaE*eV2J)*fermi_factor;
+if(kmax_estim*ne*Ith(y,i+z0_len+z1_len+z2_len+3)>MINRATE)
+      k_EI_z3_z4[i][j]=MAX(0.0,double_integral_ionization(ne,Te, mu, DeltaE*eV2J));
+
+if(kmax_estim*ne*ne*Ith(y,j+z0_len+z1_len+z2_len+z3_len+3)>MINRATE)    
+      k_EI_z4_z3[i][j]=STATES_z3[i][3]/STATES_z4[j][3]*double_integral_recombination(ne,Te, mu, DeltaE*eV2J);
+
+k_EI_MAX=MAX(k_EI_MAX,k_EI_z3_z4[i][j]);
+k_EI_REV_MAX=MAX(k_EI_REV_MAX,k_EI_z4_z3[i][j]);      
+
+      k_EI_z3_z4[i][j]*=fermi_factor;
+      k_EI_z4_z3[i][j]*=fermi_factor;
+
 #ifdef MULTIPHOTON
       double dE_SI=DeltaE*eV2J;
       // *******************
@@ -2843,7 +2922,8 @@ if(DeltaE <0 )
 
   if(fail==1) return -1; 
 #endif // MAXLEVEL > 3
-
+// if(k_EI_MAX >0 || k_EI_REV_MAX > 0)
+  // printf("myid:%d, k_EI_MAX:%.4e, k_EI_REV_MAX:%.4e,fac:%.4e\n",myid,k_EI_MAX,k_EI_REV_MAX,fermi_factor);
     return 0;
 
 }
@@ -3435,7 +3515,7 @@ double outer_integrand_recombination(double x,void *p)
   // gsl_integration_qagiu (&gslfun_inner, 0.0, integ_abstol, integ_reltol, integ_meshdim,
                          // winteg_inner, &integ_inner, &integ_err); 
 
-  gsl_integration_qag(&gslfun_inner, mu-2*T*BOLTZMAN, mu+2*T*BOLTZMAN, integ_abstol, integ_reltol, integ_meshdim,1,
+  gsl_integration_qag(&gslfun_inner, 0, muINF, integ_abstol, integ_reltol, integ_meshdim,1,
                       winteg_inner, &integ_inner, &integ_err);  
 
   return F*integ_inner;
@@ -3445,7 +3525,7 @@ double outer_integrand_recombination(double x,void *p)
 double double_integral_recombination(double ne,double T, double mu, double DeltaE)
 {
 
-return 0;
+// return 0;
   gsl_function gslfun_outer;
   gslfun_outer.function = &outer_integrand_recombination;
 
@@ -3464,14 +3544,14 @@ return 0;
   // gsl_integration_qagiu(&gslfun_outer, 0.0, integ_abstol, integ_reltol, integ_meshdim,
                         // winteg_outer, &integ_outer, &integ_err); 
 
-  gsl_integration_qag(&gslfun_outer, mu-2*T*BOLTZMAN, mu+2*T*BOLTZMAN, integ_abstol, integ_reltol, integ_meshdim,1,
+  gsl_integration_qag(&gslfun_outer, 0, muINF, integ_abstol, integ_reltol, integ_meshdim,1,
                           winteg_outer, &integ_outer, &integ_err);  
 
    //gsl_integration_qags (&gslfun_outer, 0.0, muINF, integ_abstol, integ_reltol, integ_meshdim,
    //                      winteg_outer, &integ_outer, &integ_err); 
 
   //NICHT VERGESSEN: RATIO DER STATISTICAL WEIGHTS
-  if(integ_outer < MINRATE) integ_outer=0.0;
+  // if(integ_outer < MINRATE) integ_outer=0.0;
   return MAX(integ_outer*KR_factor2,0.0);
 
 }
@@ -3517,7 +3597,7 @@ double outer_integrand_ionization(double x,void *p)
   // gsl_integration_qagiu (&gslfun_inner, DeltaE,integ_abstol, integ_reltol, integ_meshdim,
                          // winteg_inner, &integ_inner, &integ_err);    
 
-  gsl_integration_qag(&gslfun_inner, DeltaE, mu+2*T*BOLTZMAN, integ_abstol, integ_reltol, integ_meshdim,1,
+  gsl_integration_qag(&gslfun_inner, DeltaE, muINF, integ_abstol, integ_reltol, integ_meshdim,1,
                       winteg_inner, &integ_inner, &integ_err);  
 
   return F*integ_inner;
@@ -3526,7 +3606,7 @@ double outer_integrand_ionization(double x,void *p)
 
 double double_integral_ionization(double ne,double T, double mu, double DeltaE)
 {
-  return 0;
+  // return 0;
 
   gsl_function gslfun_outer;
   gslfun_outer.function = &outer_integrand_ionization;
@@ -3548,10 +3628,10 @@ double double_integral_ionization(double ne,double T, double mu, double DeltaE)
   // gsl_integration_qagiu(&gslfun_outer, 0, integ_abstol, integ_reltol, integ_meshdim,
                         // winteg_outer, &integ_outer, &integ_err); 
 
-  gsl_integration_qag(&gslfun_outer, mu-2*T*BOLTZMAN, mu+2*T*BOLTZMAN, integ_abstol, integ_reltol, integ_meshdim,1,
+  gsl_integration_qag(&gslfun_outer, 0, muINF, integ_abstol, integ_reltol, integ_meshdim,1,
                       winteg_outer, &integ_outer, &integ_err);  
 
-  if(integ_outer<MINRATE) integ_outer=0.0;
+  // if(integ_outer<MINRATE) integ_outer=0.0;
   return MAX(integ_outer,0.0);
 
 }
@@ -3588,8 +3668,12 @@ double eval_fermi_integrand(double ne,double T, double mu)
   // int code= gsl_integration_qags (&fun, mu, muINF, integ_abstol, integ_reltol, integ_meshdim,
   //                       winteg_fermi, &integ_result, &integ_err);   
 
-  int code=gsl_integration_qagiu(&fun, mu, integ_abstol, integ_reltol, integ_meshdim,
-                        winteg_fermi, &integ_result, &integ_err); 
+  // int code=gsl_integration_qagiu(&fun, mu, integ_abstol, integ_reltol, integ_meshdim,
+                        // winteg_fermi, &integ_result, &integ_err); 
+
+  int code= gsl_integration_qag(&fun, 0, muINF, integ_abstol, integ_reltol, integ_meshdim,1,
+                                winteg_fermi, &integ_result, &integ_err);    
+
 
   gsl_set_error_handler(old_error_handler); //reset the error handler 
 
@@ -3654,7 +3738,7 @@ double eval_excitation_integral(double ne,double T,double mu, double DeltaE, int
   // int code= gsl_integration_qags (&fun, DeltaE, muINF, integ_abstol, integ_reltol, integ_meshdim,
   //                         winteg_exc, &integ_result, &integ_err);    
 
-  int code= gsl_integration_qag(&fun, DeltaE, mu+2*T*BOLTZMAN, integ_abstol, integ_reltol, integ_meshdim,1,
+  int code= gsl_integration_qag(&fun, DeltaE, muINF, integ_abstol, integ_reltol, integ_meshdim,1,
                           winteg_exc, &integ_result, &integ_err);    
 
   // size_t neval; 
@@ -3681,7 +3765,7 @@ double eval_excitation_integral(double ne,double T,double mu, double DeltaE, int
 
   //return integ_result;
   // if(myid==1) printf("integ:%.4e\n",integ_result);
-  if(integ_result < MINRATE) integ_result=0.0;
+  // if(integ_result < MINRATE) integ_result=0.0;
   return MAX(integ_result,0.0);
 
 }
@@ -3719,7 +3803,7 @@ double eval_dexcitation_integral(double ne,double T,double mu, double DeltaE, in
    // gsl_integration_qags (&fun, DeltaE, muINF, integ_abstol, integ_reltol, integ_meshdim,
                          // winteg_exc, &integ_result, &integ_err);    
 
-   gsl_integration_qag(&fun, DeltaE, mu+2*T*BOLTZMAN, integ_abstol, integ_reltol, integ_meshdim,1,
+   gsl_integration_qag(&fun, DeltaE, muINF, integ_abstol, integ_reltol, integ_meshdim,1,
                           winteg_exc, &integ_result, &integ_err);    
 
 
@@ -3727,7 +3811,7 @@ double eval_dexcitation_integral(double ne,double T,double mu, double DeltaE, in
     // gsl_integration_qng(&fun, DeltaE, muINF, integ_abstol, integ_reltol,  //FAST?
     //                             &integ_result, &integ_err, &neval);
 
-  if(integ_result < MINRATE) integ_result=0.0;
+  // if(integ_result < MINRATE) integ_result=0.0;
   return MAX(integ_result,0.0);
 
 }
