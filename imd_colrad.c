@@ -1,4 +1,5 @@
 #include "imd.h"
+#include <sys/time.h>
 #include <gsl/gsl_integration.h>
 #include <gsl/gsl_errno.h>
 
@@ -42,7 +43,7 @@ double fak(double t, double x, double j,double s); //aux. function for genexpint
 double genexpint(double x,double ss,double j);
 #endif
 double ExpInt(double x);        //gsl hat keine float-variante für expint
-double chempot(double ne,double Te);
+
 
 
 const int MAX_LINE_LENGTH=3000; //wird von colrad_read benuthzt
@@ -3347,16 +3348,7 @@ int colrad_read(int number)
   return 0;
 }
 
-// **************************************************************************
-// *  CHEMICAL POTENTIAL FROM SOMMERFELD EXPANSION
-// *  TODO: BRENT ROOT-FINDING --> CHEMPOT FROM NORMALIZATION CONDITION
-// **************************************************************************
-double chempot(double ne,double Te)
-{
-  double EF= HBAR * HBAR * pow(3.0 * M_PI * M_PI * ne, 2.0 / 3.0) / 2.0 / EMASS;
-  double mu=EF*(1.0-1.0/3.0*pow(pi*BOLTZMAN*Te/2/EF,2.0));
-  return mu;
-}
+
 
 
 // double integrand_cross_section (double x, void * p) 

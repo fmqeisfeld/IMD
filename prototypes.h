@@ -132,8 +132,17 @@ double EOS_cve_from_r_te(double r,double t);
 double EOS_ee_from_r_te(double r,double t);
 double EOS_te_from_r_ee(double r,double e);
 double eeminfun(double x, double r, double e);
+//minimiert e_from_r_te-e für EOSMODE=1 (D.h. interne energie aus tabelle)
 double fminbnd(double a, double b,double (* f)(double,double,double), double tolx,double rho,double eng);
+//selbes für FEG-model
+double fminbnd2(double a, double b,double (* f)(double,double,double,double), double tolx,double rho,double ne,double eng);
 void CFL_maxdt(void);  //CFL Condition for max. stable diffusion timestep
+double chempot(double ne,double Te);
+double FEG_ee_from_r_ne_te(double r,double ne, double T);
+double FEG_cve_from_ne_te(double r,double ne,double T);
+double FEG_eeminfun(double x, double r, double ne, double e);
+double FEG_te_from_r_ne_ee(double r,double ne,double ee);
+
 #endif
 
 
@@ -207,16 +216,12 @@ double nupl(double omega_las, double Z, double ni, double ne, double Te);
 double getKappa(double Te, double Ti, double Ne,double Z);
 double getGamma(double Te, double Ti, double Ne,double Z);
 
-double Cv(double Te,double ne); 
 double nu_e_e(double Te, double EF,double Ne,double Na,double valence); 
 double v_e(double Te,double EF);
 double sigma_e_e(double Te, double EF,double Na,double valence);
 double sigma_e_ph(double Te,double Ti,double EF,double Na,double Z);
 double nueff(double Te,double Ti,double ne,double ni,double ni0,double Ce,double lod); //für drude Kombination aus Petrov & Mazhukin
 
-//for advection step we need relation btw. internal eng. and elec. temp
-double UfromT(double Te,double ne);
-double TfromU(double U,double ne);
 
 char **strsplit(const char* str, const char* delim, size_t* numtokens);
 void ttm_read(int number);

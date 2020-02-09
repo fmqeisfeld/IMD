@@ -1223,6 +1223,10 @@ EXTERN MPI_Request reque[6];
 #endif /*MPI*/
 EXTERN double E_new INIT(0.0); /* Energy of newly created FD cells */
 EXTERN double E_new_local INIT(0.0);
+
+EXTERN int first_active_cell_local INIT(99999);
+EXTERN int first_active_cell_global INIT(99999);
+
 #ifdef DEBUG /* for debugging (duh) */
 EXTERN double E_el_ab INIT(0.0);  /* Energy taken from electrons */
 EXTERN double E_el_ab_local INIT(0.0);

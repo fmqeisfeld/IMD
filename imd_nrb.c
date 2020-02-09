@@ -138,7 +138,6 @@ int init_nrb() //nrb_eps=Abstands-toleranz in Angstrom,alat=Lattice const.
 //  nrbk=0.3; //0.82905; // u/imdtime^2 ? u^2/imdtime^2
 //  nrbk=0.9;
 //  nrbk=1.2;
-  //nrbk=5.0; //je größer umso weniger steif
   //der coeff fuer die matrizen ist sqrt(k/m)
   nrbk=sqrt(nrbk/26.9815);
 
@@ -762,6 +761,9 @@ int nrb_forces(void)
   ///yx-plane
   vektor U[12];
   vektor V[12];
+
+  double neighfac=1.0;
+
   int k;
 
   double mass=26.9815; // TODO: weiter unten einfach mit MASSE(p,i) tauschen.Caution: checken ob auch sinnvolle werte geliefert werden
@@ -801,7 +803,6 @@ int nrb_forces(void)
           U_self.y=ORT(p,i,Y)-REF_POS(p,i,Y);
           U_self.z=ORT(p,i,Z)-REF_POS(p,i,Z);
           U_self.z=MINIMGZ(U_self.z);
-
           if(pbc_dirs.y==1)          
             U_self.y=MINIMGY(U_self.y);
 
@@ -929,9 +930,10 @@ if(pbc_dirs.y==1)
             U_dot.z=nrbk*sqrt2half*U[r].z;
 	  }
 
-          U_dot.x-=0.25*V[r].x; //push from neigh
-          U_dot.y-=0.25*V[r].y;
-          U_dot.z-=0.25*V[r].z;
+
+          U_dot.x-=0.25*V[r].x*neighfac; //push from neigh
+          U_dot.y-=0.25*V[r].y*neighfac;
+          U_dot.z-=0.25*V[r].z*neighfac;
 
           IMPULS(bndcell,bndi,X)+=U_dot.x*mass;
           IMPULS(bndcell,bndi,Y)+=U_dot.y*mass;
