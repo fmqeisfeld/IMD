@@ -25,7 +25,7 @@
 
 #define DENSHOTFIXSTEP 10000 //bist zu diesem step bleibt surf-dens const.
 
-#define EOSMODE 1  // 1=EOS-TABLE, 0 = Free Electron Gas
+#define EOSMODE 0  // 1=EOS-TABLE, 0 = Free Electron Gas
                    // ACHTUNG: FEG Momentan totaler BS --> t_from_e viel zu ungenau (+/- 10 %)
                    // Grund: weiss nicht genau aber vermute Fermi_dirac integral 
                    // Evtl. wäre "manuelles" integrieren zuverlässiger
@@ -507,8 +507,7 @@ void update_fd()
           //diese wird nach Allreduce zur letzten aktiven Zelle gemacht
           //und der entsprechende proc kümmert sich in diffusion-loop
           //um die kopplung
-          if( i- vlat_buffer > 0)
-            last_active_cell_local.val=MAX(last_active_cell_local.val,i_global- vlat_buffer);
+          last_active_cell_local.val=MAX(last_active_cell_local.val,i_global- vlat_buffer);
 #endif     
 #ifdef DENSHOTFIX
           first_active_cell_local=MIN(first_active_cell_local,i_global);
@@ -565,7 +564,10 @@ void update_fd()
 #ifdef VLATTICE
   MPI_Status vlatstatus;  
   MPI_Allreduce(&last_active_cell_local, &last_active_cell_global, 1, MPI_2INT, MPI_MAXLOC, cpugrid);
-  cur_vlattice_proc=last_active_cell_global.rank;
+  //cur_vlattice_proc=last_active_cell_global.rank;)  
+
+
+  cur_vlattice_proc=(int) (((double) last_active_cell_global.val*cpu_dim.x) / ((double) global_fd_dim.x));
 
 //printf("oldvlat:%d,nuvlat:%d, lastcell:%d\n",old_vlattice_proc, cur_vlattice_proc, last_active_cell_global.val);
   
@@ -793,7 +795,8 @@ void do_FILLMESH(void)
   }     // for i
 
 #ifdef VLATTICE
-        if(last_active_cell_global.rank==myid) // I own last active cell        
+        //if(last_active_cell_global.rank==myid) // I own last active cell        
+        if(cur_vlattice_proc==myid)
         {
           
           for(i=0;i<vlattice_dim;i++)
@@ -801,7 +804,11 @@ void do_FILLMESH(void)
             vlattice1[i].Z= MeanCharge(vlattice1[i].temp*11604.5, vlattice1[i].dens, atomic_charge, atomic_weight,i,1,1);
             vlattice1[i].ne= vlattice1[i].Z * vlattice1[i].dens / (atomic_weight * AMU);
             vlattice1[i].fd_k = getKappa(vlattice1[i].temp,vlattice1[i].md_temp, vlattice1[i].ne, vlattice1[i].Z); 
+#if EOSMODE==1
             vlattice1[i].Ce = EOS_cve_from_r_te(vlattice1[i].dens, vlattice1[i].temp * 11604.5);
+#else
+            vlattice1[i].Ce = FEG_cve_from_ne_te(vlattice1[1].dens, vlattice1[i].ne, vlattice1[i].temp * 11604.5);
+#endif
             vlattice1[i].fd_g= getGamma(vlattice1[i].temp, vlattice1[i].md_temp, vlattice1[i].ne, vlattice1[i].Z); 
 
             vlattice2[i].Z=vlattice1[i].Z;
@@ -1575,8 +1582,7 @@ void do_ADV(double tau)
 #else
             node.Z=MeanCharge(node.temp*11604.5, node.dens, atomic_charge, atomic_weight,i,j,k);
             node.ne = node.Z * node.dens / (atomic_weight * AMU); //Assumption: Quasi-neutrality condition
-            node2.ne = node.ne;
-            printf("ne:%.4e\n",node.ne);
+            node2.ne = node.ne;            
             node2.temp=  FEG_te_from_r_ne_ee(node.dens,node.ne, node2.U / (26.9815 * AMU * J2eV)) / 11604.5;
 #endif     
           }     
@@ -1859,7 +1865,8 @@ void do_DIFF(double tau)
         zmink = l1[i][j][zmin].fd_k;
 
 #ifdef VLATTICE
-        if(last_active_cell_global.rank==myid) // I own last active cell        
+        //if(last_active_cell_global.rank==myid) // I own last active cell        
+        if(cur_vlattice_proc==myid)
         {
           xmaxTe = vlattice1[0].temp;
           xmaxk  = vlattice1[0].fd_k;
@@ -2003,7 +2010,8 @@ void do_DIFF(double tau)
 #ifdef VLATTICE
         //Keine diffusion für md-temp, nur kopplung mit elek.temp
         //Weil gitter-temp kaum diffundiert im vgl. mit elek-temp
-        if(last_active_cell_global.rank==myid) // I own last active cell        
+        //if(last_active_cell_global.rank==myid) // I own last active cell        
+        if(cur_vlattice_proc==myid)
         {
 
           int ilocal= last_active_cell_global.val+1-my_coord.x*(local_fd_dim.x-2);
@@ -3072,7 +3080,7 @@ double EOS_cve_from_r_te(double r, double t)
   if(r < intp_cve_from_r_te.xmin || r > intp_cve_from_r_te.xmax)
   {
     char errstr[255];
-    sprintf(errstr, "ERROR: Density=%.4e  exceeds interpolation range: xmin=%.4e, xmax=%.4e\n",
+    sprintf(errstr, "ERROR in EOS_cve_from_r_te: Density=%.4e  exceeds interpolation range: xmin=%.4e, xmax=%.4e\n",
       r,intp_cve_from_r_te.xmin,intp_cve_from_r_te.xmax);
     error(errstr);
   }
