@@ -395,7 +395,7 @@ EXTERN N_Vector colrad_y;
 #ifdef FILTER
 EXTERN real filter_min_x INIT(-9e9); /* left atom deletion filter cutoff */
 EXTERN real filter_max_x INIT(9e9);
-EXTERN int  filter_int INIT(1);     //nicht jeden md-step loeschen weil neigh-rebuild
+EXTERN int  filter_int INIT(0);     //nicht jeden md-step loeschen weil neigh-rebuild
 EXTERN int  filter_rd  INIT(0);    //recursion-depth, laufvariable
 //MYMOD
 EXTERN real filter_min_y INIT(-9e9); 
@@ -1187,7 +1187,9 @@ EXTERN int old_vlattice_proc INIT(-1); //falls sich was ändert -> Bcast das kom
 EXTERN int vlat_buffer INIT(16); // So viele zellen werden von der letzten aus ignoriert...diese paar letzten zellen 
                                 // werden in DIFFLOOP als leer wahrgenommen, da sie durch nicht-reflektierende
                                 // Randbedingungen runtergekühlt werden und unnatürlichen temperaturfluss herbeiführen!
-EXTERN vlatmax last_active_cell_local,last_active_cell_global;
+//EXTERN vlatmax last_active_cell_local,last_active_cell_global;
+EXTERN int last_active_cell_local,last_active_cell_global;
+
 EXTERN real vlatdens INIT(2.665655433e+03); // kg/m^3
 //ENDOF MYMOD
 

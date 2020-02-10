@@ -25,7 +25,7 @@
 
 #define DENSHOTFIXSTEP 10000 //bist zu diesem step bleibt surf-dens const.
 
-#define EOSMODE 1  // 1=EOS-TABLE, 0 = Free Electron Gas
+#define EOSMODE 0  // 1=EOS-TABLE, 0 = Free Electron Gas
                    // ACHTUNG: FEG Momentan totaler BS --> t_from_e viel zu ungenau (+/- 10 %)
                    // Grund: weiss nicht genau aber vermute Fermi_dirac integral 
                    // Evtl. wäre "manuelles" integrieren zuverlässiger
@@ -312,8 +312,7 @@ void update_fd()
 #endif
 
 #ifdef VLATTICE
-  last_active_cell_local.val=-5000;
-  last_active_cell_local.rank=myid;
+  last_active_cell_local=-5000;
 #endif
 
 #ifdef DENSHOTFIX
@@ -507,7 +506,7 @@ void update_fd()
           //diese wird nach Allreduce zur letzten aktiven Zelle gemacht
           //und der entsprechende proc kümmert sich in diffusion-loop
           //um die kopplung
-          last_active_cell_local.val=MAX(last_active_cell_local.val,i_global- vlat_buffer);
+          last_active_cell_local=MAX(last_active_cell_local,i_global- vlat_buffer);
 #endif     
 #ifdef DENSHOTFIX
           first_active_cell_local=MIN(first_active_cell_local,i_global);
@@ -563,11 +562,11 @@ void update_fd()
 
 #ifdef VLATTICE
   MPI_Status vlatstatus;  
-  MPI_Allreduce(&last_active_cell_local, &last_active_cell_global, 1, MPI_2INT, MPI_MAXLOC, cpugrid);
+  MPI_Allreduce(&last_active_cell_local, &last_active_cell_global, 1, MPI_INT, MPI_MAX, cpugrid);
   //cur_vlattice_proc=last_active_cell_global.rank;)  
 
 
-  cur_vlattice_proc=(int) (((double) last_active_cell_global.val*cpu_dim.x) / ((double) global_fd_dim.x));
+  cur_vlattice_proc=(int) (((double) last_active_cell_global*cpu_dim.x) / ((double) global_fd_dim.x));
 
 //printf("oldvlat:%d,nuvlat:%d, lastcell:%d\n",old_vlattice_proc, cur_vlattice_proc, last_active_cell_global.val);
   
@@ -586,7 +585,7 @@ void update_fd()
   for (i = 1; i < local_fd_dim.x - 1; ++i)
   {
     i_global =  ((i - 1) + my_coord.x * (local_fd_dim.x - 2));
-    if(i_global > last_active_cell_global.val)
+    if(i_global > last_active_cell_global)
       l1[i][1][1].natoms=l2[i][1][1].natoms=-1;  //So erkenne ich deaktivierte Zellen
   }
   //Für weitere Verwendung wird last_active_cell umgerechnet um den puffer nicht jedes mal explizit abziehen zu müssen
@@ -1378,6 +1377,12 @@ void init_ttm()
     printf("Volume of whole sample: %e [cubic Angstroms]\n",
            fd_h.x * fd_h.y * fd_h.z *
            global_fd_dim.x * global_fd_dim.y * global_fd_dim.z );
+
+#ifdef VLATTICE
+    printf("Virtual lattice dim:%d\n",vlattice_dim);
+    printf("Virtual lattice buffer-cells:%d\n", vlat_buffer);
+
+#endif    
 #if DEBUG_LEVEL>0
     printf("DEBUG_LEVEL>0\n");
 #endif
@@ -1469,8 +1474,10 @@ void init_ttm()
     if (myid == 0)
       printf("t_SI:%.4e s\n", t_SI);
 #endif
-    MPI_Barrier(cpugrid);
-    ttm_writeout(100000);  //only for debug
+
+#ifdef TMM
+    tmm_time=(double) imdrestart * (double) checkpt_int * timestep * 10.18 / 1.0e15;
+#endif    
 #ifdef PDECAY
     if (myid == 0)
       printf("Using ramp_start:%f and ramp_end:%f\n", ramp_start, ramp_end);
@@ -2014,7 +2021,7 @@ void do_DIFF(double tau)
         if(cur_vlattice_proc==myid)
         {
 
-          int ilocal= last_active_cell_global.val+1-my_coord.x*(local_fd_dim.x-2);
+          int ilocal= last_active_cell_global+1-my_coord.x*(local_fd_dim.x-2);
           xminTe = l1[ilocal][1][1].temp;
           xmink  = l1[ilocal][1][1].fd_k;
           // Ci AUS GEOS: rho: 2.665655433e+03 temp: 3.000000000e+02 cvi: 8.589449886e+02           
@@ -2216,6 +2223,8 @@ void ttm_writeout(int number)
     {
       if(myid==cur_vlattice_proc)
       {
+printf("ICH send:%d\n",cur_vlattice_proc);
+
         MPI_Send(&vlattice1[0], vlattice_dim, mpi_element2, 0, 101011, cpugrid);
       }
 
@@ -2350,7 +2359,7 @@ void ttm_writeout(int number)
     {
 
           fprintf(outfile, "%d %d %d %d %e %e %e %e %e %e %e %e %e %e %e %e %d %f",                  
-                  i + last_active_cell_global.val+1, 0, 0, 
+                  i + last_active_cell_global+1, 0, 0, 
                   -2, //daran erkenne ich virtual-lattice im output file                  
                   vlattice1[i].temp,
                   vlattice1[i].md_temp,
@@ -2362,7 +2371,7 @@ void ttm_writeout(int number)
                   vlattice1[i].fd_k,
                   vlattice1[i].fd_g,
                   vlattice1[i].Z,
-                  last_active_cell_global.rank,
+                  cur_vlattice_proc,
                   vlattice1[i].Ce);
           fprintf(outfile,"\n");
     }
@@ -2409,6 +2418,11 @@ void ttm_read(int number)
   int lines = global_fd_dim.x * global_fd_dim.y * global_fd_dim.z;
   ttm_Element *buf;
 
+#ifdef VLATTICE
+  lines+=vlattice_dim;
+#endif
+
+
 #ifdef MPI
 #ifdef MPI2
   MPI_Alloc_mem(lines * sizeof(ttm_Element), MPI_INFO_NULL, &buf);
@@ -2416,6 +2430,7 @@ void ttm_read(int number)
   buf = malloc((lines * sizeof(ttm_Element)));
 #endif
 #endif
+
 
   if (myid == 0)
   {
@@ -2431,11 +2446,11 @@ void ttm_read(int number)
     printf("\nReading %d lines from ttm-file:%s\n", lines, fname);
 
 //    char line[256];
-    char line[400];
+    char line[600];
     char **tokens;
     size_t j, numtokens;
 
-    int ig, jg, kg;
+    // int ig, jg, kg;
 
     for (i = 0; i < lines + 1; i++) //skip first line (comments)
     {
@@ -2452,32 +2467,31 @@ void ttm_read(int number)
         sscanf(tokens[3], "%d",  &buf[i - 1].natoms);
         sscanf(tokens[4], "%lf", &buf[i - 1].temp);
         sscanf(tokens[5], "%lf", &buf[i - 1].md_temp);
-        sscanf(tokens[6], "%lf", &buf[i - 1].xi);
-        sscanf(tokens[7], "%lf", &buf[i - 1].source);
-        sscanf(tokens[8], "%lf", &buf[i - 1].dens);
-//  sscanf(tokens[9],"%lf", &buf[i-1].v_com.x);
-//  sscanf(tokens[10],"%lf", &buf[i-1].v_com.y);
-//  sscanf(tokens[11],"%lf", &buf[i-1].v_com.z);
-        sscanf(tokens[12], "%lf", &buf[i - 1].fd_k);
-        sscanf(tokens[13], "%lf", &buf[i - 1].fd_g);
-        sscanf(tokens[14], "%lf", &buf[i - 1].Z);
-        sscanf(tokens[15], "%d", &buf[i - 1].proc);
-        sscanf(tokens[16], "%lf", &buf[i - 1].Ce);
-#ifdef FDTD
-        sscanf(tokens[17], "%lf", &buf[i - 1].Ezx);
-        sscanf(tokens[18], "%lf", &buf[i - 1].Ezy);
-        sscanf(tokens[19], "%lf", &buf[i - 1].Hx);
-        sscanf(tokens[20], "%lf", &buf[i - 1].Hy);
-        sscanf(tokens[21], "%lf", &buf[i - 1].sigmax);
-        sscanf(tokens[22], "%lf", &buf[i - 1].sigmay);
-        sscanf(tokens[23], "%lf", &buf[i - 1].Hzx);
-        sscanf(tokens[24], "%lf", &buf[i - 1].Hzy);
-        sscanf(tokens[25], "%lf", &buf[i - 1].Ex);
-        sscanf(tokens[26], "%lf", &buf[i - 1].Ey);
+        sscanf(tokens[6], "%lf", &buf[i - 1].U);
+        sscanf(tokens[7], "%lf", &buf[i - 1].xi);
+        sscanf(tokens[8], "%lf", &buf[i - 1].source);
+        sscanf(tokens[9], "%lf", &buf[i - 1].dens);
+        sscanf(tokens[10],"%lf", &buf[i-1].vcomx); 
+        sscanf(tokens[11],"%lf", &buf[i-1].vcomy);
+        sscanf(tokens[12],"%lf", &buf[i-1].vcomz);
+        sscanf(tokens[13], "%lf", &buf[i - 1].fd_k);
+        sscanf(tokens[14], "%lf", &buf[i - 1].fd_g);
+        sscanf(tokens[15], "%lf", &buf[i - 1].Z);
+        sscanf(tokens[16], "%d", &buf[i - 1].proc);
+        sscanf(tokens[17], "%lf", &buf[i - 1].Ce);
+#ifdef FDTD //TODO:  array-index dynamisch wie in ttm_write...
+        sscanf(tokens[18], "%lf", &buf[i - 1].Ezx);
+        sscanf(tokens[19], "%lf", &buf[i - 1].Ezy);
+        sscanf(tokens[20], "%lf", &buf[i - 1].Hx);
+        sscanf(tokens[21], "%lf", &buf[i - 1].Hy);
+        sscanf(tokens[22], "%lf", &buf[i - 1].sigmax);
+        sscanf(tokens[23], "%lf", &buf[i - 1].sigmay);
+        sscanf(tokens[24], "%lf", &buf[i - 1].Hzx);
+        sscanf(tokens[25], "%lf", &buf[i - 1].Hzy);
+        sscanf(tokens[26], "%lf", &buf[i - 1].Ex);
+        sscanf(tokens[27], "%lf", &buf[i - 1].Ey);
 #endif
-
         //printf("%d %d %d %d %d %d\n",i-1,ig,jg,kg,buf[i-1].natoms,buf[i-1].proc);
-
         for (j = 0; j < numtokens; j++) {
           free(tokens[j]);
         }
@@ -2488,25 +2502,65 @@ void ttm_read(int number)
     fclose(infile);
   } //endif myid==0
 
-  MPI_Bcast(buf, lines, mpi_element2, 0, MPI_COMM_WORLD);
-
+  MPI_Bcast(buf, lines, mpi_element2, 0, cpugrid);
   int l = 0;
   //int ig,jg,kg;
   i = j = k = 1;
+#ifdef VLATTICE
+  int v=0;
+  last_active_cell_local=last_active_cell_global=99999;
+#endif
+  // ******************************************
+  // *   NOW COPY BUFF TO LATTICE 
+  // *****************************************
   for (l = 0; l < lines; l++)
   {
+
+#ifdef VLATTICE
+    if(buf[l].natoms==-2) //vlattice zellen
+    {
+
+      vlattice1[v].temp=buf[l].temp;
+      vlattice1[v].natoms = buf[l].natoms;
+      vlattice1[v].md_temp = buf[l].md_temp;
+      vlattice1[v].xi = buf[l].xi;
+      vlattice1[v].source = buf[l].source;
+      vlattice1[v].dens = buf[l].dens;
+      vlattice1[v].fd_k = buf[l].fd_k;
+      vlattice1[v].fd_g = buf[l].fd_g;
+      vlattice1[v].Z = buf[l].Z;
+      vlattice1[v].proc = buf[l].proc;
+      vlattice1[v].Ce = buf[l].Ce;
+      vlattice1[v].vcomx = buf[l].vcomx;
+      vlattice1[v].vcomy = buf[l].vcomy;
+      vlattice1[v].vcomz = buf[l].vcomz;     
+      v++;
+      continue;
+    }
+#endif    
     //ig =  ((i-1) + my_coord.x*(local_fd_dim.x-2));
     //jg =  ((j-1) + my_coord.y*(local_fd_dim.y-2));
     //kg =  ((k-1) + my_coord.z*(local_fd_dim.z-2));
     //printf("l:%d,proc:%d,myid:%d,i:%d,j:%d,k:%d\n",l,buf[l].proc,myid,i,j,k);
+#ifdef VLATTICE
+    if(buf[l].natoms==-1)
+      last_active_cell_local=MIN(last_active_cell_local,l-1);
+      last_active_cell_global=last_active_cell_local;
+#endif
+
     if (buf[l].proc == myid)
     {
       node.temp = buf[l].temp;
       node.natoms = buf[l].natoms;
+
       node.md_temp = buf[l].md_temp;
+      node.U = buf[l].U;
       node.xi = buf[l].xi;
       node.source = buf[l].source;
       node.dens = buf[l].dens;
+      node.vcomx= buf[l].vcomx;
+      node.vcomy= buf[l].vcomy;
+      node.vcomz= buf[l].vcomz;
       node.fd_k = buf[l].fd_k;
       node.fd_g = buf[l].fd_g;
       node.Z = buf[l].Z;
@@ -2547,6 +2601,12 @@ void ttm_read(int number)
       }
     }
   }
+#ifdef VLATTICE
+  cur_vlattice_proc=vlattice1[0].proc;
+  old_vlattice_proc=cur_vlattice_proc;
+#endif
+
+
 #ifdef MPI
 #ifdef MPI2
   MPI_Free_mem(buf);
@@ -2555,26 +2615,9 @@ void ttm_read(int number)
 #endif
 #endif
 
-//*****************CHECKEN OB KORREKT EINGELESEN WURDE (DEBUG PURPOSE)########
-  /*
-    int i_global,k_global,j_global;
-    for (i=1; i<local_fd_dim.x-1; ++i)
-    {
-      i_global =  ((i-1) + my_coord.x*(local_fd_dim.x-2));
-      for (j=1; j<local_fd_dim.y-1; ++j)
-      {
-        j_global =  ((j-1) + my_coord.y*(local_fd_dim.y-2));
-        for (k=1; k<local_fd_dim.z-1; ++k)
-        {
-          k_global =  ((k-1) + my_coord.z*(local_fd_dim.z-2));
-          if(i_global==110 && j_global==16 && k_global==21)
-          {
-            printf("DEBUG:natoms:%d\n",node.natoms);
-          }
-        }
-      }
-    }
-  */
+    MPI_Barrier(cpugrid);
+    ttm_writeout(100000);  //only for debug
+
 }
 
 // ******************************************************************************

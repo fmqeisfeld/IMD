@@ -1992,11 +1992,13 @@ int getparamfile(char *paramfname, int phase)
     //  /* FD electronic heat capacity  */
     //  getparam("fd_c", &fd_c, PARAM_REAL, 1, 1);
     //}
+    // fd_gamma wird nicht mehr benötigt
+    // else if (strcasecmp(token, "fd_gamma")==0)
+    // { 
+    //   // FD electronic heat capacity / T_e (proport. const.) 
+    //   getparam("fd_gamma", &fd_gamma, PARAM_REAL, 1, 1);
+    // }
 
-    else if (strcasecmp(token, "fd_gamma")==0){
-      /* FD electronic heat capacity / T_e (proport. const.) */
-      getparam("fd_gamma", &fd_gamma, PARAM_REAL, 1, 1);
-    }
     else if (strcasecmp(token, "fd_n_timesteps")==0){
       // How many FD time steps to one MD time step? 
       getparam("fd_n_timesteps", &fd_n_timesteps, PARAM_INT, 1, 1);
@@ -3916,11 +3918,12 @@ void check_parameters_complete()
   else if (strcasecmp(fd_one_d_str,"")!=0) {
     warning("Ignoring unknown value of fe_one_d\n");
   }
-  if ((fd_gamma==0.0 && fd_c==0.0)||(fd_gamma!=0.0 && fd_c!=0.0)) {
-    error ("You must specify either fd_gamma or fd_c for TTM simulations.");
-  }
+  //wird nicht mehr benutzt!
+  // if ((fd_gamma==0.0 && fd_c==0.0)||(fd_gamma!=0.0 && fd_c!=0.0)) {
+  //   error ("You must specify either fd_gamma or fd_c for TTM simulations.");
+  // }
 
-// MY MOD:
+// MY MOD: 
   if(fd_min_atoms==0)
     error("You must specify fd_min_atoms");
 #if defined(FDTD) || defined(TMM)
@@ -3938,6 +3941,12 @@ void check_parameters_complete()
   if(atomic_charge==0)
     error("You must specify atomic_charge");
 #endif /* TTM */
+  
+#ifdef FILTER
+  if(filter_int==0)
+    error("You must specify filter_int");
+#endif
+//ENDOF MYMOD  
 
 #ifdef MPI
   {
