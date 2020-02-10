@@ -19,13 +19,13 @@
 //TODO: 
 // TTM-READ UPDATEN FUER FDTD-NUTZUNG
 
-#define DENSHOTFIX //erste Zelle soll für bestimmte Zeit festkörperdichte haben!
+//#define DENSHOTFIX //erste Zelle soll für bestimmte Zeit festkörperdichte haben!
                    //Da meine umgebungsdichte-berechnung für die oberfläche eine geringere dichte liefert als im Bulk
                    //passt das nicht zusammen mit den wide-range properties!
 
 #define DENSHOTFIXSTEP 10000 //bist zu diesem step bleibt surf-dens const.
 
-#define EOSMODE 0  // 1=EOS-TABLE, 0 = Free Electron Gas
+#define EOSMODE 1  // 1=EOS-TABLE, 0 = Free Electron Gas
                    // ACHTUNG: FEG Momentan totaler BS --> t_from_e viel zu ungenau (+/- 10 %)
                    // Grund: weiss nicht genau aber vermute Fermi_dirac integral 
                    // Evtl. wäre "manuelles" integrieren zuverlässiger
@@ -3124,7 +3124,7 @@ double EOS_te_from_r_ee(double r, double e)
   {
     char errstr[255];
     sprintf(errstr, "ERROR in EOS_te_from_r_ee: Density=%.4e exceeds interpolation range of table: xmin=%.4e, xmax=%.4e\n",
-      r,intp_ee_from_r_tesqrt.xmin, intp_ee_from_r_tesqrt.xmin);
+      r,intp_ee_from_r_tesqrt.xmin, intp_ee_from_r_tesqrt.xmax);
     error(errstr);
   }  
 #endif
