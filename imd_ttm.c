@@ -2223,8 +2223,6 @@ void ttm_writeout(int number)
     {
       if(myid==cur_vlattice_proc)
       {
-printf("ICH send:%d\n",cur_vlattice_proc);
-
         MPI_Send(&vlattice1[0], vlattice_dim, mpi_element2, 0, 101011, cpugrid);
       }
 
@@ -2519,7 +2517,6 @@ void ttm_read(int number)
 #ifdef VLATTICE
     if(buf[l].natoms==-2) //vlattice zellen
     {
-
       vlattice1[v].temp=buf[l].temp;
       vlattice1[v].natoms = buf[l].natoms;
       vlattice1[v].md_temp = buf[l].md_temp;

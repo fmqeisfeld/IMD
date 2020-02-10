@@ -674,6 +674,9 @@ int bb_minimize(int);
 
 
 /* write distributions - file imd_distrib.c */
+//MYMOD
+void make_distrib_temperature(int fzhlr); //<-- berechnet und schreibt direkt aus
+//ENDOF MYMOD
 void make_distrib_density(void); 
 void write_distrib_density(int, int);
 void make_write_distrib_select(int, void (*fun)(float*, cell*, int), 

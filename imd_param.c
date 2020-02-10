@@ -466,6 +466,12 @@ int getparamfile(char *paramfname, int phase)
       /* number of steps between energy dist. writes */
       getparam(token,&dist_int,PARAM_INT,1,1);
     }
+//MYMOD
+     else if (strcasecmp(token,"dist_mdtemp_flag")==0) {
+      /* write average sample velocity? */
+      getparam(token,&dist_mdtemp_flag,PARAM_INT,1,1);
+    }
+//ENDOF MYMOD    
     else if (strcasecmp(token,"dist_dim")==0) {
       /* dimension of distributions */
       getparam(token,&dist_dim,PARAM_INT,DIM,DIM);
@@ -3941,7 +3947,7 @@ void check_parameters_complete()
   if(atomic_charge==0)
     error("You must specify atomic_charge");
 #endif /* TTM */
-  
+
 #ifdef FILTER
   if(filter_int==0)
     error("You must specify filter_int");
@@ -4268,6 +4274,9 @@ void broadcast_params() {
   MPI_Bcast( &dist_dens_flag,        1, MPI_INT, 0, MPI_COMM_WORLD);
   MPI_Bcast( &dist_vxavg_flag,       1, MPI_INT, 0, MPI_COMM_WORLD);
   MPI_Bcast( &box_from_header,       1, MPI_INT, 0, MPI_COMM_WORLD);
+  //MYMOD
+    MPI_Bcast( &dist_mdtemp_flag,       1, MPI_INT, 0, MPI_COMM_WORLD);
+  //ENDOF MYMOD
 
 #ifdef TWOD
   /*  MPI_Bcast( &pic_scale   , 2, REAL, 0, MPI_COMM_WORLD); */

@@ -1,4 +1,3 @@
-
 /******************************************************************************
 *
 * IMD -- The ITAP Molecular Dynamics Program
@@ -100,7 +99,11 @@ void write_distrib(int steps)
 
   /* make number density distribution */
   make_distrib_density();
-
+// MYMOD
+  if (dist_mdtemp_flag) {
+    make_distrib_temperature(fzhlr);
+  }
+//ENDOF MYMOD
   if (dist_Ekin_flag) {
     make_write_distrib_select( 1, dist_Ekin_fun, 
       dist_Ekin_flag, fzhlr, "Ekin", "Ekin");
@@ -489,6 +492,183 @@ void write_distrib_density(int mode, int fzhlr)
 
 }
 
+
+//MYMOD
+/******************************************************************************
+*
+*  make temperature distribution
+*
+******************************************************************************/
+void make_distrib_temperature(int fzhlr) //, char *suffix, char *cont)
+{
+  cell *p;
+  real scalex, scaley, scalez;
+  int  num, numx, numy, numz;
+  int  i,k;
+
+  float *vcomx,*vcomy,*vcomz;
+  float *vcomx_r,*vcomy_r,*vcomz_r; //reduced
+  float *totmass, *totmass_r;
+  float *mdtemp,*mdtemp_r;
+
+  vcomx = (float *) malloc( dist_dim.x * dist_dim.y * dist_dim.z* sizeof(float) );
+  vcomy = (float *) malloc( dist_dim.x * dist_dim.y * dist_dim.z* sizeof(float) );
+  vcomz = (float *) malloc( dist_dim.x * dist_dim.y * dist_dim.z* sizeof(float) );
+
+  vcomx_r = (float *) malloc( dist_dim.x * dist_dim.y * dist_dim.z* sizeof(float) );
+  vcomy_r = (float *) malloc( dist_dim.x * dist_dim.y * dist_dim.z* sizeof(float) );
+  vcomz_r = (float *) malloc( dist_dim.x * dist_dim.y * dist_dim.z* sizeof(float) );
+
+  totmass   = (float *) malloc( dist_dim.x * dist_dim.y * dist_dim.z* sizeof(float) );
+  totmass_r = (float *) malloc( dist_dim.x * dist_dim.y * dist_dim.z* sizeof(float) );
+
+  mdtemp   = (float *) malloc( dist_dim.x * dist_dim.y * dist_dim.z* sizeof(float) );
+  mdtemp_r = (float *) malloc( dist_dim.x * dist_dim.y * dist_dim.z* sizeof(float) );
+
+  /* the bins are orthogonal boxes in space */
+  scalex = dist_dim.x / (dist_ur.x - dist_ll.x);
+  scaley = dist_dim.y / (dist_ur.y - dist_ll.y);
+  scalez = dist_dim.z / (dist_ur.z - dist_ll.z);
+
+  /* clear distribution */
+  for (i=0; i<dist_size; i++){
+    vcomx[i]=vcomy[i]=vcomz[i]=0.0;
+    totmass[i]=0.0;
+    mdtemp[i]=0.0;
+    num_2[i] = 0.0;
+  } 
+
+  //1st loop over atoms to get vcom    
+  for (k=0; k<NCELLS; ++k) {
+    p = CELLPTR(k);
+    for (i=0; i<p->n; ++i) {
+      /* which bin? */
+      numx = scalex * (ORT(p,i,X) - dist_ll.x);
+      if ((numx < 0) || (numx >= dist_dim.x)) continue;
+      numy = scaley * (ORT(p,i,Y) - dist_ll.y);
+      if ((numy < 0) || (numy >= dist_dim.y)) continue;
+      num = numx * dist_dim.y + numy;
+      numz = scalez * (ORT(p,i,Z) - dist_ll.z);
+      if ((numz < 0) || (numz >= dist_dim.z)) continue;
+      num = num * dist_dim.z + numz;
+
+      vcomx[num] += IMPULS(p,i,X) ;
+      vcomy[num] += IMPULS(p,i,Y) ;
+      vcomz[num] += IMPULS(p,i,Z) ;
+      totmass[num] += MASSE(p,i);
+      num_2[num] += 1.0; //Atomzahl
+    }
+  }
+
+  /* add up results form different CPUs */
+#ifdef MPI
+  MPI_Allreduce( vcomx, vcomx_r, dist_size, MPI_FLOAT, MPI_SUM, cpugrid);
+  MPI_Allreduce( vcomy, vcomy_r, dist_size, MPI_FLOAT, MPI_SUM, cpugrid);
+  MPI_Allreduce( vcomz, vcomz_r, dist_size, MPI_FLOAT, MPI_SUM, cpugrid);
+  MPI_Allreduce( totmass, totmass_r, dist_size, MPI_FLOAT, MPI_SUM, cpugrid);
+  MPI_Reduce( num_2, num_1, dist_size, MPI_FLOAT, MPI_SUM, 0, cpugrid); //Atomzahl
+#endif
+
+  for(i=0;i<dist_size;i++)
+  {
+    if(totmass_r[i]>0 )
+    {
+      vcomx_r[i] /= totmass_r[i];
+      vcomy_r[i] /= totmass_r[i];
+      vcomz_r[i] /= totmass_r[i];
+//printf("myid:%d, i:%d, vcomx:%f\n",myid,i,vcomx_r[i]);
+    }
+  }
+
+ //2nd loop
+  for (k=0; k<NCELLS; ++k) 
+  {
+    p = CELLPTR(k);
+    for (i=0; i<p->n; ++i) 
+    {
+      /* which bin? */
+      numx = scalex * (ORT(p,i,X) - dist_ll.x);
+      if ((numx < 0) || (numx >= dist_dim.x)) continue;
+      numy = scaley * (ORT(p,i,Y) - dist_ll.y);
+      if ((numy < 0) || (numy >= dist_dim.y)) continue;
+      num = numx * dist_dim.y + numy;
+      numz = scalez * (ORT(p,i,Z) - dist_ll.z);
+      if ((numz < 0) || (numz >= dist_dim.z)) continue;
+      num = num * dist_dim.z + numz;
+
+      mdtemp[num] += MASSE(p,i) * SQR(IMPULS(p,i,X)/MASSE(p,i) - vcomx_r[num]);
+      mdtemp[num] += MASSE(p,i) * SQR(IMPULS(p,i,Y)/MASSE(p,i) - vcomy_r[num]);
+      mdtemp[num] += MASSE(p,i) * SQR(IMPULS(p,i,Z)/MASSE(p,i) - vcomz_r[num]);
+
+printf("myid:%d, md:%f\n",myid,mdtemp[num]);
+    }
+  }
+
+#ifdef MPI
+  MPI_Reduce( mdtemp, mdtemp_r, dist_size, MPI_FLOAT, MPI_SUM, 0, cpugrid);
+#endif
+
+  for(i=0;i<dist_size;i++)
+  {
+    if(totmass_r[i]>0 )
+    {      
+      mdtemp_r[i] /= 3.0 * ((float) num_1[i]);
+    }
+  }
+  /////////////     WRITE distributions  /////////////////
+  if(myid==0)
+  {
+    FILE  *outfile;
+    char  fname[255];
+    int   r, s, t;
+
+
+    /* open distribution file, write header */
+    sprintf(fname, "%s.%u.%s", outfilename, fzhlr, "mdtemp");
+    outfile = fopen(fname, "w");
+    if (NULL == outfile) error("Cannot open md-temp distribution file.");
+
+    /* write distribution */  
+    i=0;
+    for (r=0; r<dist_dim.x; r++)
+    {
+      for (s=0; s<dist_dim.y; s++)
+      {
+        for (t=0; t<dist_dim.z; t++)
+        {
+          fprintf(outfile,"%e\n", mdtemp_r[i++]);
+        }
+      }
+    }
+
+
+    fclose(outfile);
+  }
+
+  /* write minmax */
+  // WOZU?
+
+  // sprintf(fname, "%s.minmax.%s", outfilename, "dens");
+  // outfile = fopen(fname, "a");
+  // if (NULL == outfile) error("Cannot open minmax file.");
+  // fprintf(outfile, "%d %e %e\n", fzhlr, min, max);
+  // fclose(outfile);
+
+
+  //FREE MEM  
+  free(mdtemp);
+  free(mdtemp_r);
+  free(vcomx);
+  free(vcomy);
+  free(vcomz);
+  free(vcomx_r);
+  free(vcomy_r);
+  free(vcomz_r);
+  free(totmass);
+  free(totmass_r);
+}
+
+//ENDOF MYMOD
 /******************************************************************************
 *
 *  make and write distribution of selected variables
