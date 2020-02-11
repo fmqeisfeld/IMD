@@ -600,7 +600,7 @@ void make_distrib_temperature(int fzhlr) //, char *suffix, char *cont)
       mdtemp[num] += MASSE(p,i) * SQR(IMPULS(p,i,Y)/MASSE(p,i) - vcomy_r[num]);
       mdtemp[num] += MASSE(p,i) * SQR(IMPULS(p,i,Z)/MASSE(p,i) - vcomz_r[num]);
 
-printf("myid:%d, md:%f\n",myid,mdtemp[num]);
+//printf("myid:%d, md:%f\n",myid,mdtemp[num]);
     }
   }
 

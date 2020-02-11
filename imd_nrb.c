@@ -49,7 +49,7 @@
 //	   NACHTEIL: Wahrscheinlich nicht sonderlich performant + Kommunikationsmonster (alle NRB-infos werden JEDEN step kommuniziert. send_cells vor der kraftschleife und send_forces danach)
 //********************************************************************************************************************************************************************************
 #define DEBUG_LEVEL 0
-#define WATCHME 23402 
+#define WATCHME 18582
 //#define WATCH ( (NUMMER(bndcell,bndi)==38400) || (NUMMER(bndcell,bndi)==38084) )
 //#define WATCH ( (NUMMER(bndcell,bndi)==9764) )
 #define PRINTSTEP 1
@@ -662,8 +662,14 @@ if(pbc_dirs.y==1)
     // um nrb-info auf allen beteiligten procs zu vereinheitlichen
     // **********************************************************************
     have_valid_nrb=1;
-    nrb_send_cells(copy_nrb_max,pack_nrb,unpack_nrb_max); //acumm. results 
-    nrb_inverse_send_cells(copy_nrb_max,pack_nrb,unpack_nrb_max);
+#ifdef LOADBALANCE
+sync_cells_direct(copy_nrb_max,pack_nrb,unpack_nrb_max,0); //acumm. results //ACHTUNG: sync_cells macht alles kaputt --> NRB und LB nicht kompatibel
+#else
+nrb_send_cells(copy_nrb_max,pack_nrb,unpack_nrb_max); //acumm. results 
+#endif
+
+    // nrb_send_cells(copy_nrb_max,pack_nrb,unpack_nrb_max); //acumm. results 
+nrb_inverse_send_cells(copy_nrb_max,pack_nrb,unpack_nrb_max);
     // **********************************************************************
 
     //korrektur-loop: atom darf nicht bnd-atom und neigh-atom gleichzeitig sein! 
@@ -793,10 +799,18 @@ int nrb_forces(void)
         IMPULS(p,i,Z)=0.0;
         IMPULS(p,i,Y)=0.0;
 
+// if(NUMMER(p,i)==WATCHME)
+//   printf("myid:%d, in:%d, bnd:%d, neigh:%d, celltype:%d,lbtype:%d\n",
+//       myid,NUMMER(p,i),NRBBND(p,i), NRBNEIGH(p,i), p->celltype,p->lb_cell_type);
         // *************************************
         // * SELF CONTRIB only for real atoms
         // **************************************
+
+#ifdef LOADBALANCE
+        if(p->lb_cell_type==LB_REAL_CELL) //==1
+#else
         if(p->celltype==1)
+#endif      
         {
           //Comp. U-self contrib.
           U_self.x=ORT(p,i,X)-REF_POS(p,i,X);
@@ -2529,7 +2543,7 @@ if(steps<300)
         //2D FALL
 
         vektor d0,d1,dist;
-        d0.x=115;d0.y=box_y.y/2.0;d0.z=0; //left surface //big sample
+        d0.x=1100.0;d0.y=box_y.y/2.0;d0.z=0; //left surface //big sample
         d0.z=0.0;
 //      d0.x=21; d0.y=145.0; //small sample
 
@@ -2544,16 +2558,17 @@ if(steps<300)
         sigmay=50.0;  //small sample
 
         real sigmaspatial;
-        sigmaspatial=80; //big sample
-        real depth=120.0; //big
+        sigmaspatial=40; //big sample
+        real depth=80.0; //big
 
 
         real xofy=depth*exp(-0.5*pow(dist.y/sigmay,2.0));
-        if(dist.x<=xofy)
+        //if(dist.x<=xofy)
+        if(dist.x<=depth)
         {
           real timefun=exp(-0.5*pow((double) (steps-150)/50,2.0));
           real spatial=exp(-0.5*pow(dist.x/sigmaspatial,2.0));
-          real intens=timefun*spatial*100; //small sample
+          real intens=timefun*spatial*40; //small sample
 
           KRAFT(p,i,X)  += ((drand48()-0.5)*intens);
           KRAFT(p,i,Y)  += ((drand48()-0.5)*intens);

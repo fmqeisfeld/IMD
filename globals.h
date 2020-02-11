@@ -1144,7 +1144,13 @@ EXTERN ivektor force_celldim_divisor INIT(einsivektor); /* if you want cell dime
   /* These will point to the calculation net in a nice 3D array fashion */
 
 EXTERN  double max_dt_ttm; //in IMD time-units
+
+#ifdef LOADBALANCE
+EXTERN  ttm_Element * l1, * l2, * l3;
+#else
 EXTERN  ttm_Element *** l1, *** l2, *** l3;
+#endif
+
   /* These will be used to allocate and free the nets in bulk */
 EXTERN  ttm_Element * lattice1, * lattice2;
 EXTERN real fd_k INIT(17.33); /* electronic thermal conductivity */

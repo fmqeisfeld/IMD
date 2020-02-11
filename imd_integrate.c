@@ -600,7 +600,8 @@ void move_atoms_ttm(void)
 #ifdef _OPENMP
 #pragma omp parallel for reduction(+:tot_kin_energy,omega_E)
 #endif
-  for (k=0; k<NCELLS; ++k) { /* loop over all cells */
+  for (k=0; k<NCELLS; ++k) 
+  { /* loop over all cells */
 
     int  i,j, sort;
     int fd_i, fd_j, fd_k;
@@ -609,28 +610,25 @@ void move_atoms_ttm(void)
     real kin_energie_1, kin_energie_2, tmp;
 
     p = CELLPTR(k);
-
-     
+    
     fd_i=p->fd_cell_idx.x;
     fd_j=p->fd_cell_idx.y;
     fd_k=p->fd_cell_idx.z;
 
     /* get coupling constant, if fd cell is inactive, no coupling */
+  #ifdef LOADBALANCE
+    fd_xi=(l1[fd_i].natoms>=fd_min_atoms) ? (l1[fd_i].xi):(0.0);
+  #else  
     fd_xi=(l1[fd_i][fd_j][fd_k].natoms>=fd_min_atoms)?(l1[fd_i][fd_j][fd_k].xi):(0.0);
+  #endif
 
     // MY MOD : DEBUG
     // printf("proc:%d,steps:%d,i:%d,j:%d,k:%d,fd_xi:%e\n",myid,steps,fd_i,fd_j,fd_k,fd_xi);
 
-    for (i=0; i<p->n; ++i) { /* loop over all atoms in the cell */
+    for (i=0; i<p->n; ++i) 
+    { /* loop over all atoms in the cell */
 #ifdef DEBUG
       double delta_E_atom;
-#endif
-
-      /**********************
-      * MY MOD: MEAN CHARGE *
-      ***********************/
-#ifdef VARCHG
-      CHARGE(p,i)=l1[fd_i][fd_j][fd_k].Z;
 #endif
 
       kin_energie_1 = SPRODN(IMPULS,p,i,IMPULS,p,i);
@@ -644,8 +642,6 @@ void move_atoms_ttm(void)
       KRAFT(p,i,Z) += (fbc_forces + sort)->z;
 #endif
 #endif
-
-
       
       /* and set their force (->momentum) in restricted directions to 0 */
       KRAFT(p,i,X) *= (restrictions + sort)->x;
@@ -658,31 +654,9 @@ void move_atoms_ttm(void)
       omega_E += SPRODN(KRAFT,p,i,KRAFT,p,i) / MASSE(p,i);
 #endif
 
-#ifdef DEBUG
-      /* dE = dt * v * F(el->ph)
-       * mit F(el->ph) = xi*m*v_therm
-       * ******************************* */
-      delta_E_atom = 1/MASSE(p,i) * timestep
-	             * (  IMPULS(p,i,X) * fd_xi * MASSE(p,i) * ( IMPULS(p,i,X)/MASSE(p,i) - l1[fd_i][fd_j][fd_k].vcomx)
-			+ IMPULS(p,i,Y) * fd_xi * MASSE(p,i) * ( IMPULS(p,i,Y)/MASSE(p,i) - l1[fd_i][fd_j][fd_k].vcomy)
-#ifndef TWOD
-			+ IMPULS(p,i,Z) * fd_xi * MASSE(p,i) * ( IMPULS(p,i,Z)/MASSE(p,i) - l1[fd_i][fd_j][fd_k].vcomz)
-#endif /*TWOD*/
-		       );
-      E_ph_auf_local += delta_E_atom;
-#endif /*DEBUG*/
-
 
       /* TTM: p += (F + xi*m*v_therm) * dt  
-       * ********************************** */
-	
-/*
-      if(isnan(fd_xi)!=0)
-      {
-	printf("step:%d,proc:%d,xi is NaN\n",steps,myid);
-	error("xi is NaN\n");
-      }
-*/
+       * ********************************** */	
 //MYMOD: Pdecay (mode=3) an dieser stelle um zusaetzliche loop zu vermeiden
 #ifdef PDECAY
  if( ORT(p,i,X) > ramp_start )     
@@ -700,9 +674,14 @@ void move_atoms_ttm(void)
     }
   #endif
 #endif
+
+#ifdef LOADBALANCE    
+      IMPULS(p,i,X) += timestep * ( KRAFT(p,i,X) + fd_xi * MASSE(p,i) * ( IMPULS(p,i,X)/MASSE(p,i) - l1[fd_i].vcomx) );
+      IMPULS(p,i,Y) += timestep * ( KRAFT(p,i,Y) + fd_xi * MASSE(p,i) * ( IMPULS(p,i,Y)/MASSE(p,i) - l1[fd_i].vcomy) );
+      IMPULS(p,i,Z) += timestep * ( KRAFT(p,i,Z) + fd_xi * MASSE(p,i) * ( IMPULS(p,i,Z)/MASSE(p,i) - l1[fd_i].vcomz) );    
+#else
       IMPULS(p,i,X) += timestep * ( KRAFT(p,i,X) + fd_xi * MASSE(p,i) * ( IMPULS(p,i,X)/MASSE(p,i) - l1[fd_i][fd_j][fd_k].vcomx) );
       IMPULS(p,i,Y) += timestep * ( KRAFT(p,i,Y) + fd_xi * MASSE(p,i) * ( IMPULS(p,i,Y)/MASSE(p,i) - l1[fd_i][fd_j][fd_k].vcomy) );
-#ifndef TWOD
       IMPULS(p,i,Z) += timestep * ( KRAFT(p,i,Z) + fd_xi * MASSE(p,i) * ( IMPULS(p,i,Z)/MASSE(p,i) - l1[fd_i][fd_j][fd_k].vcomz) );
 #endif
 

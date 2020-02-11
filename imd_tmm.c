@@ -8,7 +8,8 @@
 //
 // 
 
-
+#define node  l1[i]
+#define node2 l2[i]
 
 /*2x2 Matrix multiplication*/
 void matmul(double complex *a,double complex *b,double complex *p)
@@ -174,7 +175,8 @@ if(steps<2) return 0;
  for(i=1;i<local_fd_dim.x-1;i++)
  {
    iglobal = (i-1) + my_coord.x*(local_fd_dim.x-2); 
-   if(l1[i][1][1].natoms<fd_min_atoms)
+   //if(l1[i][1][1].natoms<fd_min_atoms)
+  if(node.natoms<fd_min_atoms)
    {
      tmm_eps_real_arr_local[iglobal]=0.0;
      tmm_eps_imag_arr_local[iglobal]=0.0;
@@ -185,8 +187,8 @@ if(steps<2) return 0;
    //tmm_eps_imag_arr_local[iglobal]=i
 
 
-   tmm_get_epsilon(lambda,l1[i][1][1].temp, l1[i][1][1].md_temp,
-                  l1[i][1][1].Z, l1[i][1][1].ne, &tmm_eps_real_arr_local[iglobal],
+   tmm_get_epsilon(lambda,node.temp, node.md_temp,
+                  node.Z, node.ne, &tmm_eps_real_arr_local[iglobal],
                   &tmm_eps_imag_arr_local[iglobal]);
 
 
@@ -385,7 +387,7 @@ if(myid==0)
 MPI_Scatter(&tmm_Qabs[0], local_fd_dim.x-2, MPI_DOUBLE, &tmm_Qabs_scat[0], local_fd_dim.x-2, MPI_DOUBLE, 0, cpugrid);
 for(i=1;i<local_fd_dim.x-1;i++)
 {
-  l1[i][1][1].source=l2[i][1][1].source=tmm_Qabs_scat[i-1];
+  node.source=node2.source=tmm_Qabs_scat[i-1];
   //printf("me:%d,i:%d,src:%.4e\n",myid,i,l1[i][1][1].source);
 }
  return 0;

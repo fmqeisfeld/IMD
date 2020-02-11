@@ -1039,6 +1039,10 @@ NUMNEIGHS(p,i) += nbttm;
   //Atome werden beim nächsten fix_cells-aufruf gelöscht 
 
 #endif 
+
+// #ifdef NRB
+//       nrb_test_forces();
+//  #endif
 //ENDOF MYMOD
 
   /* add forces back to original cells/cpus */
@@ -1059,12 +1063,12 @@ NUMNEIGHS(p,i) += nbttm;
   */
 
 //MYMOD
-/*
-#ifdef NRB
-     nrb_test_forces();
-#endif
+
+// #ifdef NRB
+//      nrb_test_forces();
+// #endif
 //ENDOF MYMOD
-*/
+
 
 }
 
