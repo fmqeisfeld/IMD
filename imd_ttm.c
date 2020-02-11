@@ -32,7 +32,7 @@
 #define ADVMODE 1  // 0=NO ADVECTION, 1=DISCRETE FLUX SOLVER (PREDICT ATOMIC FLUXES)
 //#define ADVMODE2d  // FALLS y dim offen sein soll, müssen atomic-fluxes auch über kanten kommmuniziert werden
 
-// #define VLATTICE  //VIRTUAL LATTICE HINTER DER PROBE. ACHTUNG: NUR 1D !!!!
+#define VLATTICE  //VIRTUAL LATTICE HINTER DER PROBE. ACHTUNG: NUR 1D !!!!
                     //Falls gewünscht kann mit vlat_buffer die zahl
                     //der zellen (vom ende der probe gezählt) angegeben werden, die NICHT im TTM berücksichtigt
                     //werden soll, da diese als Puffer dienen 
@@ -471,7 +471,7 @@ for(i_global=0; i_global < global_fd_dim.x;i_global++)
   //Jetzt müssen noch die zellen deaktiviert werden, die als "puffer" dienen
   for (i = 1; i < local_fd_dim.x - 1; ++i)
   {
-    i_global =  ((i - 1) + my_coord.x * (local_fd_dim.x - 2));
+    i_global =  ((i - 1) + myid * (local_fd_dim.x - 2));
     if(i_global > last_active_cell_global)
       l1[i].natoms=l2[i].natoms=-1;  //So erkenne ich deaktivierte Zellen
   }
@@ -873,7 +873,7 @@ void init_ttm()
     {
             
       int i_global=(int) (ORT(p,i,X)/fd_h.x) ;
-      int i_local=i_global+1-my_coord.x*(local_fd_dim.x-2);
+      int i_local=i_global+1-myid*(local_fd_dim.x-2);
 
       if(i_local> -1 && i_local< local_fd_dim.x+1 )
       {
@@ -1045,7 +1045,7 @@ void do_ADV(double tau)
       SwapTTM(i, j, k);
 #endif
 
-      i_global = ((i - 1) + my_coord.x * (local_fd_dim.x - 2));
+      i_global = ((i - 1) + myid * (local_fd_dim.x - 2));
       //j_global = ((j - 1) + my_coord.y * (local_fd_dim.y - 2));
       //k_global =  ((k-1) + my_coord.z*(local_fd_dim.z-2));
 
@@ -1134,7 +1134,7 @@ void do_cell_activation(void)
     //NOW CHECK IF NEW CELL ACTIVATED!!
   for (i = 1; i < local_fd_dim.x - 1; ++i)
   {
-    i_global = ((i - 1) + my_coord.x * (local_fd_dim.x - 2));
+    i_global = ((i - 1) + myid * (local_fd_dim.x - 2));
     if (node.natoms_old >= fd_min_atoms && node.natoms < fd_min_atoms)
     {
       // ZELLE DEAKTIVIERT
@@ -1369,7 +1369,7 @@ void do_DIFF(double tau)
   if(cur_vlattice_proc==myid)
   {
 
-    int ilocal= last_active_cell_global+1-my_coord.x*(local_fd_dim.x-2);
+    int ilocal= last_active_cell_global+1-myid*(local_fd_dim.x-2);
     xminTe = l1[ilocal].temp;
     xmink  = l1[ilocal].fd_k;
     // Ci AUS GEOS: rho: 2.665655433e+03 temp: 3.000000000e+02 cvi: 8.589449886e+02           

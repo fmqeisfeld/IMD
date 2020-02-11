@@ -1197,12 +1197,12 @@ EXTERN int dirichlet_surfx_int INIT(0);
 //MYMOD FOR VIRTUAL TTM LATTICE
 EXTERN  ttm_Element * vlattice1, * vlattice2; //virtual lattice // nur 1D!!
 EXTERN  ttm_Element * vlattice3; //brauche nur den pointer (wie)
-EXTERN int vlattice_dim INIT(10);
+EXTERN int vlattice_dim INIT(30);
 //EXTERN int last_active_cell_local INIT(0); //iglobal of last ttm-cell with >= fd_min_atoms
 //EXTERN int last_active_cell_global INIT(0); 
 EXTERN int cur_vlattice_proc INIT(0); //welcher proc kümmert sich darum?
 EXTERN int old_vlattice_proc INIT(-1); //falls sich was ändert -> Bcast das komplette vlattice zum neuen proc!
-EXTERN int vlat_buffer INIT(16); // So viele zellen werden von der letzten aus ignoriert...diese paar letzten zellen 
+EXTERN int vlat_buffer INIT(8); // So viele zellen werden von der letzten aus ignoriert...diese paar letzten zellen 
                                 // werden in DIFFLOOP als leer wahrgenommen, da sie durch nicht-reflektierende
                                 // Randbedingungen runtergekühlt werden und unnatürlichen temperaturfluss herbeiführen!
 //EXTERN vlatmax last_active_cell_local,last_active_cell_global;
