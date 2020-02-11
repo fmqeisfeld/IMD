@@ -12,7 +12,7 @@
 
 #include <sys/time.h> // Performance messen
 #include <complex.h>
-#include <gsl_sf_fermi_dirac.h> // Fuer fermi-dirac integral zur berechnung der FEG-internen energie
+#include "/usr/include/gsl/gsl_sf_fermi_dirac.h"  // Fuer fermi-dirac integral zur berechnung der FEG-internen energie
                                 // als alternative zur interpol.Tabelle (falls gewünscht: EOSMODE = 0)
 
 
@@ -25,7 +25,7 @@
 
 #define DENSHOTFIXSTEP 10000 //bist zu diesem step bleibt surf-dens const.
 
-#define EOSMODE 0  // 1=EOS-TABLE, 0 = Free Electron Gas
+#define EOSMODE 1  // 1=EOS-TABLE, 0 = Free Electron Gas
                    // ACHTUNG: FEG Momentan totaler BS --> t_from_e viel zu ungenau (+/- 10 %)
                    // Grund: weiss nicht genau aber vermute Fermi_dirac integral 
                    // Evtl. wäre "manuelles" integrieren zuverlässiger
@@ -71,7 +71,7 @@ void calc_ttm()
 
   int telaps_md;     //fuer timing
   int telaps_ttm;
-  fd_n_timesteps=100;
+  fd_n_timesteps=300;
   diff_substeps=fd_n_timesteps;
 
   tau_DIFF=(timestep)/((double) fd_n_timesteps);
@@ -79,25 +79,27 @@ void calc_ttm()
   
   update_fd();
 #if ADVMODE == 1  
-  // do_ADV(1.0);
+  do_ADV(1.0);
 #endif
   do_cell_activation();
 #ifdef COLRAD
   do_colrad(timestep*10.18*1.0e-15);
 #endif
-
   do_FILLMESH(); // calc. wide-range properties
   ttm_fill_ghost_layers();  
 
   for (i = 0; i < diff_substeps; i++)
   {
-    //do_FILLMESH();
     do_tmm(tau_DIFF); //Helmholtz-solver
     tmm_time += tau_DIFF * 10.18 * 1.0e-15; //in sek
     do_DIFF(tau_DIFF);
     do_FILLMESH();
     ttm_fill_ghost_layers();            
   }
+  //xi_arr global muss noch aus xiarrlocal reduziert werden
+  //beginnend bei index=1 (brauche ghost-layer nicht)
+  MPI_Allgather(&xiarr_local[1], local_fd_dim.x-2, MPI_DOUBLE, 
+                &xiarr_global[0],local_fd_dim.x-2, MPI_DOUBLE, cpugrid);
 
 {
     //Calc internal eng and updt new U after diff
@@ -146,9 +148,14 @@ void update_fd()
   //buffer arrays für allreduce
   int * natomslocal, *natomsglobal;
   int * totneighslocal, *totneighsglobal;
-  double *vcomxlocal,*vcomxglobal;
-  double *vcomylocal,*vcomyglobal;
-  double *vcomzlocal,*vcomzglobal;
+
+  //Folgende arrays zu globalen vars gemacht, da
+  //imd integrate sie braucht
+
+  // double *vcomxlocal,*vcomxglobal;
+  // double *vcomylocal,*vcomyglobal;
+  // double *vcomzlocal,*vcomzglobal;
+
   int *fluxfromrightlocal,*fluxfromleftlocal;
   int *fluxfromrightglobal,*fluxfromleftglobal;
   double * mdtemplocal,*mdtempglobal;
@@ -165,14 +172,15 @@ void update_fd()
   alloc1darr(int, totneighslocal, global_fd_dim.x);
   alloc1darr(int, totneighsglobal, global_fd_dim.x);
 
-  alloc1darr(double, vcomxlocal, global_fd_dim.x);
-  alloc1darr(double, vcomxglobal, global_fd_dim.x);
+  //Nacht init_ttm verschoben
+  // alloc1darr(double, vcomxlocal, global_fd_dim.x);
+  // alloc1darr(double, vcomxglobal, global_fd_dim.x);
 
-  alloc1darr(double, vcomylocal, global_fd_dim.x);
-  alloc1darr(double, vcomyglobal, global_fd_dim.x);
+  // alloc1darr(double, vcomylocal, global_fd_dim.x);
+  // alloc1darr(double, vcomyglobal, global_fd_dim.x);
 
-  alloc1darr(double, vcomzlocal, global_fd_dim.x);
-  alloc1darr(double, vcomzglobal, global_fd_dim.x);
+  // alloc1darr(double, vcomzlocal, global_fd_dim.x);
+  // alloc1darr(double, vcomzglobal, global_fd_dim.x);
 
   alloc1darr(double, mdtemplocal,  global_fd_dim.x);
   alloc1darr(double, mdtempglobal, global_fd_dim.x);
@@ -182,17 +190,15 @@ void update_fd()
   {
     natomslocal[i]=totneighslocal[i]=fluxfromleftlocal[i]=fluxfromrightlocal[i]=0;
     vcomxlocal[i]=vcomylocal[i]=vcomzlocal[i]=mdtemplocal[i]=0.0;
+
+    xiarr_global[i]=0.0;
   }
+
 
 #if DEBUG_LEVEL>1
   printf("steps:%d,proc:%d,entered update_fd\n", steps, myid);
 #endif
 
-  //Clear dirichlet-maxx-array
-#ifdef DIRICHLET
-  for (j = 0; j < global_fd_dim.y; ++j)
-    dirichlet_maxx_local[j] = -1;
-#endif
 
 #ifdef VLATTICE
   last_active_cell_local=-5000;
@@ -219,7 +225,6 @@ void update_fd()
   // * FIRST LOOP: Clear arrays,get md-temps and detect
   // * activation/deactivation of FD-Cells
   // ************************************************************************
-
   for (i = 1; i < local_fd_dim.x - 1; ++i)
   {
     // i_global =  ((i - 1) + my_coord.x * (local_fd_dim.x - 2));    
@@ -236,12 +241,13 @@ void update_fd()
     node.natoms = node2.natoms = 0; 
     node.xi = node2.xi = 0.0;
     node.source = node2.source = 0.0;
+
+    xiarr_local[i]=0.0;
   }
 // **********************
 //   1st LOOP OVER ATOMS
 // **********************
 // printf("myid:%d,1st loop start\n",myid);  
-
  for (k=0; k<NCELLS; ++k) 
  {
     p = CELLPTR(k);
@@ -287,7 +293,7 @@ void update_fd()
  // *************************
  //  REDUCE Buffer arrays
  // *************************
- MPI_Barrier(cpugrid);
+ // MPI_Barrier(cpugrid);
  // printf("myid:%d,before allred\n",myid);  
 
  MPI_Allreduce(natomslocal, natomsglobal, global_fd_dim.x, MPI_INT, MPI_SUM, cpugrid);
@@ -301,7 +307,7 @@ void update_fd()
  MPI_Allreduce(vcomylocal, vcomyglobal, global_fd_dim.x, MPI_DOUBLE, MPI_SUM, cpugrid);
  MPI_Allreduce(vcomzlocal, vcomzglobal, global_fd_dim.x, MPI_DOUBLE, MPI_SUM, cpugrid);
 // printf("myid:%d,after allred\n",myid);  
- MPI_Barrier(cpugrid);
+ // MPI_Barrier(cpugrid);
 
 // ****************************** 
 //   vcom muss korrigiert werden
@@ -357,13 +363,13 @@ for (k=0; k<NCELLS; ++k)
 }
 MPI_Allreduce(mdtemplocal, mdtempglobal, global_fd_dim.x, MPI_DOUBLE, MPI_SUM, cpugrid);
 
-// *******************************************
-// Reconstruct  Lattices from buffer arrays
-// *******************************************
+// **********************************************************
+// Reconstruct  local TTM-lattice from global buffer arrays
+// *************************************************************
 // printf("myid:%d,reconstruct\n",myid);  
 for(i_global=0; i_global < global_fd_dim.x;i_global++)
 {
-  int i_local=i_global+1-my_coord.x*(local_fd_dim.x-2);
+  int i_local=i_global+1-myid*(local_fd_dim.x-2);
 
 // printf("myid:%d,ig:%d,il:%d,max:%d\n",myid,i_global,i_local,local_fd_dim.x-1);
   if(i_local<1 || i_local > local_fd_dim.x-2)
@@ -411,12 +417,12 @@ for(i_global=0; i_global < global_fd_dim.x;i_global++)
   free(natomsglobal);
   free(totneighslocal);
   free(totneighsglobal);
-  free(vcomxlocal);
-  free(vcomxglobal);
-  free(vcomylocal);
-  free(vcomyglobal);
-  free(vcomzlocal);
-  free(vcomzglobal);
+  // free(vcomxlocal);
+  // free(vcomxglobal);
+  // free(vcomylocal);
+  // free(vcomyglobal);
+  // free(vcomzlocal);
+  // free(vcomzglobal);
   free(fluxfromleftlocal);
   free(fluxfromleftglobal);
   free(fluxfromrightlocal);
@@ -448,7 +454,7 @@ for(i_global=0; i_global < global_fd_dim.x;i_global++)
   MPI_Status vlatstatus;  
   MPI_Allreduce(&last_active_cell_local, &last_active_cell_global, 1, MPI_INT, MPI_MAX, cpugrid);
   //cur_vlattice_proc=last_active_cell_global.rank;)  
-  cur_vlattice_proc=(int) (((double) last_active_cell_global*cpu_dim.x) / ((double) global_fd_dim.x));
+  cur_vlattice_proc=(int) (((double) last_active_cell_global*num_cpus) / ((double) global_fd_dim.x));
 
 //printf("oldvlat:%d,nuvlat:%d, lastcell:%d\n",old_vlattice_proc, cur_vlattice_proc, last_active_cell_global.val);
   
@@ -496,14 +502,10 @@ void do_FILLMESH(void)
   j=k=1;
   for (i = 1; i < local_fd_dim.x - 1; ++i)
   {
-    i_global =  ((i - 1) + my_coord.x * (local_fd_dim.x - 2));
+    i_global =  ((i - 1) + myid * (local_fd_dim.x - 2));
 
     if (node.natoms >= fd_min_atoms)
     {
-
-if(myid==6 || myid==7)   
-printf("myid:%d,ig:%d,i:%d,atoms:%d,temp:%f,mdtemp:%f\n",
-      myid,i_global,i,node.natoms,node.temp,node.md_temp);
 
 #ifdef DENSHOTFIX
       if(i_global==first_active_cell_global)
@@ -632,7 +634,8 @@ printf("myid:%d,ig:%d,i:%d,atoms:%d,temp:%f,mdtemp:%f\n",
                                "Maybe Interpolation table too sparse or increase tolerance",tinit,tcheck); 
                error(errstr);
              }
-#else            
+#else          
+//ACHTUNG: gsl_fermi_integral schwankt extrem  
             node.U =FEG_ee_from_r_ne_te(node.dens, node.ne, node.temp * 11604.5) * 26.9815 * AMU * J2eV; // eV/Atom
             node2.U=node.U;
 
@@ -649,6 +652,7 @@ printf("myid:%d,ig:%d,i:%d,atoms:%d,temp:%f,mdtemp:%f\n",
                                tinit*11604.5,tcheck*11604.5,node.ne); 
                error(errstr);
              }            
+
 #endif     
           } 
         } // if steps < 1
@@ -725,64 +729,65 @@ void do_COMMFLUX(void)
    * *************/
 
   //first comm. yz-plane (+x/-x)
-  if (my_coord.x != 0 && my_coord.x != cpu_dim.x - 1) //BULK
+  if (myid != 0 && myid != num_cpus - 1) //BULK
   {
     //flux
-    MPI_Sendrecv(l1[local_fd_dim.x - 2].flux, 8, MPI_INT, nbwest, 7302, //+x
-                 l1[0].flux, 8, MPI_INT, nbeast, 7302,                  //-x
+    MPI_Sendrecv(l1[local_fd_dim.x - 2].flux, 8, MPI_INT, myid+1, 7302, //+x
+                 l1[0].flux, 8, MPI_INT, myid-1, 7302,                  //-x
                  cpugrid, &stati[0]);
 
-    MPI_Sendrecv(l1[1].flux, 8, MPI_INT, nbeast, 7402,                  //-x
-                 l1[local_fd_dim.x - 1].flux, 8, MPI_INT, nbwest, 7402, //+x
+    MPI_Sendrecv(l1[1].flux, 8, MPI_INT, myid-1, 7402,                  //-x
+                 l1[local_fd_dim.x - 1].flux, 8, MPI_INT, myid+1, 7402, //+x
                  cpugrid, &stati[1]);
+
     //selbes fuer interne eng.
-    MPI_Sendrecv(&l1[local_fd_dim.x - 2].U, 1, MPI_DOUBLE, nbwest, 5302, //+x
-                 &l1[0].U, 1, MPI_DOUBLE, nbeast, 5302,                  //-x
+    MPI_Sendrecv(&l1[local_fd_dim.x - 2].U, 1, MPI_DOUBLE, myid+1, 5302, //+x
+                 &l1[0].U, 1, MPI_DOUBLE, myid-1, 5302,                  //-x
                  cpugrid, &stati[0]);
 
-    MPI_Sendrecv(&l1[1].U, 1, MPI_DOUBLE, nbeast, 5402,                  //-x
-                 &l1[local_fd_dim.x - 1].U, 1, MPI_DOUBLE, nbwest, 5402, //+x
+    MPI_Sendrecv(&l1[1].U, 1, MPI_DOUBLE, myid-1, 5402,                  //-x
+                 &l1[local_fd_dim.x - 1].U, 1, MPI_DOUBLE, myid+1, 5402, //+x
                  cpugrid, &stati[1]);
   #ifdef COLRAD
     //selbes fuer colrad
-    MPI_Sendrecv(l1[local_fd_dim.x - 2].y, colrad_neq, MPI_DOUBLE, nbwest, 4302, //+x
-                 l1[0].y, colrad_neq, MPI_DOUBLE, nbeast, 4302,                  //-x
+    MPI_Sendrecv(l1[local_fd_dim.x - 2].y, colrad_neq, MPI_DOUBLE, myid+1, 4302, //+x
+                 l1[0].y, colrad_neq, MPI_DOUBLE, myid-1, 4302,                  //-x
                  cpugrid, &stati[0]);
 
-    MPI_Sendrecv(l1[1].y, colrad_neq, MPI_DOUBLE, nbeast, 4402,                  //-x
-                 l1[local_fd_dim.x - 1].y, colrad_neq, MPI_DOUBLE, nbwest, 4402, //+x
+    MPI_Sendrecv(l1[1].y, colrad_neq, MPI_DOUBLE, myid-1, 4402,                  //-x
+                 l1[local_fd_dim.x - 1].y, colrad_neq, MPI_DOUBLE, myid+1, 4402, //+x
                  cpugrid, &stati[1]);     
   #endif
   }
-  else if (my_coord.x == 0) //SURFACE:only comm. with nbwest
+  else if (myid == 0) //SURFACE:only comm. with nbwest
   {
     //flux
-    MPI_Sendrecv(l1[local_fd_dim.x - 2].flux, 8, MPI_INT, nbwest, 7302, //+x
-                 l1[local_fd_dim.x - 1].flux, 8, MPI_INT, nbwest, 7402, //+x
+    MPI_Sendrecv(l1[local_fd_dim.x - 2].flux, 8, MPI_INT, myid+1, 7302, //+x
+                 l1[local_fd_dim.x - 1].flux, 8, MPI_INT, myid+1, 7402, //+x
                  cpugrid, &stati[1]);
     //selbes fuer u
-    MPI_Sendrecv(&l1[local_fd_dim.x - 2].U, 1, MPI_DOUBLE, nbwest, 5302, //+x
-                 &l1[local_fd_dim.x - 1].U, 1, MPI_DOUBLE, nbwest, 5402, //+x
+    MPI_Sendrecv(&l1[local_fd_dim.x - 2].U, 1, MPI_DOUBLE, myid+1, 5302, //+x
+                 &l1[local_fd_dim.x - 1].U, 1, MPI_DOUBLE, myid+1, 5402, //+x
                  cpugrid, &stati[1]);
   #ifdef COLRAD
-    MPI_Sendrecv(l1[local_fd_dim.x - 2].y, colrad_neq, MPI_DOUBLE, nbwest, 4302, //+x
-                 l1[local_fd_dim.x - 1].y, colrad_neq, MPI_DOUBLE, nbwest, 4402, //+x
+    MPI_Sendrecv(l1[local_fd_dim.x - 2].y, colrad_neq, MPI_DOUBLE, myid+1, 4302, //+x
+                 l1[local_fd_dim.x - 1].y, colrad_neq, MPI_DOUBLE, myid+1, 4402, //+x
                  cpugrid, &stati[1]);        
   #endif        
   }
-  else if (my_coord.x == cpu_dim.x - 1) //SURFACE:only comm with east
+  else if (myid == num_cpus - 1) //SURFACE:only comm with east
   {
     //flux
-    MPI_Sendrecv(l1[1].flux, 8, MPI_INT, nbeast, 7402,         //-x
-                 l1[0].flux, 8, MPI_INT, nbeast, 7302,         //-x
+    MPI_Sendrecv(l1[1].flux, 8, MPI_INT, myid-1, 7402,         //-x
+                 l1[0].flux, 8, MPI_INT, myid-1, 7302,         //-x
                  cpugrid, &stati[0]);
     //selbes fuer u
-    MPI_Sendrecv(&l1[1].U, 1, MPI_DOUBLE, nbeast, 5402,         //-x
-                 &l1[0].U, 1, MPI_DOUBLE, nbeast, 5302,         //-x
+    MPI_Sendrecv(&l1[1].U, 1, MPI_DOUBLE, myid-1, 5402,         //-x
+                 &l1[0].U, 1, MPI_DOUBLE, myid-1, 5302,         //-x
                  cpugrid, &stati[0]);
   #ifdef COLRAD
-    MPI_Sendrecv(l1[1].y, colrad_neq, MPI_DOUBLE, nbeast, 4402,         //-x
-                 l1[0].y, colrad_neq, MPI_DOUBLE, nbeast, 4302,         //-x
+    MPI_Sendrecv(l1[1].y, colrad_neq, MPI_DOUBLE, myid-1, 4402,         //-x
+                 l1[0].y, colrad_neq, MPI_DOUBLE, myid-1, 4302,         //-x
                  cpugrid, &stati[0]);        
   #endif        
   }
@@ -800,7 +805,6 @@ void do_COMMFLUX(void)
 /* init_ttm(): initialize FD stuff, ttm_init */
 void init_ttm()
 {
-  printf("myid:%d,init ttm entered\n",myid);  
   int i, j, k;
   cell *p;
 
@@ -808,17 +812,14 @@ void init_ttm()
     printf("imdrestart=%d\n", imdrestart);
 
 
-  global_fd_dim.x=60; //User supplied
-  if( global_fd_dim.x % cpu_dim.x != 0)
+  global_fd_dim.x=ttmdimx; //User supplied
+  if( global_fd_dim.x % num_cpus != 0)
   {
-    error("global_fd_dim.x % cpu_dim.x != 0.");
+    error("global_fd_dim.x mod num_cpus != 0.");
   }
 
-  local_fd_dim.x=  global_fd_dim.x/cpu_dim.x;
+  local_fd_dim.x=  global_fd_dim.x/num_cpus;
   local_fd_dim.x +=2; //Ghost layer
-
-MPI_Barrier(cpugrid);
-printf("myid:%d, localdimx:%d\n",myid,local_fd_dim.x);
 
   local_fd_dim.y=3;
   local_fd_dim.z=3;
@@ -832,16 +833,31 @@ printf("myid:%d, localdimx:%d\n",myid,local_fd_dim.x);
   neighvol = pow(sqrt(pair_pot.end[0]), 3.0) * 4.0 / 3.0 * M_PI;
 
 
-MPI_Barrier(cpugrid);
-printf("myid:%d, before malloc\n",myid);
-
   /* Time to initialize our FD lattice... */
   l1 = (ttm_Element*) malloc( local_fd_dim.x * sizeof(ttm_Element) );
   l2 = (ttm_Element*) malloc( local_fd_dim.x * sizeof(ttm_Element) );
 
+
+  // ******************************************
+  // * AUXILIARAY ARRAYS FOR imd_integrate.c
+  // ********************************************
+  xiarr_global=(double*) malloc( global_fd_dim.x * sizeof(double)); //damit xi auf allen procs vorhanden ist!
+  xiarr_local=(double*) malloc(  local_fd_dim.x * sizeof(double)); //damit xi auf allen procs vorhanden ist!
+
+  alloc1darr(double, vcomxlocal, global_fd_dim.x);
+  alloc1darr(double, vcomxglobal, global_fd_dim.x);
+
+  alloc1darr(double, vcomylocal, global_fd_dim.x);
+  alloc1darr(double, vcomyglobal, global_fd_dim.x);
+
+  alloc1darr(double, vcomzlocal, global_fd_dim.x);
+  alloc1darr(double, vcomzglobal, global_fd_dim.x);
+
+
   #ifdef VLATTICE //NUR 1D!!! (global_fd_dim.y und global_fd_dim.z=1)
   vlattice1= (ttm_Element*) malloc(sizeof(ttm_Element)* vlattice_dim);
   vlattice2= (ttm_Element*) malloc(sizeof(ttm_Element)* vlattice_dim);
+
   for(i=0;i<vlattice_dim;i++)
   {
     vlattice1[i].dens=vlattice2[i].dens=vlatdens;
@@ -850,8 +866,6 @@ printf("myid:%d, before malloc\n",myid);
   }
   #endif
 
-MPI_Barrier(cpugrid);
-printf("myid:%d,1st loop in init start\n",myid);  
  for (k=0; k<NCELLS; ++k) 
  {
     p = CELLPTR(k);
@@ -883,7 +897,7 @@ printf("myid:%d,1st loop in init start\n",myid);
     node2.natoms = node.natoms = 0;
     node2.natoms_old = node.natoms_old = 0;
     node2.U = node.U = 0.0;        
-
+    xiarr_local[i]=0.0;
     #ifdef FDTD
     int bar;
     for (bar = 0; bar < 6; bar++)
@@ -898,28 +912,6 @@ printf("myid:%d,1st loop in init start\n",myid);
 #endif
   }
 
-
-  //NOW INITIALIZE DIRICHLET BOUNDARY ARRAYS
-#ifdef DIRICHLET
-  alloc1darr(int, dirichlet_maxy_local, global_fd_dim.x);
-  alloc1darr(int, dirichlet_maxy_global, global_fd_dim.x);
-
-  alloc1darr(int, dirichlet_miny_local, global_fd_dim.x);
-  alloc1darr(int, dirichlet_miny_global, global_fd_dim.x);
-
-  alloc1darr(int, dirichlet_maxx_local, global_fd_dim.y);
-  alloc1darr(int, dirichlet_maxx_global, global_fd_dim.y);
-
-  for (i = 0; i < global_fd_dim.x; ++i)
-  {
-    dirichlet_maxy_local[i] = dirichlet_maxy_global[i] = -99999;
-    dirichlet_miny_local[i] = dirichlet_miny_global[i] = 999999;
-  }
-  for (i = 0; i < global_fd_dim.y; ++i)
-    dirichlet_maxx_local[i] = dirichlet_maxx_global[i] = -99999;
-
-  dirichlet_surfx_int = round(dirichlet_surfx / fd_h.x);
-#endif
 
 #ifdef LASERYZ
   error("TTM with LB does not support LASERYZ!")
@@ -953,14 +945,11 @@ printf("myid:%d,1st loop in init start\n",myid);
 #endif
   }
 
-MPI_Barrier(cpugrid);
-printf("myid:%d,before creeate datatypes\n",myid);  
 #ifdef MPI
   // create MPI datatypes
   ttm_create_mpi_datatypes();
 #endif
-printf("myid:%d,after creeate datatypes\n",myid);  
-  MPI_Bcast(&imdrestart, 1, MPI_INT, 0, cpugrid);
+
 
   // *****************************************
   // * READ AND BCAST INTERPOLATION TABLES
@@ -1029,8 +1018,9 @@ printf("myid:%d,after creeate datatypes\n",myid);
   }
 
   /* time to contact neighbors and fill ghost layers */
-  printf("myid:%d,before fill ghost layers\n",myid);  
-  ttm_fill_ghost_layers();
+
+ttm_fill_ghost_layers();
+
 }
 
 
@@ -1267,8 +1257,8 @@ void do_DIFF(double tau)
 
   double Ce; //specific heat
   double invxsq = 1.0 / (fd_h.x * fd_h.x);
-  double invysq = 1.0 / (fd_h.y * fd_h.y);
-  double invzsq = 1.0 / (fd_h.z * fd_h.z);
+  // double invysq = 1.0 / (fd_h.y * fd_h.y);
+  // double invzsq = 1.0 / (fd_h.z * fd_h.z);
 
   int i_global, j_global, k_global;
   double xmaxTe, xminTe, ymaxTe, yminTe, zmaxTe, zminTe; //temps
@@ -1283,11 +1273,9 @@ void do_DIFF(double tau)
   ///////////////////////////
   // DIFFUSION             //
   ///////////////////////////
-
   for (i = 1; i < local_fd_dim.x - 1; i++)
-  {
-     
-    i_global =  ((i - 1) + my_coord.x * (local_fd_dim.x - 2));
+  {     
+    i_global =  ((i - 1) + myid* (local_fd_dim.x - 2));
     //compute absorbed laser-energy
     if (laser_active)
     {
@@ -1300,6 +1288,9 @@ void do_DIFF(double tau)
 #ifdef FDTD
     SwapTTM(i, j, k);
 #endif
+
+    // if(i==1 || i==local_fd_dim.x-2)
+    // printf("myid:%d, i:%d, ig:%d, atoms:%d,at-1:%d,at+1:%d\n",myid,i,i_global, node.natoms, l1[i-1].natoms, l1[i+1].natoms);
 
     /* only do calculation if cell is not deactivated */
     if (node.natoms < fd_min_atoms)   continue;
@@ -1327,32 +1318,11 @@ void do_DIFF(double tau)
     //nicht in ttm-output geschrieben.     //
     //Sie sind "virtuell"      //
     /////////////////////////////////////////
-#ifdef DIRICHLET
-    if (i_global >= dirichlet_surfx_int) //don't cool the ablated material
-    {
-      if (dirichlet_maxy_global[i_global] == j_global)
-      {
-        ymaxTe = 0.025850926; //=RT
-        ymaxk = 1.933442e+01; //getKappa(ymaxTe, node.md_temp, node.ne,double Z)
-      }
-      else if (dirichlet_miny_global[i_global] == j_global)
-      {
-        yminTe = 0.025850926;
-        ymink = 1.933442e+01;
-      }
-      if (dirichlet_maxx_global[j_global] == i_global)
-      {
-        xmaxTe = 0.025850926;
-        xmaxk = 1.933442e+01;
-      }
-    }
-#endif
      Ce = node.Ce; //eV/(eV*Angs^3)
     /***********************************************************************
           * Explicit diffusion with variable kappa   (Convervative formulation)  *
     ************************************************************************/    
     node2.temp=tau/Ce*
-    //first diffusion terms
     ( 
       // dK/dx * d^2 T/dx^2
       (  ((node.fd_k+xmaxk)/2 * (xmaxTe-node.temp)*invxsq)
@@ -1364,13 +1334,30 @@ void do_DIFF(double tau)
     ) +node.temp;
     
 
+// if(myid==3)
+// {
+//   printf("tnow:%f,told:%f,k:%f,kmax:%f,tmax:%f,kmin:%f,tmin:%f\n",
+//           node2.temp,node.temp, node.fd_k, xmaxk, xmaxTe, xmink,xminTe);
+// }
     //Folgende Zeile setzt vorraus, dass Cve und U kompatiblen Tabllen zugrunde liegen
+    //Sonst macht T_from_E keinen sinn
     node2.U=node.U + (node2.temp-node.temp)*Ce*fd_vol/((double) node.natoms); // eV/atom
 
     //node.xi += (node2.temp-node.md_temp)*xi_fac*node.fd_g/node.md_temp/((double) node.natoms);//Original
     node.xi += (node2.temp - node.md_temp) * xi_fac * node.fd_g / node.md_temp / node.dens; // NEU
     node2.xi = node.xi;
 
+    xiarr_local[i] += (node2.temp - node.md_temp) * xi_fac * node.fd_g / node.md_temp / node.dens;
+    //xiarr_global soll auf allen procs (für alle ttm-zellen) vorhanden sein (für imd_integrate.c)
+
+
+    if(isnan(node2.temp) != 0 || isinf(node2.temp) != 0)
+    {
+      char errstr[255];
+      sprintf(errstr,"Te got NaN or Inf in diffloop.natoms:%d, Ce:%.4e, told:%f, fdk:%.2e, fdg:%.2e,mdtemp:%f, xmaxk:%.2e,xmink:%.2e,xmaxT:%.2e,xminT:%.2e\n",
+                      node.natoms, Ce, node.temp, node.fd_k, node.fd_g, node.md_temp, xmaxk,xmink, xmaxTe,xminTe);
+      error(errstr);
+    }
   } //for i
 
 
@@ -1415,9 +1402,11 @@ void do_DIFF(double tau)
 
 
   /* take care - l1 must always be the updated lattice */
+
   l3 = l1;
   l1 = l2;
   l2 = l3;
+
 
 #ifdef VLATTICE
   vlattice3=vlattice1;
@@ -1436,12 +1425,12 @@ void do_DIFF(double tau)
 // * ROUTINE ZUM AUSSCHREIBEN DER TTM-DATEN
 // ******************************************
 void ttm_writeout(int number)
-{
+{  
   int n, nlocal;
   int i, j, k;
   ttm_Element * lglobal;
   ttm_Element * llocal;
-  n = global_fd_dim.x * global_fd_dim.y * global_fd_dim.z;
+  n = global_fd_dim.x; // * global_fd_dim.y * global_fd_dim.z;
   nlocal = (local_fd_dim.x - 2);
 
 //ACHTUNG: MPIIO-OUTPUT SCHON LANGE NICHT MEHR AKTUALISIESRT. COLRAD FEHLT 
@@ -1602,21 +1591,18 @@ void ttm_writeout(int number)
 
   for (i = 1; i < local_fd_dim.x - 1; ++i)
   {
-
    /* all the "-1" and "-2" because we don't store ghost layers
      and don't want to waste the space in llocal */
     llocal[ i-1 ] = node;    
   }
 
-#ifdef MPI
-
   if (myid == 0)
   {
-#ifdef MPI2
+  #ifdef MPI2
     MPI_Alloc_mem ( n * sizeof(ttm_Element), MPI_INFO_NULL, &lglobal );
-#else
+  #else
     lglobal = malloc (n * sizeof(ttm_Element));
-#endif /*MPI2*/
+  #endif /*MPI2*/
   }
 
   /* Note: This only works because mpi_element2 includes the last element
@@ -1624,19 +1610,18 @@ void ttm_writeout(int number)
    * displacements or something (e.g. MPI standard, Ex. 4.5) */
 
   //-->Das bedeutet: Letztes Element in mpi_elemnt2 muss vom type REAL sein!
+  // printf("\n\n\n\nmyid:%d,gather start\n",myid);
   MPI_Gather( llocal, nlocal, mpi_element2,
               lglobal, nlocal, mpi_element2, 0, cpugrid );
+// printf("\n\n\n\nmyid:%d,gather end\n",myid);
 
-#else /* no MPI */
-  lglobal = llocal;
-#endif /* MPI */
-  
 
   if (myid == 0)
-  {
+  {    
     FILE *outfile;
     char fname[255];
     sprintf(fname, "%s.%d.ttm", outfilename, number);
+
     outfile = fopen(fname, "w");
     if (NULL == outfile) error ("Cannot open ttm file for writing.\n");
 
@@ -1657,26 +1642,7 @@ void ttm_writeout(int number)
     j=k=0;
     for (i = 0; i < global_fd_dim.x; ++i)
     {
-          int index;
-
-#ifdef MPI
-          ivektor from_process; /* we need to look in the data from
-           the process with these grid coords */
-          /* data from the processes is sorted by rank. */
-          from_process.x = i / (local_fd_dim.x - 2);
-          from_process.y = j / (local_fd_dim.y - 2);
-          from_process.z = k / (local_fd_dim.z - 2);
-          index = cpu_grid_coord(from_process) * nlocal +
-                  (i % (local_fd_dim.x - 2)) * (local_fd_dim.y - 2) * (local_fd_dim.z - 2) +
-                  (j % (local_fd_dim.y - 2)) * (local_fd_dim.z - 2) +
-                  (k % (local_fd_dim.z - 2));
-#else /* no MPI */
-          index =
-            i * (local_fd_dim.y - 2) * (local_fd_dim.z - 2) +
-            j * (local_fd_dim.z - 2) +
-            k;
-#endif /* MPI*/
-
+          int index=i; //In diesem Fall easy weil Gather nach cpu-nr sortiert
 
           fprintf(outfile, "%d %d %d %d %e %e %e %e %e %e %e %e %e %e %e %e %d %f",
                   i, j, k, lglobal[index].natoms, lglobal[index].temp,
@@ -2391,6 +2357,7 @@ double FEG_eeminfun(double x, double r, double ne, double e)
 }
 double FEG_ee_from_r_ne_te(double r,double ne, double T) //free-electron internal energy from Fermi-integral, T in K
 {
+
   double mu=chempot(ne,T);
   double F_3_half= gsl_sf_fermi_dirac_3half(mu/BOLTZMAN/T);
   double Gamma_5_half=3.0*sqrt(M_PI)/4.0;
@@ -2569,6 +2536,8 @@ int fitDL(int i, int j, int k)
 #ifdef MPI
 void ttm_create_mpi_datatypes(void)
 {
+
+  //mpi_element1 wird in der laodbalance variante nicht benötigt
   { /* type for our basic struct */
 
     // ************************************************************************************************
@@ -2924,54 +2893,92 @@ void ttm_fill_ghost_layers(void)
 
   /////////////////
   // x direction //
-  /////////////////
-  if (pbc_dirs.x == 1 || (my_coord.x != 0 && my_coord.x != cpu_dim.x - 1) )
+  /////////////////  
+  double buffs[3];
+  double buffr[3];
+
+  if(myid != 0 && myid !=num_cpus-1)
   {
-    /* send left slice to left neighbor. */
-    /* Simultaneously receive slice from right neighbor */
-    MPI_Sendrecv(&l1[1], 1, mpi_xplane_block, nbeast, 7100,
-                 &l1[(local_fd_dim.x - 2) + 1], 1, mpi_xplane_block, nbwest, 7100,
-                 cpugrid, &stati[0]);
 
 
-    /* send right slice to right neighbor. */
-    /* Simultaneously receive slice from left neighbor */
-    MPI_Sendrecv(&l1[(local_fd_dim.x - 2)], 1, mpi_xplane_block, nbwest, 7200,
-                 &l1[0], 1, mpi_xplane_block, nbeast, 7200,
-                 cpugrid, &stati[1]);
+// int MPI_Sendrecv(const void *sendbuf, int sendcount, MPI_Datatype sendtype,
+//                 int dest, int sendtag,
+//                 void *recvbuf, int recvcount, MPI_Datatype recvtype,
+//                 int source, int recvtag,
+//                 MPI_Comm comm, MPI_Status *status)
+
+
+    buffs[0]=l1[1].temp;
+    buffs[1]=l1[1].fd_k;
+    buffs[2]=((double)l1[1].natoms);
+
+    //links-recht
+    MPI_Sendrecv(&buffs[0], 3, MPI_DOUBLE, myid-1, 7100,
+                 &buffr[0], 3, MPI_DOUBLE, myid+1, 7100,
+                 cpugrid, &stati[0]);    
+
+    l1[(local_fd_dim.x - 2) + 1].temp=buffr[0];  
+    l1[(local_fd_dim.x - 2) + 1].fd_k=buffr[1];  
+    l1[(local_fd_dim.x - 2) + 1].natoms=(int) buffr[2];  
+
+
+    //rechts-links
+    buffs[0]=l1[(local_fd_dim.x - 2)].temp;
+    buffs[1]=l1[(local_fd_dim.x - 2)].fd_k;
+    buffs[2]=(double) l1[(local_fd_dim.x - 2)].natoms;
+
+    MPI_Sendrecv(&buffs[0], 3, MPI_DOUBLE, myid+1, 7200,
+                 &buffr[0], 3, MPI_DOUBLE, myid-1, 7200,
+                 cpugrid, &stati[1]);      
+
+    l1[0].temp=buffr[0];
+    l1[0].fd_k=buffr[1];
+    l1[0].natoms=(int) buffr[2];
   }
-  else /* no pbc and we are at the surface */
-    if (my_coord.x == 0 && my_coord.x != cpu_dim.x - 1) /* left surface */
+  else
+  {
+    if(myid==0)
     {
-      /* only receive from right */
-      MPI_Recv(&l1[(local_fd_dim.x - 2) + 1], 1, mpi_xplane_block, nbwest, 7100,
-               cpugrid, &stati[0]);
+      MPI_Recv(&buffr[0], 3, MPI_DOUBLE, myid+1, 7100,
+               cpugrid, &stati[0]);   
 
-      /* only send to right */
-      MPI_Send(&l1[(local_fd_dim.x - 2)], 1, mpi_xplane_block, nbwest, 7200,
-               cpugrid);
-      // no atoms -> no conduction.
-      l1[0].natoms = 0;
+      l1[(local_fd_dim.x - 2) + 1].temp=buffr[0];
+      l1[(local_fd_dim.x - 2) + 1].fd_k=buffr[1];
+      l1[(local_fd_dim.x - 2) + 1].natoms=(int) buffr[2];
+
+      //MPI_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag, MPI_Comm comm, MPI_Status *status)
+      buffs[0]=l1[(local_fd_dim.x - 2)].temp;
+      buffs[1]=l1[(local_fd_dim.x - 2)].fd_k;
+      buffs[2]=(double) l1[(local_fd_dim.x - 2)].natoms;
+
+      MPI_Send(&buffs[0], 3, MPI_DOUBLE, myid+1, 7200,
+               cpugrid);      
+
+
+      l1[0].natoms=0;
     }
-    else if (my_coord.x == cpu_dim.x - 1 && my_coord.x != 0) /* right surface */
+    else if(myid==num_cpus-1)
     {
+      
+      buffs[0]=l1[1].temp;
+      buffs[1]=l1[1].fd_k;
+      buffs[2]=(double) l1[1].natoms;
 
-      /* only send to left */
-      MPI_Send(&l1[1], 1, mpi_xplane_block, nbeast, 7100,
+      MPI_Send(&buffs, 3, MPI_DOUBLE, myid-1, 7100,
                cpugrid);
 
-      /* only receive from left */
-      MPI_Recv(&l1[0], 1, mpi_xplane_block, nbeast, 7200,
+    
+      MPI_Recv(&buffr[0], 3, MPI_DOUBLE, myid-1, 7200,
                cpugrid, &stati[1]);
-      // right ghost layer receives reflecting bc
-      // no atoms -> no conduction.
-      l1[local_fd_dim.x - 1].natoms = 0;
 
+      l1[0].temp=buffr[0];
+      l1[0].fd_k=buffr[1];
+      l1[0].natoms=(int) buffr[2];
+
+      l1[local_fd_dim.x - 1].natoms = 0;
     }
-    else
-    { // two surfaces, just apply reflecting bc
-      l1[0].natoms = l1[local_fd_dim.x - 1].natoms = 0;
-    }
+  }
+  
 }
 #endif /*MPI*/
 
@@ -2994,9 +3001,9 @@ double FEG_cve_from_ne_te(double r,double ne,double T)//specific heat of quasi-f
   //approximatin according to mazhukin, S. 240 (Fermi-integral analyt. genähert)
   //error less than 5%
   double EF = fermi_E(ne);
-  //double Te_K=Te*11605; //in Kelvin
+  // double Te_K=Te*11605; //in Kelvin
   // double Te_J = T * 1.6021766e-19; //in Joule
-  //return 1.5*ne*BOLTZMAN*BOLTZMAN*Te_K/sqrt(Te_J*Te_J+pow(3*EF/M_PI/M_PI,2.0))*7.243227582e-8; //J/K/m^3 -> IMD-UNITS
+  // return 1.5*ne*BOLTZMAN*BOLTZMAN*Te_K/sqrt(Te_J*Te_J+pow(3*EF/M_PI/M_PI,2.0))*7.243227582e-8; //J/K/m^3 -> IMD-UNITS
   // return 2.401087548821963e-49 * T * ne / sqrt(Te_J * Te_J + pow(EF * 0.303963550927013, 2.0)); //alle konstanten zus.gefasst
 
 
@@ -3004,31 +3011,32 @@ double FEG_cve_from_ne_te(double r,double ne,double T)//specific heat of quasi-f
   // Cv_deg=@(T) pi^2.*ne(T).*boltzman^2.*T./(2.*EF(T));
   // Cv_mix=@(T) 1./sqrt(1./Cv_deg(T).^2+1./Cv_class(T).^2);   
 
-  // double Cv_class=ne*1.5*BOLTZMAN;
-  // double Cv_deg=M_PI*M_PI*ne*BOLTZMAN*BOLTZMAN*T/2.0/EF;
-  // double Cv_mix=1.0/sqrt(1.0/Cv_deg/Cv_deg +1/Cv_class/Cv_class);
+  double Cv_class=ne*1.5*BOLTZMAN;
+  double Cv_deg=M_PI*M_PI*ne*BOLTZMAN*BOLTZMAN*T/2.0/EF;
+  double Cv_mix=1.0/sqrt(1.0/Cv_deg/Cv_deg +1/Cv_class/Cv_class);
 
-  // double result=Cv_mix;
+  double result=Cv_mix;
+  result *= r; // J/(K*kg) --> J/K/m^3
+  result *= 11604.5; // -->J/eV/m^3
+  result *= 1e-30; // --> J/eV/Angs^3
+  result *= J2eV; // --> eV/eV/A^3
+  return result;
+
+
+  // double tupper=T+T*0.02;
+  // double tlower=T-T*0.02;
+
+  // double eupper=FEG_ee_from_r_ne_te(r,ne,tupper);
+  // double elower=FEG_ee_from_r_ne_te(r,ne,tlower);
+  // double result=(eupper-elower)/(tupper-tlower);
+
   // result *= r; // J/(K*kg) --> J/K/m^3
   // result *= 11604.5; // -->J/eV/m^3
   // result *= 1e-30; // --> J/eV/Angs^3
   // result *= J2eV; // --> eV/eV/A^3
 
 
-  double tupper=T+T*0.02;
-  double tlower=T-T*0.02;
-
-  double eupper=FEG_ee_from_r_ne_te(r,ne,tupper);
-  double elower=FEG_ee_from_r_ne_te(r,ne,tlower);
-  double result=(eupper-elower)/(tupper-tlower);
-
-  result *= r; // J/(K*kg) --> J/K/m^3
-  result *= 11604.5; // -->J/eV/m^3
-  result *= 1e-30; // --> J/eV/Angs^3
-  result *= J2eV; // --> eV/eV/A^3
-
-
-  return result;
+  // return result;
 
 }
 

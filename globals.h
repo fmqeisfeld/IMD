@@ -1147,6 +1147,14 @@ EXTERN  double max_dt_ttm; //in IMD time-units
 
 #ifdef LOADBALANCE
 EXTERN  ttm_Element * l1, * l2, * l3;
+EXTERN  double *xiarr_local; //Wird mit Allgather reduziert
+EXTERN  double *xiarr_global; //Wird mit Allgather reduziert
+
+EXTERN double *vcomxlocal,*vcomxglobal;
+EXTERN double *vcomylocal,*vcomyglobal;
+EXTERN double *vcomzlocal,*vcomzglobal;
+
+EXTERN int ttmdimx INIT(0); //global_fd_dim.x muss in diesem fall angegeben werden
 #else
 EXTERN  ttm_Element *** l1, *** l2, *** l3;
 #endif

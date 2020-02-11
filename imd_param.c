@@ -2026,6 +2026,14 @@ int getparamfile(char *paramfname, int phase)
         getparam("fd_min_atoms",&fd_min_atoms,PARAM_INT,1,1);
     }
 
+
+//MYMOD FÜR loadbalance mit ttm
+#ifdef LOADBALANCE
+     else if(strcasecmp(token,"ttmdimx")==0){
+        getparam("ttmdimx",&ttmdimx,PARAM_INT,1,1);
+    }
+#endif    
+//ENDOF MYMOD
 //MY MOD: FDTD (ACHTUNG: alles in SI-einheiten!)
 #if defined(FDTD) || defined(LASER) || defined(TMM)
 else if(strcasecmp(token,"I0")==0){
@@ -3946,6 +3954,10 @@ void check_parameters_complete()
     error("You must specify atomic_weight");
   if(atomic_charge==0)
     error("You must specify atomic_charge");
+#ifdef LOADBALANCE
+  if(ttmdimx==0)
+    error("You must specify ttmdimx");
+#endif
 #endif /* TTM */
 
 #ifdef FILTER
@@ -4275,7 +4287,7 @@ void broadcast_params() {
   MPI_Bcast( &dist_vxavg_flag,       1, MPI_INT, 0, MPI_COMM_WORLD);
   MPI_Bcast( &box_from_header,       1, MPI_INT, 0, MPI_COMM_WORLD);
   //MYMOD
-    MPI_Bcast( &dist_mdtemp_flag,       1, MPI_INT, 0, MPI_COMM_WORLD);
+  MPI_Bcast( &dist_mdtemp_flag,       1, MPI_INT, 0, MPI_COMM_WORLD);
   //ENDOF MYMOD
 
 #ifdef TWOD
@@ -4736,6 +4748,11 @@ MPI_Bcast( &filter_int,             1, MPI_INT, 0, MPI_COMM_WORLD);
   MPI_Bcast( &laser_sigma_t1,    1, REAL,  0, MPI_COMM_WORLD);
   MPI_Bcast( &laser_t_1,        1, REAL,  0, MPI_COMM_WORLD);
   MPI_Bcast( &lambda,           1, REAL,0, MPI_COMM_WORLD);
+#endif
+
+#ifdef LOADBALANCE
+  MPI_Bcast( &ttmdimx,             1, MPI_INT,0, MPI_COMM_WORLD);
+
 #endif
 #ifdef FDTD
   MPI_Bcast( &srcw,             1, REAL,0, MPI_COMM_WORLD);

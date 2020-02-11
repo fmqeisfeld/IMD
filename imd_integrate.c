@@ -611,15 +611,22 @@ void move_atoms_ttm(void)
 
     p = CELLPTR(k);
     
+#ifndef LOADBALANCE    
     fd_i=p->fd_cell_idx.x;
     fd_j=p->fd_cell_idx.y;
     fd_k=p->fd_cell_idx.z;
 
     /* get coupling constant, if fd cell is inactive, no coupling */
-  #ifdef LOADBALANCE
-    fd_xi=(l1[fd_i].natoms>=fd_min_atoms) ? (l1[fd_i].xi):(0.0);
-  #else  
     fd_xi=(l1[fd_i][fd_j][fd_k].natoms>=fd_min_atoms)?(l1[fd_i][fd_j][fd_k].xi):(0.0);
+  #else        
+    //fd_xi=(l1[fd_i].natoms >= fd_min_atoms) ? (l1[fd_i].xi):(0.0); 
+    //Das funktioniert in diesem Fall nicht:
+    //z.B. kümmert sich proc 0 immer um die TTM-Zellen ganz links auch wenn dort keine atome sind
+    //gleichzeitig kann sich proc0 aber auch um außerhalb seines TTM-Bereichs kümmern...
+    //--> Brauche globales xi-array
+    //--> das geschieht in der schleife über atome weiter unten
+
+    //Dasselbe gilt für vcom.x,y,z 
   #endif
 
     // MY MOD : DEBUG
@@ -627,6 +634,12 @@ void move_atoms_ttm(void)
 
     for (i=0; i<p->n; ++i) 
     { /* loop over all atoms in the cell */
+
+#ifdef LOADBALANCE
+      int i_global=(int) (ORT(p,i,X)/fd_h.x) ;
+      fd_xi=xiarr_global[i_global];
+#endif
+
 #ifdef DEBUG
       double delta_E_atom;
 #endif
@@ -676,9 +689,9 @@ void move_atoms_ttm(void)
 #endif
 
 #ifdef LOADBALANCE    
-      IMPULS(p,i,X) += timestep * ( KRAFT(p,i,X) + fd_xi * MASSE(p,i) * ( IMPULS(p,i,X)/MASSE(p,i) - l1[fd_i].vcomx) );
-      IMPULS(p,i,Y) += timestep * ( KRAFT(p,i,Y) + fd_xi * MASSE(p,i) * ( IMPULS(p,i,Y)/MASSE(p,i) - l1[fd_i].vcomy) );
-      IMPULS(p,i,Z) += timestep * ( KRAFT(p,i,Z) + fd_xi * MASSE(p,i) * ( IMPULS(p,i,Z)/MASSE(p,i) - l1[fd_i].vcomz) );    
+      IMPULS(p,i,X) += timestep * ( KRAFT(p,i,X) + fd_xi * MASSE(p,i) * ( IMPULS(p,i,X)/MASSE(p,i) - vcomxglobal[i_global]) );
+      IMPULS(p,i,Y) += timestep * ( KRAFT(p,i,Y) + fd_xi * MASSE(p,i) * ( IMPULS(p,i,Y)/MASSE(p,i) - vcomyglobal[i_global]) );
+      IMPULS(p,i,Z) += timestep * ( KRAFT(p,i,Z) + fd_xi * MASSE(p,i) * ( IMPULS(p,i,Z)/MASSE(p,i) - vcomzglobal[i_global]) );    
 #else
       IMPULS(p,i,X) += timestep * ( KRAFT(p,i,X) + fd_xi * MASSE(p,i) * ( IMPULS(p,i,X)/MASSE(p,i) - l1[fd_i][fd_j][fd_k].vcomx) );
       IMPULS(p,i,Y) += timestep * ( KRAFT(p,i,Y) + fd_xi * MASSE(p,i) * ( IMPULS(p,i,Y)/MASSE(p,i) - l1[fd_i][fd_j][fd_k].vcomy) );
@@ -703,9 +716,8 @@ void move_atoms_ttm(void)
 
       ORT(p,i,X) += tmp * IMPULS(p,i,X);
       ORT(p,i,Y) += tmp * IMPULS(p,i,Y);
-#ifndef TWOD
       ORT(p,i,Z) += tmp * IMPULS(p,i,Z);
-#endif
+
      
 
 #ifdef STRESS_TENS

@@ -8,8 +8,13 @@
 //
 // 
 
+#ifdef LOADBALANCE
 #define node  l1[i]
 #define node2 l2[i]
+#else
+#define node  l1[i][j][k]
+#define node2 l2[i][j][k]
+#endif
 
 /*2x2 Matrix multiplication*/
 void matmul(double complex *a,double complex *b,double complex *p)
@@ -174,7 +179,16 @@ if(steps<2) return 0;
 
  for(i=1;i<local_fd_dim.x-1;i++)
  {
+
+#ifndef LOADBALANCE
    iglobal = (i-1) + my_coord.x*(local_fd_dim.x-2); 
+#else
+   //bei TTM mit LB werden cpu-zuständigkeiten unabh. von position von links nach rechts
+   //aufsteigend verteilt, sodass proc0 die zellen ganz links und proc "num_cpus-1" 
+   //das rechte ende der simbox abarbeitet
+   iglobal = (i-1) + myid*(local_fd_dim.x-2); 
+#endif
+
    //if(l1[i][1][1].natoms<fd_min_atoms)
   if(node.natoms<fd_min_atoms)
    {
@@ -212,7 +226,11 @@ printf("myid:%d,ig:%d, epsr:%.4e,epsimg:%.4e,Te:%.4e,Ti:%.4e,Ne:%.4e,Z:%.4e,atom
  //KORREKTUR-LOOP
  for(i=1;i<local_fd_dim.x-1;i++)
  {
+#ifndef LOADBALANCE  
    iglobal = (i-1) + my_coord.x*(local_fd_dim.x-2);
+#else
+   iglobal = (i-1) + myid*(local_fd_dim.x-2);
+#endif
    if (tmm_eps_real_arr_global[iglobal]==0) tmm_eps_real_arr_global[iglobal]=1.0; //VACUUM hat epsilon_real=1
  }
  // 
