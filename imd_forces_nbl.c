@@ -279,7 +279,8 @@ void make_nblist(void)
 
 //MYMOD
 #ifdef NRB
-    if(have_valid_nrb==0) init_nrb(); //gabs keinen besseren ort hierfür?
+    if(have_valid_nrb==0) init_nrb(); 
+    //gabs keinen besseren ort hierfür? // nrb_init braucht mpi-buffers...kann erst nacht setup_buffers erfolgen
     //if(steps>1) nrb_build_ifromid(); //every time nblist-is rebuild we need to reassing-per atom NRB-infos for boundary-atoms
 #endif
 //ENDOF MYMOD
@@ -1040,9 +1041,9 @@ NUMNEIGHS(p,i) += nbttm;
 
 #endif 
 
-// #ifdef NRB
+#ifdef NRB
 //       nrb_test_forces();
-//  #endif
+#endif
 //ENDOF MYMOD
 
   /* add forces back to original cells/cpus */

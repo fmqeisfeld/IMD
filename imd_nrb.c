@@ -48,11 +48,11 @@
 //	   VORTEIL:  Es funktioniert endlich
 //	   NACHTEIL: Wahrscheinlich nicht sonderlich performant + Kommunikationsmonster (alle NRB-infos werden JEDEN step kommuniziert. send_cells vor der kraftschleife und send_forces danach)
 //********************************************************************************************************************************************************************************
-#define DEBUG_LEVEL 0
-#define WATCHME 18582
+#define DEBUG_LEVEL 1
+#define WATCHME 72259
 //#define WATCH ( (NUMMER(bndcell,bndi)==38400) || (NUMMER(bndcell,bndi)==38084) )
 //#define WATCH ( (NUMMER(bndcell,bndi)==9764) )
-#define PRINTSTEP 1
+#define PRINTSTEP 10
 
 //13189
 //#define nrb_xhi  140  // alles rechts davon sind +x-bnd-atome
@@ -118,6 +118,13 @@ int nrb_binarySearch( int lo, int hi, int x,int n,int** arr)
 // *********************************************************************************************************************+
 int init_nrb() //nrb_eps=Abstands-toleranz in Angstrom,alat=Lattice const.
 {
+#ifndef NBL
+#ifdef PAIR
+    #ifndef AR
+    error("If nrb is used without NBL it must be used with AR")
+    #endif
+#endif
+#endif
   int i,j,k,n,m;
   int same_cell,jstart;
   int cmax=0;
@@ -152,6 +159,12 @@ int init_nrb() //nrb_eps=Abstands-toleranz in Angstrom,alat=Lattice const.
   {
     printf("*************************************************\n");
     printf("* NON-REFLECTING  BOUNDARY  CONDITIONS\n");
+#ifdef NBL
+    printf("* USING NBL\n");    
+#else    
+    printf("* USING PAIR\n");    
+#endif    
+
     printf("* nrb_alat:%.4e\n",nrb_alat);
     printf("* nrb_eps: %.4e\n",nrb_eps);
     printf("* nrb_k: %.4e\n",pow(nrbk,2.0)*26.9815);
@@ -172,6 +185,11 @@ int init_nrb() //nrb_eps=Abstands-toleranz in Angstrom,alat=Lattice const.
   int r;
   if( (imdrestart==0 && nrb_readfile==0))
   {
+#ifndef NBL
+    error("Initial NRB setup currently only works with NBL.");
+
+#endif    
+
     vektor d;
     //SET REFPOS
     // Hier auch direkt xmax,ymax,ymin suchen
@@ -208,6 +226,8 @@ if(pbc_dirs.y==1)
     {
      printf("* nrb_xhi:%.2f, nrb_yhi:%.2f, nrb_ylo:%.2f\n", nrb_xhi,nrb_yhi,nrb_ylo);
     }
+
+#ifdef NBL 
 
     //geschieht nur 1 mal zu Beginn-->muss nicht unbedingt vektorisiert werden
     for (k=0; k<ncells2;k++) 
@@ -656,6 +676,7 @@ if(pbc_dirs.y==1)
 	 } //for m
      } //for i
     } //for k
+#endif //NBL
 
 
     // Folgende 2 send_cells aufrufe nur 1 mal zu beginn nötig
@@ -663,7 +684,7 @@ if(pbc_dirs.y==1)
     // **********************************************************************
     have_valid_nrb=1;
 #ifdef LOADBALANCE
-sync_cells_direct(copy_nrb_max,pack_nrb,unpack_nrb_max,0); //acumm. results //ACHTUNG: sync_cells macht alles kaputt --> NRB und LB nicht kompatibel
+sync_cells_direct(copy_nrb_max,pack_nrb,unpack_nrb_max,0); //acumm. results
 #else
 nrb_send_cells(copy_nrb_max,pack_nrb,unpack_nrb_max); //acumm. results 
 #endif
@@ -692,15 +713,19 @@ nrb_inverse_send_cells(copy_nrb_max,pack_nrb,unpack_nrb_max);
   {
     have_valid_nrb=1;    
     if(nrb_readfile==1) nrb_readinputfile(nrb_input_file);    //anderes such-schema als bei restart (aufwändiger)
-    else if(imdrestart>0 && nrb_readfile==0) nrb_readrestart(nrb_restart_file);  //d.h. nrb_input_file hat vorrang über restart-file
-							       //was in den meisten fällen jedoch keinen sinn macht!
+    else if(imdrestart>0 && nrb_readfile==0) nrb_readrestart(nrb_restart_file);  
+    //d.h. nrb_input_file hat vorrang über restart-file
+		
 
 #ifdef LOADBALANCE
 sync_cells_direct(copy_nrb_max,pack_nrb,unpack_nrb_max,0); //acumm. results //ACHTUNG: sync_cells macht alles kaputt --> NRB und LB nicht kompatibel
 #else
 nrb_send_cells(copy_nrb_max,pack_nrb,unpack_nrb_max); //acumm. results 
 #endif
-    //nrb_inverse_send_cells(copy_nrb_max,pack_nrb,unpack_nrb_max);
+
+#ifdef NBL  //ERROR WENN NUR PAIR OHNE NBL
+    nrb_inverse_send_cells(copy_nrb_max,pack_nrb,unpack_nrb_max);
+#endif    
 
     nrb_build_ifromid();
   }
@@ -841,7 +866,7 @@ int nrb_forces(void)
 	 cell*bndcell=p;
 	 int bndi=i;
 //if(WATCH)
-if(NUMMER(p,i)==WATCHME && (steps % 100 ==0) )
+if(NUMMER(p,i)==WATCHME && (steps % PRINTSTEP ==0) )
 printf("myid:%d,steps:%d, DOFORCE2, ind:%d, bnd:%d, dpx:%f dpy:%f dpz:%f px:%f py:%f pz:%f x:%f y:%f z:%f rx:%f,ry:%f,rz:%f\n",
         myid,steps,NUMMER(p,i),NRBBND(p,i),
 
@@ -866,6 +891,8 @@ printf("myid:%d,steps:%d, DOFORCE2, ind:%d, bnd:%d, dpx:%f dpy:%f dpz:%f px:%f p
   cell* bndcell;
   cell* neighcell;
   int bndi,neighi;
+
+#ifdef NBL  
   for (k=0; k<ncells; k++) 
   {
     cell *p = cell_array + cnbrs[k].np;
@@ -955,7 +982,7 @@ if(pbc_dirs.y==1)
 
 
 #if DEBUG_LEVEL>0
-if(NUMMER(bndcell,bndi)==WATCHME && (steps % 100==0))
+if(NUMMER(bndcell,bndi)==WATCHME && (steps % PRINTSTEP ==0 ))
 //if(WATCH) //NUMMER(bndcell,bndi)==WATCHME && steps>PRINTSTEP)
 printf("myid:%d,steps:%d, DOFORCE, ind:%d, bnd:%d,nei:%d,r:%d, dpx:%f dpy:%f dpz:%f px:%f py:%f pz:%f btyp:%d,ntyp:%d,x:%f,y:%f,z:%f,rx:%f,ry:%f,rz:%f\n",
         myid,steps,NUMMER(bndcell,bndi),NRBBND(bndcell,bndi),NUMMER(neighcell,neighi),r,
@@ -975,6 +1002,122 @@ printf("myid:%d,steps:%d, DOFORCE, ind:%d, bnd:%d,nei:%d,r:%d, dpx:%f dpy:%f dpz
       n++;
     }//for i
   } //for k
+
+
+  #endif //NBL
+
+#ifdef PAIR
+  for (n=0; n<nlists; ++n) 
+  {
+    for (k=0; k<npairs[n]; ++k) 
+    {
+      pair *P;
+      P = pairs[n] + k;
+      cell*p=cell_array+P->np;
+      cell*q=cell_array+P->nq;
+
+      vektor pbc;
+      pbc.x = P->ipbc[0]*box_x.x + P->ipbc[1]*box_y.x + P->ipbc[2]*box_z.x;
+      pbc.y = P->ipbc[0]*box_x.y + P->ipbc[1]*box_y.y + P->ipbc[2]*box_z.y;
+      pbc.z = P->ipbc[0]*box_x.z + P->ipbc[1]*box_y.z + P->ipbc[2]*box_z.z;
+
+
+      for (i=0; i<p->n; ++i) 
+      {
+         int j,jstart;
+         if(NRBBND(p,i)==0 && NRBNEIGH(p,i)==0) //weder bnd noch neigh --> dont waste time
+          continue;
+
+         jstart = (((p==q) && (pbc.x==0) && (pbc.y==0) && (pbc.z==0)) ? i+1 : 0);
+
+         //Loop over neighs
+         for (j = jstart; j < q->n; ++j)
+         {
+
+            int r=0;
+            for(r=0;r<12;r++)
+            {   
+              if(NRBBND(p,i)>0 && NUMMER(q,j)==NRBI(p,i,r)) 
+              {
+                bndcell=p;
+                bndi=i;
+                neighcell=q;
+                neighi=j; 
+              }
+              else if(NRBBND(q,j)>0 && NUMMER(p,i)==NRBI(q,j,r))
+              {
+                bndcell=q;
+                bndi=j;
+                neighcell=p;
+                neighi=i;
+              }
+              else continue;
+
+              U_dot.x=U_dot.y=U_dot.z=0.0;
+
+              //displacement from refpos
+              U[r].x=ORT(neighcell,neighi,X)-REF_POS(neighcell,neighi,X);
+              U[r].y=ORT(neighcell,neighi,Y)-REF_POS(neighcell,neighi,Y);
+              U[r].z=ORT(neighcell,neighi,Z)-REF_POS(neighcell,neighi,Z);
+     
+              U[r].z=MINIMGZ(U[r].z); //ACHTUNG: Bei 1D-Simulation, muss U[r].y auch mittels MINIMGY berechnet werden!
+              if(pbc_dirs.y==1)          
+                U[r].y=MINIMGY(U[r].y);
+
+
+              V[r].x=IMPULS_ALT(neighcell,neighi,X)/mass;
+              V[r].y=IMPULS_ALT(neighcell,neighi,Y)/mass;
+              V[r].z=IMPULS_ALT(neighcell,neighi,Z)/mass;
+
+
+              if(NRBBND(bndcell,bndi)==1)
+              {
+                      U_dot.x=nrbk*U[r].x;
+                      U_dot.y=nrbk*sqrt2half*U[r].y;
+                      U_dot.z=nrbk*sqrt2half*U[r].z;
+              }
+              else if(NRBBND(bndcell,bndi)==2 || NRBBND(bndcell,bndi)==3) //BND-typ 1 hat vorrang
+              {
+                      U_dot.x=nrbk*sqrt2half*U[r].x;
+                      U_dot.y=nrbk*U[r].y;
+                      U_dot.z=nrbk*sqrt2half*U[r].z;
+              }
+
+
+              U_dot.x-=0.25*V[r].x*neighfac; //push from neigh
+              U_dot.y-=0.25*V[r].y*neighfac;
+              U_dot.z-=0.25*V[r].z*neighfac;
+
+              IMPULS(bndcell,bndi,X)+=U_dot.x*mass;
+              IMPULS(bndcell,bndi,Y)+=U_dot.y*mass;
+              IMPULS(bndcell,bndi,Z)+=U_dot.z*mass;
+
+#if DEBUG_LEVEL>0
+if(NUMMER(bndcell,bndi)==WATCHME && (steps % PRINTSTEP ==0 ))
+//if(WATCH) //NUMMER(bndcell,bndi)==WATCHME && steps>PRINTSTEP)
+printf("myid:%d,steps:%d, DOFORCE, ind:%d, bnd:%d,nei:%d,r:%d, dpx:%f dpy:%f dpz:%f px:%f py:%f pz:%f btyp:%d,ntyp:%d,x:%f,y:%f,z:%f,rx:%f,ry:%f,rz:%f\n",
+        myid,steps,NUMMER(bndcell,bndi),NRBBND(bndcell,bndi),NUMMER(neighcell,neighi),r,
+        U_dot.x*mass,
+        U_dot.y*mass,
+        U_dot.z*mass,
+
+        IMPULS(bndcell,bndi,X),IMPULS(bndcell,bndi,Y),IMPULS(bndcell,bndi,Z),
+        bndcell->celltype,
+        neighcell->celltype,
+        ORT(neighcell,neighi,X),ORT(neighcell,neighi,Y),ORT(neighcell,neighi,Z),
+        REF_POS(neighcell,neighi,X),REF_POS(neighcell,neighi,Y),REF_POS(neighcell,neighi,Z)); //vom nachbar-atom
+#endif
+
+            }//for r
+          } //for j
+        }//for i
+      }//for k
+    }//for n
+  
+#endif
+
+
+
   return 0;
 }
 
@@ -1105,7 +1248,12 @@ void pack_nrb( msgbuf *b, int k, int l, int m, vektor v )
 
   b->n = j;
   if (b->n_max < b->n)
-    error("Buffer overflow in pack_nrb - increase msgbuf_size");
+  {    
+    char errstr[255];
+    sprintf(errstr,"Buffer overflow in pack_nrb - increase msgbuf_size. b->n_max:%d, b->n:%d",b->n_max,b->n);
+    error(errstr);
+  }
+  
 }
 
 
@@ -1193,7 +1341,7 @@ void unpack_nrb_max( msgbuf *b, int k, int l, int m )
 
   b->n = j;
   if (b->n_max < b->n)
-    error("Buffer overflow in unpack_nrb - increase msgbuf_size");
+    error("Buffer overflow in unpack_nrb_max - increase msgbuf_size");
 }
 
 
@@ -1239,7 +1387,11 @@ void unpack_nrb( msgbuf *b, int k, int l, int m )
 
   b->n = j;
   if (b->n_max < b->n)
-    error("Buffer overflow in unpack_nrb - increase msgbuf_size");
+  {
+    char errstr[255];
+    sprintf(errstr,"Buffer overflow in unpack_nrb - increase msgbuf_size. b->n_max:%d, b->n:%d",b->n_max,b->n);
+    error(errstr);
+  }
 }
 
 // ******************************************************
@@ -2543,7 +2695,7 @@ if(steps<300)
         //2D FALL
 
         vektor d0,d1,dist;
-        d0.x=1100.0;d0.y=box_y.y/2.0;d0.z=0; //left surface //big sample
+        d0.x=400.0;d0.y=box_y.y/2.0;d0.z=0; //left surface //big sample
         d0.z=0.0;
 //      d0.x=21; d0.y=145.0; //small sample
 
@@ -2555,11 +2707,11 @@ if(steps<300)
 
         real sigmay;
 //      sigmay=100.0; // big sample
-        sigmay=50.0;  //small sample
+        sigmay=100.0;  //small sample
 
         real sigmaspatial;
-        sigmaspatial=40; //big sample
-        real depth=80.0; //big
+        sigmaspatial=60; //big sample
+        real depth=150.0; //big
 
 
         real xofy=depth*exp(-0.5*pow(dist.y/sigmay,2.0));
@@ -2568,7 +2720,7 @@ if(steps<300)
         {
           real timefun=exp(-0.5*pow((double) (steps-150)/50,2.0));
           real spatial=exp(-0.5*pow(dist.x/sigmaspatial,2.0));
-          real intens=timefun*spatial*40; //small sample
+          real intens=timefun*spatial*45; //small sample
 
           KRAFT(p,i,X)  += ((drand48()-0.5)*intens);
           KRAFT(p,i,Y)  += ((drand48()-0.5)*intens);

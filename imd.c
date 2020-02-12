@@ -248,10 +248,6 @@ int main(int argc, char **argv)
 #ifdef COLRAD
   colrad_init();
 #endif
-//#ifdef NRB //ERFOLGT AN ANDERER STELLE
-//  init_nrb();
-//#endif
-
 //ENDOF MY MOD
 
 #ifdef SM
@@ -283,6 +279,13 @@ int main(int argc, char **argv)
 	  	printf("LOAD BALANCING: After initial runs variance %f\n", lb_loadVariance);
 	  }
   }
+#endif
+
+  #ifdef NRB //ERFOLGT AN ANDERER STELLE FÜR NRB MIT NBL
+  #ifndef NBL
+    init_nrb(); //das geht nur wenn atome nicht erst identifiziert werden muessen
+                //Problem : Das geht hier noch nicht, weil nrb mpi-buffers brauch (muss nach setup buffers erfolgen )
+  #endif
 #endif
 
   imd_stop_timer(&time_setup);

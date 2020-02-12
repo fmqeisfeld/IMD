@@ -1267,7 +1267,11 @@ void write_atoms_press(FILE *out)
 
 void write_config_press(int nr)
 {
-  write_config_select( nr, "press", write_atoms_press, write_header_press);
+  //write_config_select( nr, "press", write_atoms_press, write_header_press);
+  //MYMOD : benenne die dateien *.stress statt *.press um verwechslungen mit dist-files
+  //        zu vermeiden
+  //write_config_select( nr, "press", write_atoms_press, write_header_press);
+  write_config_select( nr, "stress", write_atoms_press, write_header_press);
 }
 
 #endif /* STRESS_TENS */

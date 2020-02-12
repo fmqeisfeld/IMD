@@ -124,7 +124,12 @@ void fix_cells(void)
         			  lcoord.y < 0 || lcoord.y >= cell_dim.y ||
         			  lcoord.z < 0 || lcoord.z >= cell_dim.z ||
         			  (PTR_VV(cell_array,lcoord,cell_dim))->lb_cell_type == LB_EMPTY_CELL) {
-        		  error("LB: Illegal cell accessed, Atom jumped multiple CPUs");
+              //MYMOD : Mehr info
+              char errstr[256];
+              sprintf(errstr,"LB: Illegal cell accessed, Atom %d jumped multiple CPUs\n",NUMMER(p,l));
+        		  //error("LB: Illegal cell accessed, Atom jumped multiple CPUs");
+              error(errstr);
+              //ENDOF MYMOD
         	  }
         	  to_cpu = (PTR_VV(cell_array,lcoord,cell_dim))->lb_cpu_affinity;
 #else

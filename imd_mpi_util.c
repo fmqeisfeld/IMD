@@ -870,10 +870,11 @@ void setup_buffers(void)
 #ifdef VARCHG
     binc1++;         /* charge */   
 #endif
+
 //MYMOD
 #ifdef TTM
     binc1++;  //for numneighs
-    binc1++; // for fdi,fdj and fdk
+    binc1++; // for fdi,fdj and fdk for advection step
     binc1++;
     binc1++;
 #endif
@@ -883,11 +884,15 @@ void setup_buffers(void)
 #ifdef NRB
   binc1+=14; // 12 x nrbid + nrbbnd +nrbneigh
   binc1+=3; // 3 x IMPULS
-  binc1+=3; // REFPOS wird auch kommuniziert! (wieso war das nicht schon vorher dabei?)
+  binc1+=3; // REFPOS wird auch kommuniziert!
+#endif
+#ifdef FILTER
+  binc1+=1; //keepme varibale
 #endif
 //ENDOF MYMOD
 
     /* for communication from buffer cells */
+
     binc2 = DIM;     /* force */
 #ifndef MONOLJ
     binc2++;         /* pot_eng */
@@ -895,6 +900,11 @@ void setup_buffers(void)
 //MYMOD
 #ifdef NRB
    binc2+=DIM; // impulse
+   // binc2+=3;
+   // binc2+=14;
+#endif
+#ifdef FILTER
+  binc1+=1; //keepme varibale (skalar) wird wie forces akkumuliert
 #endif
 //ENDOF MYMOD
 
@@ -950,6 +960,8 @@ void setup_buffers(void)
 #endif
   }
 
+
+
   /* Find largest cell */
   for (k=0; k<ncells; ++k) {
     int n;
@@ -963,8 +975,6 @@ void setup_buffers(void)
   /* Add security */
   largest_cell = (int) largest_cell * msgbuf_size;
 
-//MY MOD
-//largest_cell+=50;
 
 #ifndef TWOD
   size_east  = largest_cell * cell_dim.y * cell_dim.z * binc;

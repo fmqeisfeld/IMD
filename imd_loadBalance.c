@@ -522,6 +522,8 @@ int balanceLoad(real (*getLoad)(void), vektor (*getCog)(void), int reset, int cy
 		lb_syncBufferCellAffinity();
 		make_cell_lists();
 		setup_buffers();
+
+		
 #ifdef NBLIST
 		lb_need_nbl_update = 1;
 		have_valid_nbl = 0;

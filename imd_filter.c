@@ -151,7 +151,7 @@ error("FILTER only works with NBL or PAIR LISTS WITH AR");
 void filter_atoms(void)
 {
 
-  MPI_Barrier(cpugrid);
+  //MPI_Barrier(cpugrid);
 
   //printf("myid:%d,steps:%d,entered filter_atoms,%d\n",myid,steps,have_valid_nbl);
 
