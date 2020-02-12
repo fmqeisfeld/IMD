@@ -6,6 +6,12 @@
 // ***********************************************
 // DEV-LOG:
 //*****************************************************************************************************************************************************************************
+// 
+// 1.1.20: imd_nrb geht nun auch mit LB, aber nicht im init step wegen inverse_send_cells
+//         Das macht aber nichts, denn man kann eifach 1-step simulation anlaufen lassen,
+//         die dann das nrb-outfile schreibt.
+//         anschließend kann die simulation mit LB fortgesetzt werden
+//
 // Wichtig: Es muss darauf geachtet werden, dass die Probe in z-Richtung nicht zu dünn ist.
 // 	    Es muss verhindert werden dass es in Z-Richtung nur 1 MD-Zelle gibt.
 // 	    Trifft dies zu, dann hat diese Zelle 2 Nachbar-Bufferzellen (in z-Richtung) die genau dieselben Atome enthalten.

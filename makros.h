@@ -56,10 +56,22 @@ INLINE static int MOD(shortint p, int q)
 // mapping zwischen 3d und 1d arrays
 #define ARR3D(array,i,j,k,dim2,dim3) (array[(dim2)*(dim3)*(i) + (dim3)*(j) + (k)])
 
+#ifdef MPI2
+#define alloc1darr(type,var,rows)  \
+    if(MPI_Alloc_mem ( rows * sizeof(type), MPI_INFO_NULL, &var ) !=MPI_SUCCESS) error("allocc1darr failed.");
+#else
 #define alloc1darr(type, var, rows)                             \
-  var= (type*) malloc((rows)*sizeof(type));                     
+  if(var= (type*) malloc((rows)*sizeof(type))==NULL) error("alloc1darr failed");  
+#endif
+
+
+#ifdef MPI2
+  #define free1darr(var)                                         \
+  MPI_Free_mem (var);
+#else
 #define free1darr(var)                                          \
-  free(var)                                                     
+  free(var)                                                  
+#endif
 
 //makre sure that "i" is already defined as "int i;" before calling
 // alloc2darr and free2darr!

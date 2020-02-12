@@ -8,7 +8,11 @@
 #define NBUFFC 0
 #endif /*BUFCELLS*/
 
-
+// ****************************************************
+// * ACHTUNG: Das ist eine modifizierte TTM-Version,
+// *          die sich mit loadbalance verträgt
+// *          Allerdings bisher nur für 1D-TTM
+// ***************************************************
 
 #include <sys/time.h> // Performance messen
 #include <complex.h>
@@ -20,8 +24,9 @@
 // TTM-READ UPDATEN FUER FDTD-NUTZUNG
 
 //#define DENSHOTFIX //erste Zelle soll für bestimmte Zeit festkörperdichte haben!
-                   //Da meine umgebungsdichte-berechnung für die oberfläche eine geringere dichte liefert als im Bulk
-                   //passt das nicht zusammen mit den wide-range properties!
+                   //Da meine umgebungsdichte-berechnung für die oberfläche eine geringere dichte liefert 
+                   //als im Bulk. Im Kontinuum-Bild hat oberfläche aber auch bulk-dichte
+                   //Fazit: --> kaum unterschied, nur geringfügig größere Refl.
 
 #define DENSHOTFIXSTEP 10000 //bist zu diesem step bleibt surf-dens const.
 
@@ -32,7 +37,7 @@
 #define ADVMODE 1  // 0=NO ADVECTION, 1=DISCRETE FLUX SOLVER (PREDICT ATOMIC FLUXES)
 //#define ADVMODE2d  // FALLS y dim offen sein soll, müssen atomic-fluxes auch über kanten kommmuniziert werden
 
-#define VLATTICE  //VIRTUAL LATTICE HINTER DER PROBE. ACHTUNG: NUR 1D !!!!
+#define VLATTICE   //VIRTUAL LATTICE HINTER DER PROBE. ACHTUNG: NUR 1D !!!!
                     //Falls gewünscht kann mit vlat_buffer die zahl
                     //der zellen (vom ende der probe gezählt) angegeben werden, die NICHT im TTM berücksichtigt
                     //werden soll, da diese als Puffer dienen 
@@ -46,9 +51,10 @@
 
 
 #define TTMOUTBUFLEN 400  //Wird bei ttm-output im MPIIO-Modus gebraucht. Entspricht max. Zeilenlänge
-#define node  l1[i]
+#define node  l1[i]       //Achtung: MPIIO-lange nicht mehr aktualisiert (z.b. fehlt colrad)
 #define node2 l2[i]
 
+#define RHOMIN       50
 
 
 
@@ -222,8 +228,7 @@ void update_fd()
 #endif
 
   // **********************************************************************
-  // * FIRST LOOP: Clear arrays,get md-temps and detect
-  // * activation/deactivation of FD-Cells
+  // * Clear arrays
   // ************************************************************************
   for (i = 1; i < local_fd_dim.x - 1; ++i)
   {
@@ -370,7 +375,7 @@ MPI_Allreduce(mdtemplocal, mdtempglobal, global_fd_dim.x, MPI_DOUBLE, MPI_SUM, c
 for(i_global=0; i_global < global_fd_dim.x;i_global++)
 {
   int i_local=i_global+1-myid*(local_fd_dim.x-2);
-
+  
 // printf("myid:%d,ig:%d,il:%d,max:%d\n",myid,i_global,i_local,local_fd_dim.x-1);
   if(i_local<1 || i_local > local_fd_dim.x-2)
     continue;
@@ -378,6 +383,9 @@ for(i_global=0; i_global < global_fd_dim.x;i_global++)
     i=i_local;
     node.natoms=natomsglobal[i_global];
     node2.natoms=node.natoms;
+    node.flux[0]=node2.flux[0]=fluxfromrightglobal[i];
+    node.flux[1]=node2.flux[1]=fluxfromleftglobal[i];
+
     if(node.natoms > 0)
     {
       node.dens=((double) totneighsglobal[i_global])/((double) node.natoms) * atomic_weight / neighvol * 1660.53907; //kg/m^3       
@@ -388,14 +396,14 @@ for(i_global=0; i_global < global_fd_dim.x;i_global++)
       node.md_temp /= (3.0 * (double) node.natoms);
 
 #ifdef VLATTICE
-      if(node.natoms >= fd_min_atoms)
+      if(node.natoms >= fd_min_atoms && node.dens > RHOMIN)
       {  
         last_active_cell_local=MAX(last_active_cell_local,i_global- vlat_buffer);
       }
 #endif     
 
 #ifdef DENSHOTFIX
-      if(node.natoms >= fd_min_atoms)
+      if(node.natoms >= fd_min_atoms && node.dens > RHOMIN)
       {
         first_active_cell_local=MIN(first_active_cell_local,i_global);
       }
@@ -413,22 +421,22 @@ for(i_global=0; i_global < global_fd_dim.x;i_global++)
 
   }
 
-  free(natomslocal);
-  free(natomsglobal);
-  free(totneighslocal);
-  free(totneighsglobal);
-  // free(vcomxlocal);
-  // free(vcomxglobal);
-  // free(vcomylocal);
-  // free(vcomyglobal);
-  // free(vcomzlocal);
-  // free(vcomzglobal);
-  free(fluxfromleftlocal);
-  free(fluxfromleftglobal);
-  free(fluxfromrightlocal);
-  free(fluxfromrightglobal);
-  free(mdtemplocal);
-  free(mdtempglobal);
+  free1darr(natomslocal);
+  free1darr(natomsglobal);
+  free1darr(totneighslocal);
+  free1darr(totneighsglobal);
+  // free1darr(vcomxlocal);
+  // free1darr(vcomxglobal);
+  // free1darr(vcomylocal);
+  // free1darr(vcomyglobal);
+  // free1darr(vcomzlocal);
+  // free1darr(vcomzglobal);
+  free1darr(fluxfromleftlocal);
+  free1darr(fluxfromleftglobal);
+  free1darr(fluxfromrightlocal);
+  free1darr(fluxfromrightglobal);
+  free1darr(mdtemplocal);
+  free1darr(mdtempglobal);
 
   // ******************************************************************************
   // *  ONLY ONCE: INITIALIZE ELECTRON TEMPERATURE AND CHECK EOS PLAUSIBILITY
@@ -438,7 +446,7 @@ for(i_global=0; i_global < global_fd_dim.x;i_global++)
     for(i=1;i<local_fd_dim.x-1;i++)
     {
       node.natoms_old = node2.natoms_old = node.natoms;
-      if (node.natoms >= fd_min_atoms)
+      if (node.natoms >= fd_min_atoms && node.dens > RHOMIN)
       {
          node.temp = node2.temp = node.md_temp;
       }      
@@ -504,7 +512,7 @@ void do_FILLMESH(void)
   {
     i_global =  ((i - 1) + myid * (local_fd_dim.x - 2));
 
-    if (node.natoms >= fd_min_atoms)
+    if (node.natoms >= fd_min_atoms && node.dens > RHOMIN)
     {
 
 #ifdef DENSHOTFIX
@@ -615,7 +623,7 @@ void do_FILLMESH(void)
         // *****************************************************************************
         if (steps < 1)
         {
-          if (node.natoms >= fd_min_atoms)
+          if (node.natoms >= fd_min_atoms && node.dens > RHOMIN)
           {        
 #if EOSMODE==1               
              node.U =EOS_ee_from_r_te(node.dens, node.temp * 11604.5) * 26.9815 * AMU * J2eV; // eV/Atom
@@ -861,8 +869,8 @@ void init_ttm()
   for(i=0;i<vlattice_dim;i++)
   {
     vlattice1[i].dens=vlattice2[i].dens=vlatdens;
-    vlattice1[i].temp=vlattice2[i].temp=0.0258;
-    vlattice1[i].md_temp=vlattice2[i].md_temp=0.0258;    
+    vlattice1[i].temp=vlattice2[i].temp=0.0264;
+    vlattice1[i].md_temp=vlattice2[i].md_temp=0.0264;    
   }
   #endif
 
@@ -1085,7 +1093,7 @@ void do_ADV(double tau)
 #endif        
 
           //Temp updaten wenn zelle aktiviert
-          if(node.natoms >= fd_min_atoms)
+          if(node.natoms >= fd_min_atoms && node.dens > RHOMIN)
           {
 #if EOSMODE==1            
             node2.temp = EOS_te_from_r_ee(node.dens, node2.U / (26.9815 * AMU * J2eV)) / 11604.5;
@@ -1135,7 +1143,7 @@ void do_cell_activation(void)
   for (i = 1; i < local_fd_dim.x - 1; ++i)
   {
     i_global = ((i - 1) + myid * (local_fd_dim.x - 2));
-    if (node.natoms_old >= fd_min_atoms && node.natoms < fd_min_atoms)
+    if (node.natoms_old >= fd_min_atoms && node.natoms < fd_min_atoms && node.dens > RHOMIN)
     {
       // ZELLE DEAKTIVIERT
 #if DEBUG_LEVEL > 0
@@ -1146,7 +1154,7 @@ void do_cell_activation(void)
       node.xi = 0.0;
     }
     // ZELLE AKTIVIERT
-    else if (node.natoms_old < fd_min_atoms && node.natoms >= fd_min_atoms)
+    else if (node.natoms_old < fd_min_atoms && node.natoms >= fd_min_atoms && node.dens > RHOMIN)
     {
 #if DEBUG_LEVEL > 0
       printf("Warning:New FD cell activated on proc %d at ig:%d,jg:%d,kg:%d with %d atoms on step:%d and T=%.4e, dens=%.4e, atoms_old:%d\n",
@@ -1175,7 +1183,7 @@ void do_cell_activation(void)
 
         // Was folgt, ist das ursprüngliche schema, mit den neu aktivierten Zellen
         // eine elec-temp. aus dem mittel der nachbarzelen zugewiesen wird ---> verletzt Energieerhaltung
-        if (l1[i + 1].natoms >= fd_min_atoms)
+        if (l1[i + 1].natoms >= fd_min_atoms)  //eigentlich noch dense zu prüfen aber bisher nicht kommuniziert
         {
           E_el_neighbors += SQR(l1[i + 1].temp);
           n_neighbors++;
@@ -1228,7 +1236,7 @@ void do_cell_activation(void)
 
     } // endif ..new cell activated...
 
-    //node.natoms_old=node2.natoms_old=node.natoms;
+    //node.natoms_old=node2.natoms_old=node.natoms; //nach update_fd verschoben
 
 
   } //for i
@@ -1293,9 +1301,12 @@ void do_DIFF(double tau)
     // printf("myid:%d, i:%d, ig:%d, atoms:%d,at-1:%d,at+1:%d\n",myid,i,i_global, node.natoms, l1[i-1].natoms, l1[i+1].natoms);
 
     /* only do calculation if cell is not deactivated */
-    if (node.natoms < fd_min_atoms)   continue;
-    if (l1[i - 1].natoms < fd_min_atoms)  xmin = i; else  xmin = i - 1;
-    if (l1[i + 1].natoms < fd_min_atoms) xmax = i; else  xmax = i + 1;
+    //ACHTUNG: dens in buffer-zelle ist nicht bekannt, da nicht kommuniziert
+    //         aber in fill_ghost_layers wird natoms genullt falls dens < RHOMIN    
+    if (node.natoms < fd_min_atoms || node.dens < RHOMIN)   continue;
+    if (l1[i - 1].natoms < fd_min_atoms || l1[i-1].dens < RHOMIN)  xmin = i; else  xmin = i - 1; //  
+    if (l1[i + 1].natoms < fd_min_atoms || l1[i+1].dens < RHOMIN) xmax = i; else  xmax = i + 1;  // 
+
 
     xmaxTe = l1[xmax].temp;
     xminTe = l1[xmin].temp;
@@ -2199,7 +2210,7 @@ void CFL_maxdt(void)
     // {
     //   for (k = 1; k < local_fd_dim.z - 1; ++k)
     //   {
-        if (node.natoms >= fd_min_atoms)
+        if (node.natoms >= fd_min_atoms && node.dens > RHOMIN)
         {
           // ************************************************
           // * DETERMINE MAX. TIME-STEP FOR STABILITY   *
@@ -2243,17 +2254,23 @@ double EOS_ee_from_r_te(double r, double t)
 #if DEBUG_LEVEL > 0
 if(tsqrt > intp_ee_from_r_tesqrt.ymax || tsqrt < intp_ee_from_r_tesqrt.ymin )
 {
-  char errstr[255];
+  char errstr[400];
   sprintf(errstr, "ERRROR in EOS_ee_from_r_te: tsqrt=%.4e exceeded interpolation range in EOS-table. ymin=%.4e,ymax=%.4e\n",
         tsqrt,intp_ee_from_r_tesqrt.ymin, intp_ee_from_r_tesqrt.ymax);
-  error(errstr);
+  printf("myid:%d, WARNING: %s. using bounds.\n",myid,errstr);
+  tsqrt=MIN(intp_ee_from_r_tesqrt.ymax,tsqrt);
+  tsqrt=MAX(intp_ee_from_r_tesqrt.ymin,tsqrt);
+  //error(errstr);
 }
 if(r < intp_ee_from_r_tesqrt.xmin || r > intp_ee_from_r_tesqrt.xmax)
 {
-  char errstr[255];
+  char errstr[400];
   sprintf(errstr, "ERROR in EOS_ee_from_r_te: Density=%.4e exceeds interpolation range, rmin= %.4e, rmax=%.4e\n",
     r, intp_ee_from_r_tesqrt.xmin,intp_ee_from_r_tesqrt.xmax);
-  error(errstr);
+  printf("myid:%d, WARNING: %s. using bounds.\n",myid,errstr);
+  r=MIN(intp_ee_from_r_tesqrt.xmax, r);
+  r=MAX(r,intp_ee_from_r_tesqrt.xmin);
+  //error(errstr);
 }
 #endif
 
@@ -2263,7 +2280,7 @@ if(r < intp_ee_from_r_tesqrt.xmin || r > intp_ee_from_r_tesqrt.xmax)
 #if DEBUG_LEVEL > 0
   if(isnan(pout.z)!=0)
   { 
-    char errstr[255];
+    char errstr[400];
     sprintf(errstr, "ERROR in EOS_ee_from_r_te: ee_from_r_te retunred NaN!.r:%.4e,t:%.4e",r,t);
     error(errstr);
   }
@@ -2287,10 +2304,24 @@ double EOS_cve_from_r_te(double r, double t)
 #if DEBUG_LEVEL > 0   
   if(r < intp_cve_from_r_te.xmin || r > intp_cve_from_r_te.xmax)
   {
-    char errstr[255];
+    char errstr[400];
     sprintf(errstr, "ERROR in EOS_cve_from_r_te: Density=%.4e  exceeds interpolation range: xmin=%.4e, xmax=%.4e\n",
       r,intp_cve_from_r_te.xmin,intp_cve_from_r_te.xmax);
-    error(errstr);
+
+    printf("myid:%d, WARNING: %s. using bounds.\n",myid,errstr);
+    r=MIN(intp_cve_from_r_te.xmax, r);
+    r=MAX(r,intp_cve_from_r_te.xmin);    
+    //error(errstr);
+  }
+  if(t < intp_cve_from_r_te.ymin || t > intp_cve_from_r_te.ymax)
+  {
+    char errstr[400];
+    sprintf(errstr, "ERROR in EOS_cve_from_r_te: Te=%.4e  exceeds interpolation range: ymin=%.4e, ymax=%.4e\n",
+      t,intp_cve_from_r_te.ymin,intp_cve_from_r_te.ymax);
+
+    printf("myid:%d, WARNING: %s. using bounds.\n",myid,errstr);
+    t=MIN(intp_cve_from_r_te.ymax, t);
+    t=MAX(t,intp_cve_from_r_te.ymin);      
   }
 #endif
 
@@ -2299,7 +2330,7 @@ double EOS_cve_from_r_te(double r, double t)
 #if DEBUG_LEVEL > 0
   if(isnan(pout.z)!=0)
   { 
-    char errstr[255];
+    char errstr[400];
     sprintf(errstr, "ERROR: cve_from_r_te retunred NaN!.r:%.4e,t:%.4e",r,t);
     error(errstr);
   }
@@ -2330,11 +2361,16 @@ double EOS_te_from_r_ee(double r, double e)
 #if DEBUG_LEVEL > 0
   if(r < intp_ee_from_r_tesqrt.xmin || r > intp_ee_from_r_tesqrt.xmax)
   {
-    char errstr[255];
+    char errstr[400];
     sprintf(errstr, "ERROR in EOS_te_from_r_ee: Density=%.4e exceeds interpolation range of table: xmin=%.4e, xmax=%.4e\n",
       r,intp_ee_from_r_tesqrt.xmin, intp_ee_from_r_tesqrt.xmax);
-    error(errstr);
-  }  
+
+    printf("myid:%d, WARNING: %s. using bounds.\n",myid,errstr);
+    r=MIN(r,intp_ee_from_r_tesqrt.xmax);
+    r=MAX(r,intp_ee_from_r_tesqrt.xmin);  
+
+    //error(errstr);
+  }    
 #endif
 
   //double eSI=e/(26.9815*AMU*6.2415091E18); // eV/Atom ---> J/kg
@@ -2911,6 +2947,7 @@ void ttm_fill_ghost_layers(void)
     buffs[0]=l1[1].temp;
     buffs[1]=l1[1].fd_k;
     buffs[2]=((double)l1[1].natoms);
+    if(l1[1].dens < RHOMIN) buffs[2]=0; //zelle deakt. in diff-step.
 
     //links-recht
     MPI_Sendrecv(&buffs[0], 3, MPI_DOUBLE, myid-1, 7100,
@@ -2926,6 +2963,7 @@ void ttm_fill_ghost_layers(void)
     buffs[0]=l1[(local_fd_dim.x - 2)].temp;
     buffs[1]=l1[(local_fd_dim.x - 2)].fd_k;
     buffs[2]=(double) l1[(local_fd_dim.x - 2)].natoms;
+    if(l1[(local_fd_dim.x - 2)].dens < RHOMIN) buffs[2]=0;
 
     MPI_Sendrecv(&buffs[0], 3, MPI_DOUBLE, myid+1, 7200,
                  &buffr[0], 3, MPI_DOUBLE, myid-1, 7200,
@@ -2950,6 +2988,7 @@ void ttm_fill_ghost_layers(void)
       buffs[0]=l1[(local_fd_dim.x - 2)].temp;
       buffs[1]=l1[(local_fd_dim.x - 2)].fd_k;
       buffs[2]=(double) l1[(local_fd_dim.x - 2)].natoms;
+      if(l1[(local_fd_dim.x - 2)].dens < RHOMIN) buffs[2]=0;
 
       MPI_Send(&buffs[0], 3, MPI_DOUBLE, myid+1, 7200,
                cpugrid);      
@@ -2963,6 +3002,7 @@ void ttm_fill_ghost_layers(void)
       buffs[0]=l1[1].temp;
       buffs[1]=l1[1].fd_k;
       buffs[2]=(double) l1[1].natoms;
+      if(l1[1].dens < RHOMIN) buffs[2]=0.0;
 
       MPI_Send(&buffs, 3, MPI_DOUBLE, myid-1, 7100,
                cpugrid);
