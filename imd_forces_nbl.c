@@ -1042,34 +1042,12 @@ NUMNEIGHS(p,i) += nbttm;
 #endif 
 
 #ifdef NRB
-//       nrb_test_forces();
+  //nrb_test_forces();
 #endif
 //ENDOF MYMOD
 
   /* add forces back to original cells/cpus */
   send_forces(add_forces,pack_forces,unpack_forces);
-
-  /*
-  for(k=0;k<nallcells;k++)
-  //for(k=0;k<ncells;k++)
-  {
-    cell*p=cell_array+k; //CELLPTR(k);
-    //cell*p=CELLPTR(k);
-    for(i=0;i<p->n; i++)
-    {
-	 if(NUMMER(p,i)==1016002)
-		 printf("myid:%d,steps:%d, type:%d, DEBUG, bnd:%d\n", myid,steps,p->celltype, NRBBND(p,i));
-    }
-  }
-  */
-
-//MYMOD
-
-// #ifdef NRB
-//      nrb_test_forces();
-// #endif
-//ENDOF MYMOD
-
 
 }
 

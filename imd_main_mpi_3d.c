@@ -160,9 +160,10 @@ void calc_forces(int steps)
 //MYMOD
 #ifdef NRB
   #ifndef NBL
-    nrb_forces();
-
-    nrb_test_forces();
+    nrb_forces(); //Dass mus VOR send_forces geschehen
+    //Im NBL-Fall steht dies direkt am Ende der force-loop, weil send_forces dort 
+    //aufgerufen wird und nicht hier
+    //nrb_test_forces(); //TESTZWECKE
   #endif
 #endif  
 

@@ -3,7 +3,10 @@
 # NORMAL
 make clean
 # make -j8 imd_mpi_eam_nve_nbl_nrb_stress_filter_loadbalance
-make -j8 imd_mpi_eam_nve_nrb_stress_loadbalance_ar_filter
+#make -j8 imd_mpi_eam_nve_nrb_stress_loadbalance_ar_filter
+make -j8 imd_mpi_eam_nve_nrb_stress_loadbalance_nbl_filter
+# make -j8 imd_mpi_eam_nve_stress_loadbalance_nbl_filter
+
 # make -j8 imd_mpi_eam_nve_nbl_nrb_loadbalance
 #make -j8 imd_mpi_eam_ttm_tmm_nbl
 #make -j8 imd_mpi_eam_ttm_tmm_nbl

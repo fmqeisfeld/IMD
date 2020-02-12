@@ -48,7 +48,7 @@
 //	   VORTEIL:  Es funktioniert endlich
 //	   NACHTEIL: Wahrscheinlich nicht sonderlich performant + Kommunikationsmonster (alle NRB-infos werden JEDEN step kommuniziert. send_cells vor der kraftschleife und send_forces danach)
 //********************************************************************************************************************************************************************************
-#define DEBUG_LEVEL 1
+#define DEBUG_LEVEL 0
 #define WATCHME 72259
 //#define WATCH ( (NUMMER(bndcell,bndi)==38400) || (NUMMER(bndcell,bndi)==38084) )
 //#define WATCH ( (NUMMER(bndcell,bndi)==9764) )
@@ -724,7 +724,7 @@ nrb_send_cells(copy_nrb_max,pack_nrb,unpack_nrb_max); //acumm. results
 #endif
 
 #ifdef NBL  //ERROR WENN NUR PAIR OHNE NBL
-    nrb_inverse_send_cells(copy_nrb_max,pack_nrb,unpack_nrb_max);
+    //nrb_inverse_send_cells(copy_nrb_max,pack_nrb,unpack_nrb_max); // brauche ich nur im init step
 #endif    
 
     nrb_build_ifromid();
@@ -1006,6 +1006,7 @@ printf("myid:%d,steps:%d, DOFORCE, ind:%d, bnd:%d,nei:%d,r:%d, dpx:%f dpy:%f dpz
 
   #endif //NBL
 
+#ifndef NBL
 #ifdef PAIR
   for (n=0; n<nlists; ++n) 
   {
@@ -1115,7 +1116,7 @@ printf("myid:%d,steps:%d, DOFORCE, ind:%d, bnd:%d,nei:%d,r:%d, dpx:%f dpy:%f dpz
     }//for n
   
 #endif
-
+#endif
 
 
   return 0;
