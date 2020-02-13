@@ -1155,6 +1155,9 @@ EXTERN double *vcomxlocal,*vcomxglobal;
 EXTERN double *vcomylocal,*vcomyglobal;
 EXTERN double *vcomzlocal,*vcomzglobal;
 
+EXTERN int *fluxfromrightlocal,*fluxfromleftlocal;
+EXTERN int *fluxfromrightglobal,*fluxfromleftglobal;
+
 EXTERN int ttmdimx INIT(0); //global_fd_dim.x muss in diesem fall angegeben werden
 #else
 EXTERN  ttm_Element *** l1, *** l2, *** l3;

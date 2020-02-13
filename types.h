@@ -462,9 +462,10 @@ typedef struct
 
 #ifndef LOADBALANCE  
   //advection
-  int flux[8]; //<--23.11.18: Mit dem neuen advection solver brauche ich die atomzahlen nicht  
+  int flux[8];
 #else
-  int flux[2]; //left und right in 1D TTM
+  //int flux[2]; //left und right in 1D TTM
+  //In diesem fall wird ein anderes, globals array genutzt 
 #endif
 
 

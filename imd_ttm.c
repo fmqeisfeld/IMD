@@ -166,15 +166,19 @@ void update_fd()
   // double *vcomylocal,*vcomyglobal;
   // double *vcomzlocal,*vcomzglobal;
 
-  int *fluxfromrightlocal,*fluxfromleftlocal;
-  int *fluxfromrightglobal,*fluxfromleftglobal;
+  // int *fluxfromrightlocal,*fluxfromleftlocal;
+  // int *fluxfromrightglobal,*fluxfromleftglobal;
+  
+
+  // alloc1darr(int, fluxfromrightlocal, global_fd_dim.x);
+  // alloc1darr(int, fluxfromleftlocal, global_fd_dim.x);
+
+  // alloc1darr(int, fluxfromrightglobal, global_fd_dim.x);
+  // alloc1darr(int, fluxfromleftglobal, global_fd_dim.x);
+
   double * mdtemplocal,*mdtempglobal;
 
-  alloc1darr(int, fluxfromrightlocal, global_fd_dim.x);
-  alloc1darr(int, fluxfromleftlocal, global_fd_dim.x);
 
-  alloc1darr(int, fluxfromrightglobal, global_fd_dim.x);
-  alloc1darr(int, fluxfromleftglobal, global_fd_dim.x);
 
   alloc1darr(int, natomslocal, global_fd_dim.x);
   alloc1darr(int, natomsglobal, global_fd_dim.x);
@@ -222,11 +226,6 @@ void update_fd()
 // *********************************************************
 // Clear edges & corners of fluxes & temp (erstmal nur 1D und 2D)  *
 // *********************************************************
-  for (k = 0; k < 2; k++)
-  {
-    l1[0].flux[k] = l1[local_fd_dim.x - 1].flux[k] = 0;
-    l1[local_fd_dim.x - 1].flux[k] = l1[0].flux[k] = 0;
-  }
   l1[0].temp = l1[local_fd_dim.x - 1].temp = 0;
   l1[local_fd_dim.x - 1].temp = l1[0].temp = 0;
 #endif
@@ -242,9 +241,7 @@ void update_fd()
     node.vcomy = 0.0;
     node.vcomz = 0.0;
     node.source = node2.source = 0.0;
-#if ADVMODE==1
-    node.flux[0] = node.flux[1] == 0;    
-#endif
+
     node.natoms_old = node2.natoms_old = node.natoms;
     node.natoms = node2.natoms = 0; 
     node.xi = node2.xi = 0.0;
@@ -260,8 +257,8 @@ void update_fd()
  for (k=0; k<NCELLS; ++k) 
  {
     p = CELLPTR(k);
-    if(p->lb_cell_type != LB_REAL_CELL)
-      continue;
+    // if(p->lb_cell_type != LB_REAL_CELL)
+    //   continue;
     for (l=0; l<p->n; ++l) 
     {
       int i_global=(int) (ORT(p,l,X)/fd_h.x) ;
@@ -287,10 +284,19 @@ void update_fd()
         {
           // +x
           if (p->fdi[l] > i_global)
+          {
             fluxfromrightlocal[i_global]++;            
+// if(myid==1)            
+// {if(i_global==11)
+// printf("\nfluxfromright[%d]:%d\n\n",i_global,fluxfromrightlocal[i_global]);
+// }
+          }
           //-x
           else if (p->fdi[l] < i_global)
+          {
             fluxfromleftlocal[i_global]++;
+          }
+
         }
       }      
       p->fdi[l] = i_global; //für advection
@@ -384,12 +390,12 @@ for(i_global=0; i_global < global_fd_dim.x;i_global++)
   if(i_local<1 || i_local > local_fd_dim.x-2)
     continue;
 
-
     i=i_local;
+
     node.natoms=natomsglobal[i_global];
     node2.natoms=node.natoms;
-    node.flux[0]=node2.flux[0]=fluxfromrightglobal[i];
-    node.flux[1]=node2.flux[1]=fluxfromleftglobal[i];
+    // node.flux[0]=node2.flux[0]=fluxfromrightglobal[i];
+    // node.flux[1]=node2.flux[1]=fluxfromleftglobal[i];
 
     if(node.natoms > 0)
     {
@@ -465,10 +471,10 @@ for(i_global=0; i_global < global_fd_dim.x;i_global++)
   // free1darr(vcomyglobal);
   // free1darr(vcomzlocal);
   // free1darr(vcomzglobal);
-  free1darr(fluxfromleftlocal);
-  free1darr(fluxfromleftglobal);
-  free1darr(fluxfromrightlocal);
-  free1darr(fluxfromrightglobal);
+  // free1darr(fluxfromleftlocal);
+  // free1darr(fluxfromleftglobal);
+  // free1darr(fluxfromrightlocal);
+  // free1darr(fluxfromrightglobal);
   free1darr(mdtemplocal);
   free1darr(mdtempglobal);
 
@@ -774,13 +780,13 @@ void do_COMMFLUX(void)
   if (myid != 0 && myid != num_cpus - 1) //BULK
   {
     //flux
-    MPI_Sendrecv(l1[local_fd_dim.x - 2].flux, 2, MPI_INT, myid+1, 7302, //+x
-                 l1[0].flux, 2, MPI_INT, myid-1, 7302,                  //-x
-                 cpugrid, &stati[0]);
+    // MPI_Sendrecv(l1[local_fd_dim.x - 2].flux, 2, MPI_INT, myid+1, 7302, //+x
+    //              l1[0].flux, 2, MPI_INT, myid-1, 7302,                  //-x
+    //              cpugrid, &stati[0]);
 
-    MPI_Sendrecv(l1[1].flux, 2, MPI_INT, myid-1, 7402,                  //-x
-                 l1[local_fd_dim.x - 1].flux, 2, MPI_INT, myid+1, 7402, //+x
-                 cpugrid, &stati[1]);
+    // MPI_Sendrecv(l1[1].flux, 2, MPI_INT, myid-1, 7402,                  //-x
+    //              l1[local_fd_dim.x - 1].flux, 2, MPI_INT, myid+1, 7402, //+x
+    //              cpugrid, &stati[1]);
 
     //selbes fuer interne eng.
     MPI_Sendrecv(&l1[local_fd_dim.x - 2].U, 1, MPI_DOUBLE, myid+1, 5302, //+x
@@ -804,9 +810,9 @@ void do_COMMFLUX(void)
   else if (myid == 0) //SURFACE:only comm. with nbwest
   {
     //flux
-    MPI_Sendrecv(l1[local_fd_dim.x - 2].flux, 2, MPI_INT, myid+1, 7302, //+x
-                 l1[local_fd_dim.x - 1].flux, 2, MPI_INT, myid+1, 7402, //+x
-                 cpugrid, &stati[1]);
+    // MPI_Sendrecv(l1[local_fd_dim.x - 2].flux, 2, MPI_INT, myid+1, 7302, //+x
+    //              l1[local_fd_dim.x - 1].flux, 2, MPI_INT, myid+1, 7402, //+x
+    //              cpugrid, &stati[1]);
     //selbes fuer u
     MPI_Sendrecv(&l1[local_fd_dim.x - 2].U, 1, MPI_DOUBLE, myid+1, 5302, //+x
                  &l1[local_fd_dim.x - 1].U, 1, MPI_DOUBLE, myid+1, 5402, //+x
@@ -820,9 +826,9 @@ void do_COMMFLUX(void)
   else if (myid == num_cpus - 1) //SURFACE:only comm with east
   {
     //flux
-    MPI_Sendrecv(l1[1].flux, 2, MPI_INT, myid-1, 7402,         //-x
-                 l1[0].flux, 2, MPI_INT, myid-1, 7302,         //-x
-                 cpugrid, &stati[0]);
+    // MPI_Sendrecv(l1[1].flux, 2, MPI_INT, myid-1, 7402,         //-x
+    //              l1[0].flux, 2, MPI_INT, myid-1, 7302,         //-x
+    //              cpugrid, &stati[0]);
     //selbes fuer u
     MPI_Sendrecv(&l1[1].U, 1, MPI_DOUBLE, myid-1, 5402,         //-x
                  &l1[0].U, 1, MPI_DOUBLE, myid-1, 5302,         //-x
@@ -895,6 +901,11 @@ void init_ttm()
   alloc1darr(double, vcomzlocal, global_fd_dim.x);
   alloc1darr(double, vcomzglobal, global_fd_dim.x);
 
+  alloc1darr(int, fluxfromrightlocal, global_fd_dim.x);
+  alloc1darr(int, fluxfromleftlocal, global_fd_dim.x); 
+
+  alloc1darr(int, fluxfromrightglobal, global_fd_dim.x);
+  alloc1darr(int, fluxfromleftglobal, global_fd_dim.x);
 
   #ifdef VLATTICE //NUR 1D!!! (global_fd_dim.y und global_fd_dim.z=1)
   vlattice1= (ttm_Element*) malloc(sizeof(ttm_Element)* vlatdim);
@@ -945,13 +956,7 @@ void init_ttm()
     for (bar = 0; bar < 6; bar++)
       node2.DL[bar] = node.DL[bar] = 0.0;
     #endif
-#if ADVMODE==1 
-    int foo;
-    for (foo = 0; foo < 8; foo++)
-    {
-      node.flux[foo] = node2.flux[foo] = 0;
-    }
-#endif
+
   }
 
 
@@ -1088,12 +1093,7 @@ void do_ADV(double tau)
 #endif
 
       i_global = ((i - 1) + myid * (local_fd_dim.x - 2));
-      //j_global = ((j - 1) + my_coord.y * (local_fd_dim.y - 2));
-      //k_global =  ((k-1) + my_coord.z*(local_fd_dim.z-2));
 
-//REMINDER
-// flux[0] : teilchen erhalten von +x,y
-// flux[1] : teilchen erhalten von -x,y
 
       double Nold = (double) node.natoms_old;
       double Nnew = (double) node.natoms; //tmp;
@@ -1103,11 +1103,18 @@ void do_ADV(double tau)
       {
         node2.U= node.U * Nold / Nnew+ tau*(
                                   // +x/-x
-        + (double) node.flux[0] * l1[i + 1].U //erhalten von +x,y
-        - (double) l1[i + 1].flux[1] * node.U //nach +x,y abgeflossen
+        // + (double) node.flux[0] * l1[i + 1].U //erhalten von +x,y
+        // - (double) l1[i + 1].flux[1] * node.U //nach +x,y abgeflossen
 
-        + (double) node.flux[1] * l1[i - 1].U //erhalten von -x,y
-        - (double) l1[i - 1].flux[0] * node.U //nach -x,y abgeflossen
+        // + (double) node.flux[1] * l1[i - 1].U //erhalten von -x,y
+        // - (double) l1[i - 1].flux[0] * node.U //nach -x,y abgeflossen
+
+        + (double) fluxfromrightglobal[i_global]     * l1[i + 1].U //erhalten von +x,y
+        - (double) fluxfromleftglobal[i_global + 1] * node.U //nach +x,y abgeflossen
+
+        + (double) fluxfromleftglobal[i_global] * l1[i - 1].U //erhalten von -x,y
+        - (double) fluxfromrightglobal[i_global - 1]* node.U //nach -x,y abgeflossen
+
       ) / Nnew;
 
 #ifdef COLRAD
@@ -1137,6 +1144,7 @@ void do_ADV(double tau)
             node2.ne = node.ne;            
             node2.temp=  FEG_te_from_r_ne_ee(node.dens,node.ne, node2.U / (26.9815 * AMU * J2eV)) / 11604.5;
 #endif     
+
           }     
       }
       else if (Nnew < 1)
@@ -1191,8 +1199,8 @@ void do_cell_activation(void)
     else if (node.natoms_old < fd_min_atoms && node.natoms >= fd_min_atoms && node.dens > RHOMIN)
     {
 #if DEBUG_LEVEL > 0
-      printf("Warning:New FD cell activated on proc %d at ig:%d,jg:%d,kg:%d with %d atoms on step:%d and T=%.4e, dens=%.4e, atoms_old:%d\n",
-             myid, i, j, k, node.natoms, steps, node.temp, node.dens, node.natoms_old);
+      printf("Warning:New FD cell activated on proc %d at ig:%d, il%d, with %d atoms on step:%d and T=%.4e, dens=%.4e, atoms_old:%d\n",
+             myid, i_global, i,node.natoms, steps, node.temp, node.dens, node.natoms_old);
 #endif
       // *****************************************************
       // * NEU AKTIVIERTE ZELLE MIT UNSINNIGER TEMPERATUR,   *
