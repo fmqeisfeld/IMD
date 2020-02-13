@@ -16,8 +16,9 @@
 
 #include <sys/time.h> // Performance messen
 #include <complex.h>
-#include "/usr/include/gsl/gsl_sf_fermi_dirac.h"  // Fuer fermi-dirac integral zur berechnung der FEG-internen energie
-                                // als alternative zur interpol.Tabelle (falls gewünscht: EOSMODE = 0)
+// #include "/usr/include/gsl/gsl_sf_fermi_dirac.h"  // Fuer fermi-dirac integral zur berechnung der FEG-internen energie
+                                                   // als alternative zur interpol.Tabelle (falls gewünscht: EOSMODE = 0)
+//gsl_sf_fermi_dirac deakt. (genau wie FEG_ee_from_r_ne_te), weil es auf hazel nicht zu finden ist
 
 
 //TODO: 
@@ -38,7 +39,7 @@
 //#define ADVMODE2d  // FALLS y dim offen sein soll, müssen atomic-fluxes auch über kanten kommmuniziert werden
 
 #define VLATTICE   //VIRTUAL LATTICE HINTER DER PROBE. ACHTUNG: NUR 1D !!!!
-                    //Falls gewünscht kann mit vlat_buffer die zahl
+                    //Falls gewünscht kann mit vlatbuffer die zahl
                     //der zellen (vom ende der probe gezählt) angegeben werden, die NICHT im TTM berücksichtigt
                     //werden soll, da diese als Puffer dienen 
                     //Grund:md-temp (und damit auch elek.temp) nimmt wegen Schockabsorbierenden Randbed. 
@@ -66,22 +67,21 @@ void calc_ttm()
   int i, j, k;
   double fd_subtime;
   double tau_DIFF; //integr. timestep-size in IMD-time units
-  double tau_FDTD; //integr. timestep-size in SI-units
+  // double tau_FDTD; //integr. timestep-size in SI-units
 
-  int fdtd_substeps;
+  // diff_substeps=fd_n_timesteps;
+  // tau_DIFF=(timestep)/((double) fd_n_timesteps);
+
+
+  // int fdtd_substeps;
   //int diff_substeps;
-  int fdtd_div_diff; // fdtd_substeps/diff_substeps
+  // int fdtd_div_diff; // fdtd_substeps/diff_substeps
   // ACHTUNG: integr.zeitschritt fuer Diffusion ist maximal so groß
   // wie integr.zeitschritt fuer maxwell-solver
   // Außerdem kann der benutzer via fd_n_timesteps eine untere grenze bestimmen
 
-  int telaps_md;     //fuer timing
-  int telaps_ttm;
-  fd_n_timesteps=300;
-  diff_substeps=fd_n_timesteps;
-
-  tau_DIFF=(timestep)/((double) fd_n_timesteps);
-
+  // int telaps_md;     //fuer timing
+  // int telaps_ttm;
   
   update_fd();
 #if ADVMODE == 1  
@@ -94,9 +94,14 @@ void calc_ttm()
   do_FILLMESH(); // calc. wide-range properties
   ttm_fill_ghost_layers();  
 
+  CFL_maxdt();    
+  diff_substeps = MAX(fd_n_timesteps, (int) (timestep / max_dt_ttm));
+  tau_DIFF = timestep / ((double) diff_substeps);  
+
+
   for (i = 0; i < diff_substeps; i++)
   {
-    do_tmm(tau_DIFF); //Helmholtz-solver
+    do_tmm(tau_DIFF); //Helmholtz-solver, tau_DIFF spielt hier keine Rolle mehr
     tmm_time += tau_DIFF * 10.18 * 1.0e-15; //in sek
     do_DIFF(tau_DIFF);
     do_FILLMESH();
@@ -133,7 +138,8 @@ void calc_ttm()
 MPI_Reduce(&Eabs_local, &Eabs_global, 1, MPI_DOUBLE, MPI_SUM, 0, cpugrid);
 
 if(myid==0)
-  printf("step:%d, Finc:%.4e, t-t0:%.4e, Refl:%.4e \n",steps,Eabs_global * eV2J / laser_spot_area,(tmm_time - laser_t_0) * 1e15,tmm_refl);
+  printf("step:%d, It:%.2e, substeps:%d, Finc:%.4e, t-t0:%.4e, Refl:%.4e, maxdt:%f \n",
+          steps,I_t, diff_substeps, Eabs_global * eV2J / laser_spot_area,(tmm_time - laser_t_0) * 1e15,tmm_refl, max_dt_ttm);
 
 }
 
@@ -218,7 +224,7 @@ void update_fd()
 // *********************************************************
 // Clear edges & corners of fluxes & temp (erstmal nur 1D und 2D)  *
 // *********************************************************
-  for (k = 0; k < 8; k++)
+  for (k = 0; k < 2; k++)
   {
     l1[0].flux[k] = l1[local_fd_dim.x - 1].flux[k] = 0;
     l1[local_fd_dim.x - 1].flux[k] = l1[0].flux[k] = 0;
@@ -239,8 +245,7 @@ void update_fd()
     node.vcomz = 0.0;
     node.source = node2.source = 0.0;
 #if ADVMODE==1
-    node.flux[0] = node.flux[1] = node.flux[2] = node.flux[3] = 0;
-    node.flux[4] = node.flux[5] = node.flux[6] = node.flux[7] = 0;
+    node.flux[0] = node.flux[1] == 0;    
 #endif
     node.natoms_old = node2.natoms_old = node.natoms;
     node.natoms = node2.natoms = 0; 
@@ -248,6 +253,7 @@ void update_fd()
     node.source = node2.source = 0.0;
 
     xiarr_local[i]=0.0;
+    node.dens=node2.dens=0;
   }
 // **********************
 //   1st LOOP OVER ATOMS
@@ -375,10 +381,11 @@ MPI_Allreduce(mdtemplocal, mdtempglobal, global_fd_dim.x, MPI_DOUBLE, MPI_SUM, c
 for(i_global=0; i_global < global_fd_dim.x;i_global++)
 {
   int i_local=i_global+1-myid*(local_fd_dim.x-2);
-  
+
 // printf("myid:%d,ig:%d,il:%d,max:%d\n",myid,i_global,i_local,local_fd_dim.x-1);
   if(i_local<1 || i_local > local_fd_dim.x-2)
     continue;
+
 
     i=i_local;
     node.natoms=natomsglobal[i_global];
@@ -398,7 +405,7 @@ for(i_global=0; i_global < global_fd_dim.x;i_global++)
 #ifdef VLATTICE
       if(node.natoms >= fd_min_atoms && node.dens > RHOMIN)
       {  
-        last_active_cell_local=MAX(last_active_cell_local,i_global- vlat_buffer);
+        last_active_cell_local=MAX(last_active_cell_local,i_global- vlatbuffer);
       }
 #endif     
 
@@ -418,6 +425,35 @@ for(i_global=0; i_global < global_fd_dim.x;i_global++)
 
     node2.md_temp=node.md_temp;      
     node2.dens=node.dens;    
+    ////////
+    // ghost layers können direkt hier gefüllt werden
+    ///////////
+    if(i_local==1)
+    {
+      l1[0].natoms=natomsglobal[i_global-1];
+      if(l1[0].natoms > 0 )
+        l1[0].dens=((double) totneighsglobal[i_global-1])/((double) l1[0].natoms) * atomic_weight / neighvol * 1660.53907; //kg/m^3       
+
+      l2[0].natoms=l1[0].natoms;
+      l2[0].dens=l1[0].dens;
+    }
+    else if (i_local==local_fd_dim.x-2)
+    {
+      l1[local_fd_dim.x-1].natoms=natomsglobal[i_global+1];
+
+      if(l1[local_fd_dim.x-1].natoms > 0 )
+        l1[local_fd_dim.x-1].dens=((double) totneighsglobal[i_global+1])/((double) l1[local_fd_dim.x-1].natoms) *
+                                    atomic_weight / neighvol * 1660.53907; //kg/m^3  
+
+      l2[local_fd_dim.x-1].natoms=l1[local_fd_dim.x-1].natoms;
+      l2[local_fd_dim.x-1].dens  =l1[local_fd_dim.x-1].dens;
+
+// if(myid==1)      
+//   printf("\n\n\nFUCK:%d, you:%f\n\n\n\n", l2[local_fd_dim.x-2].natoms, l2[local_fd_dim.x-2].dens);
+    }
+
+
+
 
   }
 
@@ -468,10 +504,10 @@ for(i_global=0; i_global < global_fd_dim.x;i_global++)
   
   if(cur_vlattice_proc != old_vlattice_proc) //last-filled cell is now on other proc --> send to new proc
   {
-    //MPI_Bcast(&vlattice1[0], vlattice_dim, mpi_element2, last_active_cell_global.rank, cpugrid);       
+    //MPI_Bcast(&vlattice1[0], vlatdim, mpi_element2, last_active_cell_global.rank, cpugrid);       
     if(steps>0) //Beim 0-ten step macht das keinen sinn!
-       MPI_Sendrecv(&vlattice1[0], vlattice_dim, mpi_element2, cur_vlattice_proc, 101010, 
-                    &vlattice1[0], vlattice_dim, mpi_element2, old_vlattice_proc, 101010, cpugrid, &vlatstatus);       
+       MPI_Sendrecv(&vlattice1[0], vlatdim, mpi_element2, cur_vlattice_proc, 101010, 
+                    &vlattice1[0], vlatdim, mpi_element2, old_vlattice_proc, 101010, cpugrid, &vlatstatus);       
   }
 
   old_vlattice_proc=cur_vlattice_proc;
@@ -674,8 +710,8 @@ void do_FILLMESH(void)
           node.Z = 0.0;
           node.ne = 0.0;
           node.Ce = 0.0;
-          //node.temp=0.0;  //nicht nullen, sonst funktioniert advection nicht
-        }
+          node.temp=0.0;  //temp wird nun in do_DIFF genutzt zum zu prüfen ob
+        }                 //Nachbarzellen aktiv oder nicht,sodass atomzahl nicht mehr kommuniziert werden muss
 
   }     // for i
 
@@ -684,7 +720,7 @@ void do_FILLMESH(void)
         if(cur_vlattice_proc==myid)
         {
           
-          for(i=0;i<vlattice_dim;i++)
+          for(i=0;i<vlatdim;i++)
           {
             vlattice1[i].Z= MeanCharge(vlattice1[i].temp*11604.5, vlattice1[i].dens, atomic_charge, atomic_weight,i,1,1);
             vlattice1[i].ne= vlattice1[i].Z * vlattice1[i].dens / (atomic_weight * AMU);
@@ -740,12 +776,12 @@ void do_COMMFLUX(void)
   if (myid != 0 && myid != num_cpus - 1) //BULK
   {
     //flux
-    MPI_Sendrecv(l1[local_fd_dim.x - 2].flux, 8, MPI_INT, myid+1, 7302, //+x
-                 l1[0].flux, 8, MPI_INT, myid-1, 7302,                  //-x
+    MPI_Sendrecv(l1[local_fd_dim.x - 2].flux, 2, MPI_INT, myid+1, 7302, //+x
+                 l1[0].flux, 2, MPI_INT, myid-1, 7302,                  //-x
                  cpugrid, &stati[0]);
 
-    MPI_Sendrecv(l1[1].flux, 8, MPI_INT, myid-1, 7402,                  //-x
-                 l1[local_fd_dim.x - 1].flux, 8, MPI_INT, myid+1, 7402, //+x
+    MPI_Sendrecv(l1[1].flux, 2, MPI_INT, myid-1, 7402,                  //-x
+                 l1[local_fd_dim.x - 1].flux, 2, MPI_INT, myid+1, 7402, //+x
                  cpugrid, &stati[1]);
 
     //selbes fuer interne eng.
@@ -770,8 +806,8 @@ void do_COMMFLUX(void)
   else if (myid == 0) //SURFACE:only comm. with nbwest
   {
     //flux
-    MPI_Sendrecv(l1[local_fd_dim.x - 2].flux, 8, MPI_INT, myid+1, 7302, //+x
-                 l1[local_fd_dim.x - 1].flux, 8, MPI_INT, myid+1, 7402, //+x
+    MPI_Sendrecv(l1[local_fd_dim.x - 2].flux, 2, MPI_INT, myid+1, 7302, //+x
+                 l1[local_fd_dim.x - 1].flux, 2, MPI_INT, myid+1, 7402, //+x
                  cpugrid, &stati[1]);
     //selbes fuer u
     MPI_Sendrecv(&l1[local_fd_dim.x - 2].U, 1, MPI_DOUBLE, myid+1, 5302, //+x
@@ -786,8 +822,8 @@ void do_COMMFLUX(void)
   else if (myid == num_cpus - 1) //SURFACE:only comm with east
   {
     //flux
-    MPI_Sendrecv(l1[1].flux, 8, MPI_INT, myid-1, 7402,         //-x
-                 l1[0].flux, 8, MPI_INT, myid-1, 7302,         //-x
+    MPI_Sendrecv(l1[1].flux, 2, MPI_INT, myid-1, 7402,         //-x
+                 l1[0].flux, 2, MPI_INT, myid-1, 7302,         //-x
                  cpugrid, &stati[0]);
     //selbes fuer u
     MPI_Sendrecv(&l1[1].U, 1, MPI_DOUBLE, myid-1, 5402,         //-x
@@ -863,10 +899,10 @@ void init_ttm()
 
 
   #ifdef VLATTICE //NUR 1D!!! (global_fd_dim.y und global_fd_dim.z=1)
-  vlattice1= (ttm_Element*) malloc(sizeof(ttm_Element)* vlattice_dim);
-  vlattice2= (ttm_Element*) malloc(sizeof(ttm_Element)* vlattice_dim);
+  vlattice1= (ttm_Element*) malloc(sizeof(ttm_Element)* vlatdim);
+  vlattice2= (ttm_Element*) malloc(sizeof(ttm_Element)* vlatdim);
 
-  for(i=0;i<vlattice_dim;i++)
+  for(i=0;i<vlatdim;i++)
   {
     vlattice1[i].dens=vlattice2[i].dens=vlatdens;
     vlattice1[i].temp=vlattice2[i].temp=0.0264;
@@ -940,8 +976,8 @@ void init_ttm()
            fd_h.x * fd_h.y * fd_h.z * global_fd_dim.x );
 
 #ifdef VLATTICE
-    printf("Virtual lattice dim:%d\n",vlattice_dim);
-    printf("Virtual lattice buffer-cells:%d\n", vlat_buffer);
+    printf("Virtual lattice dim:%d\n",vlatdim);
+    printf("Virtual lattice buffer-cells:%d\n", vlatbuffer);
 #endif    
 
 #if DEBUG_LEVEL>0
@@ -1183,12 +1219,12 @@ void do_cell_activation(void)
 
         // Was folgt, ist das ursprüngliche schema, mit den neu aktivierten Zellen
         // eine elec-temp. aus dem mittel der nachbarzelen zugewiesen wird ---> verletzt Energieerhaltung
-        if (l1[i + 1].natoms >= fd_min_atoms)  //eigentlich noch dense zu prüfen aber bisher nicht kommuniziert
+        if (l1[i + 1].natoms >= fd_min_atoms && l1[i+1].dens >= RHOMIN)  //eigentlich noch dense zu prüfen aber bisher nicht kommuniziert
         {
           E_el_neighbors += SQR(l1[i + 1].temp);
           n_neighbors++;
         }
-        if (l1[i - 1].natoms >= fd_min_atoms)
+        if (l1[i - 1].natoms >= fd_min_atoms && l1[i-1].dens >= RHOMIN)
         {
           E_el_neighbors += SQR(l1[i - 1].temp);
           n_neighbors++;
@@ -1278,6 +1314,7 @@ void do_DIFF(double tau)
   printf("steps:%d,proc:%d,entered do_DIFF\n", steps, myid);
 #endif
   j_global=k_global=1;
+
   ///////////////////////////
   // DIFFUSION             //
   ///////////////////////////
@@ -1303,10 +1340,15 @@ void do_DIFF(double tau)
     /* only do calculation if cell is not deactivated */
     //ACHTUNG: dens in buffer-zelle ist nicht bekannt, da nicht kommuniziert
     //         aber in fill_ghost_layers wird natoms genullt falls dens < RHOMIN    
-    if (node.natoms < fd_min_atoms || node.dens < RHOMIN)   continue;
-    if (l1[i - 1].natoms < fd_min_atoms || l1[i-1].dens < RHOMIN)  xmin = i; else  xmin = i - 1; //  
-    if (l1[i + 1].natoms < fd_min_atoms || l1[i+1].dens < RHOMIN) xmax = i; else  xmax = i + 1;  // 
 
+    if (node.natoms < fd_min_atoms || node.dens < RHOMIN)   continue;
+
+    if (l1[i - 1].natoms < fd_min_atoms || l1[i-1].dens < RHOMIN)  xmin = i; else  xmin = i - 1; //das geht nun, da ich update_fd
+    if (l1[i + 1].natoms < fd_min_atoms || l1[i+1].dens < RHOMIN)  xmax = i; else  xmax = i + 1; //auch direkt ghost-layer befülle
+
+
+    // if (l1[i - 1].temp <= 0 )  xmin = i; else  xmin = i - 1; //das geht nun, da ich update_fd
+    // if (l1[i + 1].temp <= 0 )  xmax = i; else  xmax = i + 1; //auch direkt ghost-layer befülle
 
     xmaxTe = l1[xmax].temp;
     xminTe = l1[xmin].temp;
@@ -1389,7 +1431,7 @@ void do_DIFF(double tau)
     Ci *= 11604.5; // -->J/eV/m^3
     Ci *= 1e-30; // --> J/eV/Angs^3
     Ci *= J2eV; // --> eV/eV/A^3
-    for(i=0;i<vlattice_dim;i++)
+    for(i=0;i<vlatdim;i++)
     {
       // Te-diffusion
       Ce = vlattice1[i].Ce;                        
@@ -1410,7 +1452,6 @@ void do_DIFF(double tau)
     }
   }
 #endif   
-
 
   /* take care - l1 must always be the updated lattice */
 
@@ -1584,12 +1625,12 @@ void ttm_writeout(int number)
     {
       if(myid==cur_vlattice_proc)
       {
-        MPI_Send(&vlattice1[0], vlattice_dim, mpi_element2, 0, 101011, cpugrid);
+        MPI_Send(&vlattice1[0], vlatdim, mpi_element2, 0, 101011, cpugrid);
       }
 
       if(myid==0)
       {
-        MPI_Recv(&vlattice1[0], vlattice_dim, mpi_element2, cur_vlattice_proc, 101011, cpugrid, &vlatstatus);
+        MPI_Recv(&vlattice1[0], vlatdim, mpi_element2, cur_vlattice_proc, 101011, cpugrid, &vlatstatus);
       }        
     }
 #endif 
@@ -1678,7 +1719,7 @@ void ttm_writeout(int number)
     }
 
 #ifdef VLATTICE
-    for(i=0;i<vlattice_dim;i++)
+    for(i=0;i<vlatdim;i++)
     {
 
           fprintf(outfile, "%d %d %d %d %e %e %e %e %e %e %e %e %e %e %e %e %d %f",                  
@@ -1742,7 +1783,7 @@ void ttm_read(int number)
   ttm_Element *buf;
 
 #ifdef VLATTICE
-  lines+=vlattice_dim;
+  lines+=vlatdim;
 #endif
 
 
@@ -2200,16 +2241,11 @@ void CFL_maxdt(void)
   int i, j, k;
   double maxdttmp = 1e9; // temp.var for comp. of max. allowed ttm-timestep
   double dxsq = fd_h.x * fd_h.x;
-  double dysq = fd_h.y * fd_h.y; // maxdt <= 0.5*dx^2/k_(i+1/2)*C (numerical recp. s. 1045)
-  double dzsq = fd_h.z * fd_h.z;
   double khalf;
 
   for (i = 1; i < local_fd_dim.x - 1; ++i)
   {
-    // for (j = 1; j < local_fd_dim.y - 1; ++j)
-    // {
-    //   for (k = 1; k < local_fd_dim.z - 1; ++k)
-    //   {
+
         if (node.natoms >= fd_min_atoms && node.dens > RHOMIN)
         {
           // ************************************************
@@ -2218,13 +2254,9 @@ void CFL_maxdt(void)
           //x-dir
           if (l1[i + 1].natoms >= fd_min_atoms) imax = i + 1; else imax = i;
           khalf = (node.fd_k + l1[imax].fd_k); //k_(i+1/2)*2
-          maxdttmp = MIN(maxdttmp, node.Ce * dxsq / khalf);
-    
-      //   }
-      // }
+          maxdttmp = MIN(maxdttmp, node.Ce * dxsq / khalf);        
     }
   }
-
   //COMMINICATE GLOBALLY TTM-TIMESTEP
   if (steps > 0)
   {
@@ -2393,13 +2425,15 @@ double FEG_eeminfun(double x, double r, double ne, double e)
 }
 double FEG_ee_from_r_ne_te(double r,double ne, double T) //free-electron internal energy from Fermi-integral, T in K
 {
-
+  return 0;
+  /*
   double mu=chempot(ne,T);
   double F_3_half= gsl_sf_fermi_dirac_3half(mu/BOLTZMAN/T);
   double Gamma_5_half=3.0*sqrt(M_PI)/4.0;
   double C=EMASS/M_PI/M_PI/pow(HBAR,3.0)*sqrt(2*EMASS)*pow(BOLTZMAN*T,2.5)/Gamma_5_half;
   double result=C*F_3_half/r;
   return result;
+  */
 }
 double FEG_te_from_r_ne_ee(double r,double ne,double e)
 {
@@ -2930,54 +2964,43 @@ void ttm_fill_ghost_layers(void)
   /////////////////
   // x direction //
   /////////////////  
-  double buffs[3];
-  double buffr[3];
+  double buffs[2];
+  double buffr[2];
 
   if(myid != 0 && myid !=num_cpus-1)
   {
 
-
-// int MPI_Sendrecv(const void *sendbuf, int sendcount, MPI_Datatype sendtype,
-//                 int dest, int sendtag,
-//                 void *recvbuf, int recvcount, MPI_Datatype recvtype,
-//                 int source, int recvtag,
-//                 MPI_Comm comm, MPI_Status *status)
-
-
     buffs[0]=l1[1].temp;
     buffs[1]=l1[1].fd_k;
-    buffs[2]=((double)l1[1].natoms);
-    if(l1[1].dens < RHOMIN) buffs[2]=0; //zelle deakt. in diff-step.
 
     //links-recht
-    MPI_Sendrecv(&buffs[0], 3, MPI_DOUBLE, myid-1, 7100,
-                 &buffr[0], 3, MPI_DOUBLE, myid+1, 7100,
+    MPI_Sendrecv(&buffs[0], 2, MPI_DOUBLE, myid-1, 7100,
+                 &buffr[0], 2, MPI_DOUBLE, myid+1, 7100,
                  cpugrid, &stati[0]);    
 
     l1[(local_fd_dim.x - 2) + 1].temp=buffr[0];  
     l1[(local_fd_dim.x - 2) + 1].fd_k=buffr[1];  
-    l1[(local_fd_dim.x - 2) + 1].natoms=(int) buffr[2];  
-
+    // l1[(local_fd_dim.x - 2) + 1].natoms=(int) buffr[2];  
 
     //rechts-links
     buffs[0]=l1[(local_fd_dim.x - 2)].temp;
     buffs[1]=l1[(local_fd_dim.x - 2)].fd_k;
-    buffs[2]=(double) l1[(local_fd_dim.x - 2)].natoms;
-    if(l1[(local_fd_dim.x - 2)].dens < RHOMIN) buffs[2]=0;
+    // buffs[2]=(double) l1[(local_fd_dim.x - 2)].natoms;
+    // if(l1[(local_fd_dim.x - 2)].dens < RHOMIN) buffs[2]=0;
 
-    MPI_Sendrecv(&buffs[0], 3, MPI_DOUBLE, myid+1, 7200,
-                 &buffr[0], 3, MPI_DOUBLE, myid-1, 7200,
+    MPI_Sendrecv(&buffs[0], 2, MPI_DOUBLE, myid+1, 7200,
+                 &buffr[0], 2, MPI_DOUBLE, myid-1, 7200,
                  cpugrid, &stati[1]);      
 
     l1[0].temp=buffr[0];
     l1[0].fd_k=buffr[1];
-    l1[0].natoms=(int) buffr[2];
+    // l1[0].natoms=(int) buffr[2];
   }
   else
   {
     if(myid==0)
     {
-      MPI_Recv(&buffr[0], 3, MPI_DOUBLE, myid+1, 7100,
+      MPI_Recv(&buffr[0], 2, MPI_DOUBLE, myid+1, 7100,
                cpugrid, &stati[0]);   
 
       l1[(local_fd_dim.x - 2) + 1].temp=buffr[0];
@@ -2987,10 +3010,10 @@ void ttm_fill_ghost_layers(void)
       //MPI_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag, MPI_Comm comm, MPI_Status *status)
       buffs[0]=l1[(local_fd_dim.x - 2)].temp;
       buffs[1]=l1[(local_fd_dim.x - 2)].fd_k;
-      buffs[2]=(double) l1[(local_fd_dim.x - 2)].natoms;
-      if(l1[(local_fd_dim.x - 2)].dens < RHOMIN) buffs[2]=0;
+      // buffs[2]=(double) l1[(local_fd_dim.x - 2)].natoms;
+      // if(l1[(local_fd_dim.x - 2)].dens < RHOMIN) buffs[2]=0;
 
-      MPI_Send(&buffs[0], 3, MPI_DOUBLE, myid+1, 7200,
+      MPI_Send(&buffs[0], 2, MPI_DOUBLE, myid+1, 7200,
                cpugrid);      
 
 
@@ -3001,24 +3024,23 @@ void ttm_fill_ghost_layers(void)
       
       buffs[0]=l1[1].temp;
       buffs[1]=l1[1].fd_k;
-      buffs[2]=(double) l1[1].natoms;
-      if(l1[1].dens < RHOMIN) buffs[2]=0.0;
+      // buffs[2]=(double) l1[1].natoms;
+      // if(l1[1].dens < RHOMIN) buffs[2]=0.0;
 
-      MPI_Send(&buffs, 3, MPI_DOUBLE, myid-1, 7100,
+      MPI_Send(&buffs, 2, MPI_DOUBLE, myid-1, 7100,
                cpugrid);
 
     
-      MPI_Recv(&buffr[0], 3, MPI_DOUBLE, myid-1, 7200,
+      MPI_Recv(&buffr[0], 2, MPI_DOUBLE, myid-1, 7200,
                cpugrid, &stati[1]);
 
       l1[0].temp=buffr[0];
       l1[0].fd_k=buffr[1];
-      l1[0].natoms=(int) buffr[2];
+      // l1[0].natoms=(int) buffr[2];
 
       l1[local_fd_dim.x - 1].natoms = 0;
     }
   }
-  
 }
 #endif /*MPI*/
 

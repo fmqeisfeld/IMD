@@ -16,6 +16,8 @@
 #define node2 l2[i][j][k]
 #endif
 
+#define RHOMIN  50 //kg/m^3 (active cell abh. von minatoms und dens)
+
 /*2x2 Matrix multiplication*/
 void matmul(double complex *a,double complex *b,double complex *p)
 {
@@ -97,24 +99,37 @@ int tmm_init()
   laser_sigma_t_squared=laser_sigma_t*laser_sigma_t;
 
   //alloc eps arr
-  tmm_eps_real_arr_local = (real*) malloc(global_fd_dim.x*sizeof(real));
-  tmm_eps_imag_arr_local = (real*) malloc(global_fd_dim.x*sizeof(real));
+  // tmm_eps_real_arr_local = (real*) malloc(global_fd_dim.x*sizeof(real));
+  // tmm_eps_imag_arr_local = (real*) malloc(global_fd_dim.x*sizeof(real));
 
-  tmm_eps_real_arr_global= (real*) malloc(global_fd_dim.x*sizeof(real));
-  tmm_eps_imag_arr_global= (real*) malloc(global_fd_dim.x*sizeof(real));
+  // tmm_eps_real_arr_global= (real*) malloc(global_fd_dim.x*sizeof(real));
+  // tmm_eps_imag_arr_global= (real*) malloc(global_fd_dim.x*sizeof(real));
+
+  alloc1darr(real,tmm_eps_real_arr_global,global_fd_dim.x);
+  alloc1darr(real,tmm_eps_imag_arr_global,global_fd_dim.x);
+
+  alloc1darr(real,tmm_eps_real_arr_local,global_fd_dim.x);
+  alloc1darr(real,tmm_eps_imag_arr_local,global_fd_dim.x);  
 
   tmm_read_arr("alu_eps_bb.dat",&eps_bb_data,3,&eps_bb_rows);
   tmm_read_arr("K12.dat",&K12,2,&K12_rows);
 
 
-  km=(double complex*) malloc(global_fd_dim.x*sizeof(double complex));
-  km=(double complex*) malloc(global_fd_dim.x*sizeof(double complex));
+  // km=(double complex*) malloc(global_fd_dim.x*sizeof(double complex));
 
-  tmm_active_cell_local=(int*) malloc(global_fd_dim.x*sizeof(int));
-  tmm_active_cell_global=(int*) malloc(global_fd_dim.x*sizeof(int));
+  alloc1darr(double complex,km,global_fd_dim.x);
 
-  tmm_Qabs =      (double*) calloc(global_fd_dim.x,sizeof(double));
-  tmm_Qabs_scat = (double*) calloc(global_fd_dim.x,sizeof(double));
+  // tmm_active_cell_local=(int*) malloc(global_fd_dim.x*sizeof(int));
+  // tmm_active_cell_global=(int*) malloc(global_fd_dim.x*sizeof(int));
+
+  alloc1darr(int,tmm_active_cell_global,global_fd_dim.x);
+  alloc1darr(int,tmm_active_cell_local,global_fd_dim.x);
+
+  // tmm_Qabs =      (double*) calloc(global_fd_dim.x,sizeof(double));
+  // tmm_Qabs_scat = (double*) calloc(global_fd_dim.x,sizeof(double));
+
+  alloc1darr(double,tmm_Qabs,global_fd_dim.x);
+  alloc1darr(double,tmm_Qabs_scat,global_fd_dim.x);
 
   tmm_dt=timestep*10.18/1e15; // in sek.
   int i;
@@ -124,6 +139,9 @@ int tmm_init()
     tmm_eps_imag_arr_local[i]=tmm_eps_imag_arr_global[i]=0.0;   
     km[i]=0.0+I*0.0;
     tmm_active_cell_local[i]=tmm_active_cell_global[i]=0;
+
+    tmm_Qabs[i]=0.0;
+    tmm_Qabs_scat[i]=0.0;
   }
 
   real freq=c0/lambda;
@@ -190,7 +208,7 @@ if(steps<2) return 0;
 #endif
 
    //if(l1[i][1][1].natoms<fd_min_atoms)
-  if(node.natoms<fd_min_atoms)
+  if(node.natoms < fd_min_atoms || node.dens < RHOMIN)
    {
      tmm_eps_real_arr_local[iglobal]=0.0;
      tmm_eps_imag_arr_local[iglobal]=0.0;
@@ -201,9 +219,14 @@ if(steps<2) return 0;
    //tmm_eps_imag_arr_local[iglobal]=i
 
 
-   tmm_get_epsilon(lambda,node.temp, node.md_temp,
-                  node.Z, node.ne, &tmm_eps_real_arr_local[iglobal],
+   tmm_get_epsilon(lambda,0.0258, 0.0258,
+                  2.5, 2e29, &tmm_eps_real_arr_local[iglobal],
                   &tmm_eps_imag_arr_local[iglobal]);
+
+
+   // tmm_get_epsilon(lambda,node.temp, node.md_temp,
+   //                node.Z, node.ne, &tmm_eps_real_arr_local[iglobal],
+   //                &tmm_eps_imag_arr_local[iglobal]);
 
 
 /*
@@ -319,6 +342,11 @@ if(myid==0)
   }
   if(tooshort==1)
   {
+    int l;
+    for(l=0;l<global_fd_dim.x-1;l++)
+    {
+      printf("km:%f+i*%f\n", creal(km[l]),cimag(km[l]));
+    }
     error("Sample is too short for TMM.");
     MPI_Abort(cpugrid,0);
   }

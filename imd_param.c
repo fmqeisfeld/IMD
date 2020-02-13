@@ -436,7 +436,7 @@ int getparamfile(char *paramfname, int phase)
 #endif
       else if (strcasecmp(tmpstr,"ttm")==0) {
         ensemble = ENS_TTM;
-	move_atoms = move_atoms_ttm;
+	       move_atoms = move_atoms_ttm;
       }
     else {
         error("unknown ensemble");
@@ -2029,6 +2029,13 @@ int getparamfile(char *paramfname, int phase)
 
 //MYMOD FÜR loadbalance mit ttm
 #ifdef LOADBALANCE
+     else if(strcasecmp(token,"vlatdim")==0){
+        getparam("vlatdim",&vlatdim,PARAM_INT,1,1);
+    }
+     else if(strcasecmp(token,"vlatbuffer")==0){
+        getparam("vlatbuffer",&vlatbuffer,PARAM_INT,1,1);
+    }    
+
      else if(strcasecmp(token,"ttmdimx")==0){
         getparam("ttmdimx",&ttmdimx,PARAM_INT,1,1);
     }
@@ -4752,6 +4759,8 @@ MPI_Bcast( &filter_int,             1, MPI_INT, 0, MPI_COMM_WORLD);
 
 #ifdef LOADBALANCE
   MPI_Bcast( &ttmdimx,             1, MPI_INT,0, MPI_COMM_WORLD);
+  MPI_Bcast( &vlatdim,             1, MPI_INT,0, MPI_COMM_WORLD);
+  MPI_Bcast( &vlatbuffer,          1, MPI_INT,0, MPI_COMM_WORLD);
 
 #endif
 #ifdef FDTD

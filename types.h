@@ -459,10 +459,15 @@ typedef struct
   real dens;
   real fd_k,fd_g;
   real Z;
+
+#ifndef LOADBALANCE  
   //advection
-  int flux[8]; //<--23.11.18: Mit dem neuen advection solver brauche ich die atomzahlen nicht
-  //real slx,sly,slz; // dafuer aber flux-interface-slopes
-  //real lod; //local order param,averaged over all atoms in this cell
+  int flux[8]; //<--23.11.18: Mit dem neuen advection solver brauche ich die atomzahlen nicht  
+#else
+  int flux[2]; //left und right in 1D TTM
+#endif
+
+
   real Ce; //electronic Volumetric specific heat
   real ne;      //elec dens
   real U;  // internal energy in eV/Atom
