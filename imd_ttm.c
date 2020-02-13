@@ -1116,11 +1116,11 @@ void do_ADV(double tau)
           {
             Ith(node2.y,l) = Ith(node.y,l) * Nold / Nnew+ tau*(
                                       // +x/-x
-            + (double) node.flux[0] * Ith(l1[i + 1][j][k].y,l) //erhalten von +x,y
-            - (double) l1[i + 1][j][k].flux[1] * Ith(node.y,l) //nach +x,y abgeflossen
+            + (double) node.flux[0] * Ith(l1[i + 1].y,l) //erhalten von +x,y
+            - (double) l1[i + 1].flux[1] * Ith(node.y,l) //nach +x,y abgeflossen
 
-            + (double) node.flux[1] * Ith(l1[i - 1][j][k].y,l) //erhalten von -x,y
-            - (double) l1[i - 1][j][k].flux[0] * Ith(node.y,l) //nach -x,y abgeflossen
+            + (double) node.flux[1] * Ith(l1[i - 1].y,l) //erhalten von -x,y
+            - (double) l1[i - 1].flux[0] * Ith(node.y,l) //nach -x,y abgeflossen
           // +y/-y
           ) / Nnew;
         }

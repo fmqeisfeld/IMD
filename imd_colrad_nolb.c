@@ -11,15 +11,6 @@
 // ****************************************************
 
 
-#ifdef LOADBALANCE
-#define node  l1[i]
-#define node2 l2[i]
-#else
-#define node  l1[i][j][k]
-#define node2 l2[i][j][k]
-#endif
-
-
 #define USEFLOAT  // hauptsächlich in der funktion genexptint. Profiling zeigte, dass
                   // hier die meiste zeit verbraucht wird -> float verdoppelt performance
 //#define OMP
@@ -193,25 +184,25 @@ void do_colrad(double dt)
     {
       for(k=1;k<local_fd_dim.z-1;k++)
       {
-        if(node.natoms < fd_min_atoms) continue;
-        y=node.y;
+        if(l1[i][j][k].natoms < fd_min_atoms) continue;
+        y=l1[i][j][k].y;
 
-        Te0=node.temp*11604.5;
-        Ti0=node.md_temp*11604.5;        
-        rho0=node.dens;
+        Te0=l1[i][j][k].temp*11604.5;
+        Ti0=l1[i][j][k].md_temp*11604.5;        
+        rho0=l1[i][j][k].dens;
         ni0=rho0/AMU/26.9185; //1e28; //1e26/m^3 entspricht etwa 1e-4/Angtrom^3   
 
         if(cdata->initial_equi==true)     
         {
           double Zmean=MeanCharge(Te0, rho0, atomic_charge, atomic_weight,i,j,k);          
-          ne0= Zmean* node.dens / (atomic_weight * AMU);          
-          node.ne=ne0; //Saha init greift darauf zu
+          ne0= Zmean* l1[i][j][k].dens / (atomic_weight * AMU);          
+          l1[i][j][k].ne=ne0; //Saha init greift darauf zu
           colrad_Saha_init(i, j, k); 
           cdata->Tinit=Te0;                 
         }
         else //NORMAL
         {
-          ne0=node.ne;
+          ne0=l1[i][j][k].ne;
         }
 
         
@@ -255,7 +246,7 @@ printf("myid:%d, COLRAD Cell %d was equilibrated, nfe:%ld, nje:%ld, nsetups:%ld,
         } //initial equi
         else //NORMAL
         {
-          cdata->dens=node.dens;
+          cdata->dens=l1[i][j][k].dens;
           flag = CVode(cvode_mem, tout, y, &t, CV_NORMAL);
           colrad_ptotal+=(fd_vol)*1e-30*cdata->P_TOTAL; // d.h. ptotal ist Gesamt-Leisung
 
@@ -285,32 +276,32 @@ printf("myid:%d, COLRAD Cell %d step done, nfe:%ld, nje:%ld, nsetups:%ld, nni:%l
  
 
         //REASSIGN NEW TE AND NE
-        node.temp=Ith(y,0)/11604.5;
-        node.ne=Ith(y,2);
-        node.Z=node.ne/ni0;
-        node.P_EE=cdata->P_EE;
-        node.P_EI=cdata->P_EI;
-        node.P_MPI2=cdata->P_MPI2;
-        node.P_MPI3=cdata->P_MPI3;
-        node.P_RR=cdata->P_RR;
+        l1[i][j][k].temp=Ith(y,0)/11604.5;
+        l1[i][j][k].ne=Ith(y,2);
+        l1[i][j][k].Z=l1[i][j][k].ne/ni0;
+        l1[i][j][k].P_EE=cdata->P_EE;
+        l1[i][j][k].P_EI=cdata->P_EI;
+        l1[i][j][k].P_MPI2=cdata->P_MPI2;
+        l1[i][j][k].P_MPI3=cdata->P_MPI3;
+        l1[i][j][k].P_RR=cdata->P_RR;
 
-        node2.temp=node.temp; //auch in l2 speichern! wichtig!
-        node2.ne=node.ne;     //sonst geht alles im diffusion-step vor 
-        node2.Z=node.Z;       //ttm-writeout verloren!
-        node2.P_EE=node.P_EE;
-        node2.P_EI=node.P_EI;
-        node2.P_MPI2=node.P_MPI2;
-        node2.P_MPI3=node.P_MPI3;
-        node2.P_RR=node.P_RR;
+        l2[i][j][k].temp=l1[i][j][k].temp; //auch in l2 speichern! wichtig!
+        l2[i][j][k].ne=l1[i][j][k].ne;     //sonst geht alles im diffusion-step vor 
+        l2[i][j][k].Z=l1[i][j][k].Z;       //ttm-writeout verloren!
+        l2[i][j][k].P_EE=l1[i][j][k].P_EE;
+        l2[i][j][k].P_EI=l1[i][j][k].P_EI;
+        l2[i][j][k].P_MPI2=l1[i][j][k].P_MPI2;
+        l2[i][j][k].P_MPI3=l1[i][j][k].P_MPI3;
+        l2[i][j][k].P_RR=l1[i][j][k].P_RR;
 
 
-        if(node.temp <0 || isnan(node.temp) !=0 )        
+        if(l1[i][j][k].temp <0 || isnan(l1[i][j][k].temp) !=0 )        
         {
           char errstr[255];
           sprintf(errstr,"ERROR in COLRAD: Te became Nan or <0\n");
           error(errstr);
         }
-        if(node.ne <0 || isnan(node.ne) !=0 )        
+        if(l1[i][j][k].ne <0 || isnan(l1[i][j][k].ne) !=0 )        
         {
           char errstr[255];
           sprintf(errstr,"ERROR in COLRAD: ne became Nan or <0\n");
@@ -411,12 +402,12 @@ if(myid==0)
 		{
 			for(k=1;k<local_fd_dim.z-1;k++)
 			{
-				node.y=N_VNew_Serial(neq);
-        node.P_EE=0.0;
-        node.P_EI=0.0;
-        node.P_MPI2=0.0;
-        node.P_MPI3=0.0;
-        node.P_RR=0.0;
+				l1[i][j][k].y=N_VNew_Serial(neq);
+        l1[i][j][k].P_EE=0.0;
+        l1[i][j][k].P_EI=0.0;
+        l1[i][j][k].P_MPI2=0.0;
+        l1[i][j][k].P_MPI3=0.0;
+        l1[i][j][k].P_RR=0.0;
 
 				//l2... <--brauche nur 1 mal speicher alloc'en
 				//aber in DIFF-LOOP darauf achten, dass beim swappen
@@ -503,13 +494,13 @@ void colrad_Saha_init(int i,int j,int k)
   //     {
         double Te0,Ti0,ne0,ni0,rho0;
         N_Vector y;
-        y=node.y;
+        y=l1[i][j][k].y;
 
-        Te0=node.temp*11604.5;
-        Ti0=node.md_temp*11604.5;        
-        rho0=node.dens; ///1e10;
+        Te0=l1[i][j][k].temp*11604.5;
+        Ti0=l1[i][j][k].md_temp*11604.5;        
+        rho0=l1[i][j][k].dens; ///1e10;
         ni0=rho0/AMU/26.9185; //1e28; //1e26/m^3 entspricht etwa 1e-4/Angtrom^3        
-        ne0=node.ne;
+        ne0=l1[i][j][k].ne;
 
         Ith(y,0)=Te0;
         Ith(y,1)=Ti0;
@@ -2222,9 +2213,8 @@ if(DeltaE >0)
   //BEI PRE-EQUILIBRIERUNG T=CONST !
   if(initial_equi==false)
   {
-    // double cvinv=  1.0/EOS_cve_from_r_te(data->dens, Te);  
-    // double cvinv=  1.0/Cv(Te/11604.5, ne);
-    double cvinv=1.0/(1.5*BOLTZMAN*Te);
+    //double cvinv=  1.0/EOS_cve_from_r_te(data->dens, Te);
+    double cvinv=  1.0/Cv(Te/11604.5, ne);
     Ith(colrad_ydot,0) =  cvinv*P_E_TOTAL;
   }
   else
@@ -3284,7 +3274,7 @@ int colrad_write(int number)
           fprintf(outfile,"%d %d %d",i,j,k);
           for(l=0;l<neq;l++)
           {
-            fprintf(outfile, " %.4e ", Ith(node.y,l));
+            fprintf(outfile, " %.4e ", Ith(l1[i][j][k].y,l));
           }
           fprintf(outfile,"\n");
         }        
@@ -3339,7 +3329,7 @@ int colrad_read(int number)
           {
 
             sscanf(tokens[l+3], "%lf",  &tmp);                              
-            Ith(node.y,l)=tmp;
+            Ith(l1[i][j][k].y,l)=tmp;
             
           }
           linenr++;
