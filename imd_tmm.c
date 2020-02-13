@@ -161,7 +161,7 @@ int tmm_init()
 
 
 #if defined(FDTD) || defined(LASER)
-    error("TMM does not work along with FDTD or LASER. Only one of those options is allowed.");
+    error("TMM does not work with FDTD or LASER. Only one of those options is allowed.");
 #endif
 
     laser_spot_area=(fd_h.y*1e-10*fd_h.z*1e-10);
@@ -229,14 +229,14 @@ if(steps<2) return 0;
    //tmm_eps_imag_arr_local[iglobal]=i
 
 
-   tmm_get_epsilon(lambda,0.0258, 0.0258,
-                  2.5, 2e29, &tmm_eps_real_arr_local[iglobal],
-                  &tmm_eps_imag_arr_local[iglobal]);
-
-
-   // tmm_get_epsilon(lambda,node.temp, node.md_temp,
-   //                node.Z, node.ne, &tmm_eps_real_arr_local[iglobal],
+   // tmm_get_epsilon(lambda,0.0258, 0.0258,
+   //                2.5, 2e29, &tmm_eps_real_arr_local[iglobal],
    //                &tmm_eps_imag_arr_local[iglobal]);
+
+
+   tmm_get_epsilon(lambda,node.temp, node.md_temp,
+                  node.Z, node.ne, &tmm_eps_real_arr_local[iglobal],
+                  &tmm_eps_imag_arr_local[iglobal]);
 
 
 /*
