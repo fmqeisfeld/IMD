@@ -58,7 +58,6 @@
 #define RHOMIN       50
 
 
-
 // ****************************************************
 // *                MAIN FUNC
 // *****************************************************
@@ -82,7 +81,6 @@ void calc_ttm()
 
   // int telaps_md;     //fuer timing
   // int telaps_ttm;
-  
   update_fd();
 #if ADVMODE == 1  
   do_ADV(1.0);
@@ -138,8 +136,8 @@ void calc_ttm()
 MPI_Reduce(&Eabs_local, &Eabs_global, 1, MPI_DOUBLE, MPI_SUM, 0, cpugrid);
 
 if(myid==0)
-  printf("step:%d, It:%.2e, substeps:%d, Finc:%.4e, t-t0:%.4e, Refl:%.4e, maxdt:%f \n",
-          steps,I_t, diff_substeps, Eabs_global * eV2J / laser_spot_area,(tmm_time - laser_t_0) * 1e15,tmm_refl, max_dt_ttm);
+  printf("step:%d, It:%.2e, substeps:%d, Finc:%.4e, t-t0:%.4e, Refl:%.4e, laser_active:%d \n",
+          steps,I_t, diff_substeps, Eabs_global * eV2J / laser_spot_area,(tmm_time - laser_t_0) * 1e15,tmm_refl, laser_active);
 
 }
 

@@ -468,6 +468,7 @@ EXTERN int    eps_bb_rows INIT(0);
 EXTERN double  **K12;
 EXTERN int    K12_rows INIT(0);
 EXTERN double  **eps_bb_data;
+EXTERN double tmm_threshold INIT(1e-5); //ab wann laser aktivieren? 
 #endif
 
 #if defined(FDTD) || defined(LASER) || defined(TMM)

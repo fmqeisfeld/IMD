@@ -7,6 +7,7 @@
 // ACHTUNG: Falls Qabs=NaN --> Probe wahrscheinlich zu kurz!
 //
 // 
+#define TMM_t0_suggest //wenn ja, wird t0 so angepasst dass laser E-field gerade @ threshold für laser aktivieren
 
 #ifdef LOADBALANCE
 #define node  l1[i]
@@ -150,6 +151,15 @@ int tmm_init()
   k0/=1e10; //weil fd_h.x in Angstrom 
 
 
+
+#ifdef TMM_t0_suggest
+  // verschiebe t0 sodasss laser E-feld gerade threshold-value erreicht
+  double tstart=laser_sigma_t*sqrt(-2.0*log(tmm_threshold));  
+  laser_t_0 = tstart;
+  laser_t_0 += 100e-15; // plus 100 fs puffer
+#endif
+
+
 #if defined(FDTD) || defined(LASER)
     error("TMM does not work along with FDTD or LASER. Only one of those options is allowed.");
 #endif
@@ -166,7 +176,7 @@ int tmm_init()
           if(tmm_pol==1)
             printf("Polarization: S\n");
           if(tmm_pol==2)
-	    printf("Polarization: P\n");
+	        printf("Polarization: P\n");
           printf("I0:%.4e W/m^2\n",I0);
           printf("t0:%.4e,sigma_t:%.4e\n",laser_t_0,laser_sigma_t);
           printf("t1:%.4e,sigma_t1:%.4e\n",laser_t_1,laser_sigma_t1);
@@ -180,11 +190,11 @@ int tmm_init()
 int do_tmm(real dt)
 {  
   int i,iglobal,j;
-  double Imp=3.769911184307751e+02;
-  I_t=I0*exp(-pow(tmm_time-laser_t_0,2)/laser_sigma_t_squared); //TESTCASE
+  double Imp=3.769911184307751e+02; // vacuum impedanz
+  I_t=I0*exp(-pow(tmm_time-laser_t_0,2)/laser_sigma_t_squared);
 if(steps<2) return 0;
   //if(I_t<0.001*I0)
-  if(sqrt(2.0*I_t*Imp)<1e-5* sqrt(2*I0*Imp))
+  if(sqrt(2.0*I_t*Imp)<tmm_threshold* sqrt(2*I0*Imp)) //Elec-field strength threshold
   {
     laser_active=false;
     return 0;
