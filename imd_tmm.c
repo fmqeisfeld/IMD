@@ -98,6 +98,7 @@ double EE(double z, double delta, double complex kl, double complex epsl, double
 int tmm_init()
 {
   laser_sigma_t_squared=laser_sigma_t*laser_sigma_t;
+  laser_sigma_t1_squared=laser_sigma_t1*laser_sigma_t1;
 
   //alloc eps arr
   // tmm_eps_real_arr_local = (real*) malloc(global_fd_dim.x*sizeof(real));
@@ -192,6 +193,7 @@ int do_tmm(real dt)
   int i,iglobal,j;
   double Imp=3.769911184307751e+02; // vacuum impedanz
   I_t=I0*exp(-pow(tmm_time-laser_t_0,2)/laser_sigma_t_squared);
+  I_t+=I0*exp(-pow(tmm_time-laser_t_1,2)/laser_sigma_t1_squared);
 if(steps<2) return 0;
   //if(I_t<0.001*I0)
   if(sqrt(2.0*I_t*Imp)<tmm_threshold* sqrt(2*I0*Imp)) //Elec-field strength threshold
