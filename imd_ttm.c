@@ -3010,8 +3010,7 @@ void ttm_fill_ghost_layers(void)
                cpugrid, &stati[0]);   
 
       l1[(local_fd_dim.x - 2) + 1].temp=buffr[0];
-      l1[(local_fd_dim.x - 2) + 1].fd_k=buffr[1];
-      l1[(local_fd_dim.x - 2) + 1].natoms=(int) buffr[2];
+      l1[(local_fd_dim.x - 2) + 1].fd_k=buffr[1];      
 
       //MPI_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag, MPI_Comm comm, MPI_Status *status)
       buffs[0]=l1[(local_fd_dim.x - 2)].temp;
