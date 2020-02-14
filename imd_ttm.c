@@ -2258,7 +2258,7 @@ void CFL_maxdt(void)
           // * DETERMINE MAX. TIME-STEP FOR STABILITY   *
           // ************************************************
           //x-dir
-          if (l1[i + 1].natoms >= fd_min_atoms) imax = i + 1; else imax = i;
+          if (l1[i + 1].natoms >= fd_min_atoms && l1[i+1].dens >= RHOMIN) imax = i + 1; else imax = i;
           khalf = (node.fd_k + l1[imax].fd_k); //k_(i+1/2)*2
           maxdttmp = MIN(maxdttmp, node.Ce * dxsq / khalf);        
     }
