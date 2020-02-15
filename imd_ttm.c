@@ -16,7 +16,7 @@
 
 #include <sys/time.h> // Performance messen
 #include <complex.h>
-// #include "/usr/include/gsl/gsl_sf_fermi_dirac.h"  // Fuer fermi-dirac integral zur berechnung der FEG-internen energie
+#include "/usr/include/gsl/gsl_sf_fermi_dirac.h"  // Fuer fermi-dirac integral zur berechnung der FEG-internen energie
                                                    // als alternative zur interpol.Tabelle (falls gewünscht: EOSMODE = 0)
 //gsl_sf_fermi_dirac deakt. (genau wie FEG_ee_from_r_ne_te), weil es auf hazel nicht zu finden ist
 
@@ -35,10 +35,10 @@
                    // ACHTUNG: FEG Momentan totaler BS --> t_from_e viel zu ungenau (+/- 10 %)
                    // Grund: weiss nicht genau aber vermute Fermi_dirac integral 
                    // Evtl. wäre "manuelles" integrieren zuverlässiger
-#define ADVMODE 1  // 0=NO ADVECTION, 1=DISCRETE FLUX SOLVER (PREDICT ATOMIC FLUXES)
+#define ADVMODE 0  // 0=NO ADVECTION, 1=DISCRETE FLUX SOLVER (PREDICT ATOMIC FLUXES)
 //#define ADVMODE2d  // FALLS y dim offen sein soll, müssen atomic-fluxes auch über kanten kommmuniziert werden
 
-#define VLATTICE   //VIRTUAL LATTICE HINTER DER PROBE. ACHTUNG: NUR 1D !!!!
+//#define VLATTICE   //VIRTUAL LATTICE HINTER DER PROBE. ACHTUNG: NUR 1D !!!!
                     //Falls gewünscht kann mit vlatbuffer die zahl
                     //der zellen (vom ende der probe gezählt) angegeben werden, die NICHT im TTM berücksichtigt
                     //werden soll, da diese als Puffer dienen 
@@ -692,7 +692,7 @@ void do_FILLMESH(void)
              double tcheck = FEG_te_from_r_ne_ee(node.dens, node.ne, echeck/26.9815/AMU * eV2J) / 11604.5;
              double tinit=node.temp;
 
-             if(ABS(tcheck -tinit) > tinit*0.05) // 5% unterschied
+             if(ABS(tcheck -tinit) > tinit*0.15) // 5% unterschied
              {
                char errstr[255];
 
@@ -1123,11 +1123,11 @@ void do_ADV(double tau)
           {
             Ith(node2.y,l) = Ith(node.y,l) * Nold / Nnew+ tau*(
                                       // +x/-x
-            + (double) node.flux[0] * Ith(l1[i + 1].y,l) //erhalten von +x,y
-            - (double) l1[i + 1].flux[1] * Ith(node.y,l) //nach +x,y abgeflossen
+            + (double) fluxfromrightglobal[i_global] * Ith(l1[i + 1].y,l) //erhalten von +x,y
+            - (double) fluxfromleftglobal[i_global + 1] * Ith(node.y,l) //nach +x,y abgeflossen
 
-            + (double) node.flux[1] * Ith(l1[i - 1].y,l) //erhalten von -x,y
-            - (double) l1[i - 1].flux[0] * Ith(node.y,l) //nach -x,y abgeflossen
+            + (double) fluxfromleftglobal[i_global] * Ith(l1[i - 1].y,l) //erhalten von -x,y
+            - (double) fluxfromrightglobal[i_global - 1]* Ith(node.y,l) //nach -x,y abgeflossen
           // +y/-y
           ) / Nnew;
         }
@@ -1440,6 +1440,16 @@ void do_DIFF(double tau)
     for(i=0;i<vlatdim;i++)
     {
       // Te-diffusion
+      if(i<vlatdim-1)
+      {
+        xmaxk= vlattice1[i+1].fd_k;
+        xmaxTe=vlattice1[i+1].temp;
+      }
+      else
+      {
+        xmaxk=  vlattice1[i].fd_k;
+        xmaxTe= vlattice1[i].temp;
+      }
       Ce = vlattice1[i].Ce;                        
       vlattice2[i].temp=tau/Ce*
       //first diffusion terms
@@ -2431,21 +2441,21 @@ double FEG_eeminfun(double x, double r, double ne, double e)
 }
 double FEG_ee_from_r_ne_te(double r,double ne, double T) //free-electron internal energy from Fermi-integral, T in K
 {
-  return 0;
-  /*
+ 
   double mu=chempot(ne,T);
   double F_3_half= gsl_sf_fermi_dirac_3half(mu/BOLTZMAN/T);
   double Gamma_5_half=3.0*sqrt(M_PI)/4.0;
   double C=EMASS/M_PI/M_PI/pow(HBAR,3.0)*sqrt(2*EMASS)*pow(BOLTZMAN*T,2.5)/Gamma_5_half;
   double result=C*F_3_half/r;
   return result;
-  */
+
 }
 double FEG_te_from_r_ne_ee(double r,double ne,double e)
 {
   //tmin=100 ?
   //tmax=1e6?
-  double m=fminbnd2(100.0,1e5,FEG_eeminfun,1e-9,r,ne,e);
+  double m=fminbnd2(100.0,1e4,FEG_eeminfun,1e-9,r,ne,e);
+  return m;
 }
 
 

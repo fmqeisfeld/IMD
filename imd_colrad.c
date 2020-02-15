@@ -20,14 +20,15 @@
 #endif
 
 
-#define USEFLOAT  // hauptsächlich in der funktion genexptint. Profiling zeigte, dass
+// #define USEFLOAT  // hauptsächlich in der funktion genexptint. Profiling zeigte, dass
                   // hier die meiste zeit verbraucht wird -> float verdoppelt performance
-//#define OMP
+#define OMP
 #define LAPACK
 //#define MULTIPHOTON
 // #define SPONT  //<-- spontante emission, Kaum effekt 
 //#define STARK  //<-- reabsorption via stark effect
 #define DOIPD    //
+#define RHOMIN 50
 
 #ifdef OMP
 #include <omp.h>
@@ -66,7 +67,7 @@ const int MAX_LINE_LENGTH=3000; //wird von colrad_read benuthzt
 // *********************************************************
 // const double eV2J=1.6021766E-19;
 const double eV2H=0.03674932; //eV to Hartree
-const double colrad_reltol=1e-6;
+const double colrad_reltol=1e-5;
 const double colrad_abstol=10.0;
 
 // const double J2eV=6.2415091E18;
@@ -82,7 +83,7 @@ const double E_ion_H=13.6; // eV
 const double E_ion_H_J=2.178960176000000e-18; // J
 const double E_ion_H_sq_J=4.747867448593952e-36;
 
-const double colrad_tequi=1e-6;//TEST// 1e-12; //bei initial equi ohne Temperatur-variation erst einmal 
+const double colrad_tequi=1e-12;//TEST// 1e-12; //bei initial equi ohne Temperatur-variation erst einmal 
                                 //die Saha-besetzungsdichten equilibrieren
 
 //const double  LIGHTSPEED=2.997925458e8; // m/s
@@ -131,12 +132,30 @@ double integrand_deexcitation(double x,void *p);
 
 double fermi_integrand(double x, void *p);
 double eval_fermi_integrand(double ne,double T, double mu);
-const double integ_reltol = 1e-5;
-const double integ_abstol = 1e-20;
-const int    integ_meshdim =2500;
+const double integ_reltol = 1e-3;
 
-#define muINF (20*mu)
-#define MINRATE 1e16    //wenn geschätzte max. ioniz.rate kleiner als das --> integrale garnicht erst berechnen 
+const double integ_abstol = 1e-6; 
+const double integ_abstol_ioniz= 1e-6; 
+const double integ_abstol_recomb= 1e-6; 
+
+const int    integ_meshdim =1500;
+
+const double alpha_i =0.05; //0.3;
+const double beta_i  =4.0 ; //0.9;
+const double ioniz_const = 1.573949440579906e+71; // konstanten zus. gefasst und aus dem doppelintegral gezogen
+const double recomb_const= 6.213703330335829e+72; // selbes für 3b-recomb.
+
+#define muINF (20*eV2J) //ACHTUNG: Unebdingt was sinnvolleres finden (mu wird kleiner mit Te)
+
+//wenn geschätzte max. ioniz.rate kleiner als das --> integrale garnicht erst berechnen 
+//Schätzungen mit Hilfe von matlab-script DESCHAUD_TEST.m
+#define MINRATE  1e20            // in 1/s/m^3 --> alles unter 10 Ionisationsereignissen pro fs pro m^3 wird ignoriert
+                                 // habe ich also eine ionenkonz. von 10^26/m^3 und eine rate von  10/m^3/fs
+                                 // so ändert sich pro md-step die konz. um den Bruchteil 10/1E26 = 1E-25
+                                 // -->wayne
+
+#define RATEIONIZMAX  1.5252e-13 // in m^3/s, das entspricht dem doppelintegral 
+#define RATERECOMBMAX 6e-35 //6.1052e-42 // in m^6/s, das entspricht dem doppelintegral
 #define MINCONC 1e-60   //im Saha-init sollen zu kleine konzentrationen ignoriert werden
 
 double k_EE_MAX, k_EI_MAX, k_EE_REV_MAX, k_EI_REV_MAX; //DEBUG PURPOSE
@@ -154,6 +173,7 @@ typedef struct {
   double ni; //für Z=ne/ni
   bool initial_equi;
   double Tinit; //initial Temp. during equi must not change!
+  double Heatrate; //um temp.sprünge zu vermeiden //TEST!
 } *colrad_UserData;
 colrad_UserData  cdata;
 
@@ -189,11 +209,24 @@ void do_colrad(double dt)
 
   for(i=1;i<local_fd_dim.x-1;i++)
   {
+
+#ifndef LOADBALANCE
     for(j=1;j<local_fd_dim.y-1;j++)
     {
       for(k=1;k<local_fd_dim.z-1;k++)
-      {
-        if(node.natoms < fd_min_atoms) continue;
+      {        
+#endif   
+
+        //clear -> irgendwas stimmt nicht!
+        // node.ne=node2.ne=0.0;
+        // node.Z=node2.Z=0.0;
+        // node.P_EE=node2.P_EE=0.0;
+        // node.P_EI=node2.P_EI=0.0;
+        // node.P_MPI2=node2.P_MPI2=0.0;
+        // node.P_MPI3=node2.P_MPI3=0.0;
+        // node.P_RR=node2.P_RR=0.0;
+
+        if(node.natoms < fd_min_atoms || node.dens < RHOMIN) continue;
         y=node.y;
 
         Te0=node.temp*11604.5;
@@ -214,8 +247,8 @@ void do_colrad(double dt)
           ne0=node.ne;
         }
 
-        
-        Ith(y,0)=Te0;
+        double Told=Ith(y,0); //DEBUG //letzter step, checke wie groß temp.sprung
+        Ith(y,0)=Told; //TEST//Te0;
         Ith(y,1)=Ti0;
         Ith(y,2)=ne0;
 
@@ -229,10 +262,14 @@ void do_colrad(double dt)
 
           int i_global,j_global,k_global;
 
+#ifndef LOADBALANCE
           i_global = ((i - 1) + my_coord.x * (local_fd_dim.x - 2));
           j_global = ((j - 1) + my_coord.y * (local_fd_dim.y - 2));
           k_global =  ((k-1) + my_coord.z*(local_fd_dim.z-2));          
-
+#else
+          i_global = ((i - 1) + myid * (local_fd_dim.x - 2));
+          j_global=k_global=1;
+#endif
 long int nje;
 long int nfe;
 long int nsetups;
@@ -256,11 +293,19 @@ printf("myid:%d, COLRAD Cell %d was equilibrated, nfe:%ld, nje:%ld, nsetups:%ld,
         else //NORMAL
         {
           cdata->dens=node.dens;
+
+// printf("myid:%d, COLRAD Cell %d begin step, Te0:%f, ne0:%.2e\n", myid,(i - 1) + myid * (local_fd_dim.x - 2),Te0, ne0);          
+          cdata->Heatrate=(Te0-Told)/dt; //TEST
+
           flag = CVode(cvode_mem, tout, y, &t, CV_NORMAL);
           colrad_ptotal+=(fd_vol)*1e-30*cdata->P_TOTAL; // d.h. ptotal ist Gesamt-Leisung
 
           int i_global;
+#ifndef LOADBALANCE          
           i_global = ((i - 1) + my_coord.x * (local_fd_dim.x - 2));
+#else
+          i_global = ((i - 1) + myid * (local_fd_dim.x - 2));          
+#endif          
 
 long int nje;
 long int nfe;
@@ -276,9 +321,10 @@ CVodeGetNumNonlinSolvIters(cvode_mem, &nni);
 CVodeGetNumSteps(cvode_mem, &nst);
 CVodeGetNumNonlinSolvConvFails(cvode_mem, &ncfn);
 CVodeGetNumErrTestFails(cvode_mem, &netf);
-
-printf("myid:%d, COLRAD Cell %d step done, nfe:%ld, nje:%ld, nsetups:%ld, nni:%ld,nst:%ld,ncfn:%ld,netf:%ld\n",
-      myid,i_global, nfe,nje,nsetups,nni,nst,ncfn,netf);
+if(myid==1 && i_global==18) //DEBUG
+printf("myid:%d, COLRAD Cell %d step done,HR:%.2e, Told:%f, T0:%f, T1:%f, ne0:%.2e, ne1:%.2e, nfe:%ld, nje:%ld, nsetups:%ld, nni:%ld,nst:%ld,ncfn:%ld,netf:%ld\n",
+      myid,i_global, cdata->Heatrate, Told, node.temp*11604.5, Ith(y,0), node.ne, Ith(y,2),
+      nfe,nje,nsetups,nni,nst,ncfn,netf);
 
           //ni0=cdata->ni;
         }
@@ -316,9 +362,10 @@ printf("myid:%d, COLRAD Cell %d step done, nfe:%ld, nje:%ld, nsetups:%ld, nni:%l
           sprintf(errstr,"ERROR in COLRAD: ne became Nan or <0\n");
           error(errstr);
         }
-
-      }
-    } 
+#ifndef LOADBALANCE
+      } // for k
+    }  //for j
+#endif    
   }
  if(cdata->initial_equi==true)
  {
@@ -342,7 +389,7 @@ printf("myid:%d, COLRAD Cell %d step done, nfe:%ld, nje:%ld, nsetups:%ld, nni:%l
              end.tv_usec - start.tv_usec) / 1.e6;
 
     // if(myid==0)
-    printf("myid:%d, telaps:%f, COLRAD STEP DONE, kee:%.4e,keerev:%.4e, kei:%.4e, keirev:%.4e\n",
+    printf("myid:%d, telaps:%f, COLRAD STEP DONE, kee:%.4e,keeb:%.4e, kei:%.4e, k3b:%.4e\n",
       myid,delta, k_EE_MAX, k_EE_REV_MAX, k_EI_MAX, k_EI_REV_MAX);
  // }
  #endif
@@ -407,10 +454,13 @@ if(myid==0)
 
 	for(i=1;i<local_fd_dim.x-1;i++)
 	{
+
+#ifndef LOADBALANCE    
 		for(j=1;j<local_fd_dim.y-1;j++)
 		{
 			for(k=1;k<local_fd_dim.z-1;k++)
 			{
+#endif        
 				node.y=N_VNew_Serial(neq);
         node.P_EE=0.0;
         node.P_EI=0.0;
@@ -421,9 +471,11 @@ if(myid==0)
 				//l2... <--brauche nur 1 mal speicher alloc'en
 				//aber in DIFF-LOOP darauf achten, dass beim swappen
 				//l2.y immer auf l1.y zeigt und nicht ins Leere
+#ifndef LOADBALANCE        
 			}
-
 		}
+#endif
+
 	}
 	abstol = N_VNew_Serial(neq);
 	N_Vector Vdummy=N_VNew_Serial(neq); //wird bei re-init ersetzt
@@ -2222,23 +2274,32 @@ if(DeltaE >0)
   //BEI PRE-EQUILIBRIERUNG T=CONST !
   if(initial_equi==false)
   {
-    // double cvinv=  1.0/EOS_cve_from_r_te(data->dens, Te);  
+    double cv=EOS_cve_from_r_te(data->dens, Te);  
+  
+  //pout.z *= 11604.5; // -->J/eV/m^3
+  //pout.z *= 1e-30; // --> J/eV/Angs^3
+  //pout.z *= J2eV; // --> eV/eV/A^3
+    cv *= 1e30/11604.5*eV2J;   // von eV/(eV*A^3) to  J/(K*m^3) 
+    double cvinv=1.0/cv;    
+
     // double cvinv=  1.0/Cv(Te/11604.5, ne);
-    double cvinv=1.0/(1.5*BOLTZMAN*Te);
+    //double cvinv=1.0/(1.5*BOLTZMAN*Te);
     Ith(colrad_ydot,0) =  cvinv*P_E_TOTAL;
+    Ith(colrad_ydot,0) += data->Heatrate;
+
+// if(myid==1)
+//   for(i=0;i<neq;i++)
+//   {
+//     printf("theta:%.4e\n", cvinv*P_E_TOTAL); 
+//   }
+
   }
   else
   {
     Ith(colrad_ydot,0)=0.0;
   }
 
-// if(myid==1)
-//  for(i=0;i<neq;i++)
-//  {
-  
-//    if(ABS(Ith(colrad_ydot,i)) > 1e-12)
-//      printf("myid:%d, t:%.4e, i:%d, y[i]:%.4e, dot[i]:%.4e\n",myid,t,i, Ith(y,i), Ith(colrad_ydot,i));
-//  }
+
 
 
   return 0; // 0 heisst alles ok
@@ -2266,9 +2327,9 @@ int colrad_GetCoeffs(N_Vector y,double It,void *user_data)
 
   // double v_e=sqrt(8.0*BOLTZMAN*Te/pi/EMASS);
   double E_ion_H=13.6*eV2J;
-  double alpha_i=0.05;
-  double alpha_e=0.05;
-  double beta_i=4.0;
+  // double alpha_i=0.05;
+  // double alpha_e=0.05;
+  // double beta_i=4.0;
   // double four_pi_a0_sq=4.0*pi*pow(bohr_radius,2.0);
   
 
@@ -2325,11 +2386,13 @@ int colrad_GetCoeffs(N_Vector y,double It,void *user_data)
 
   double mu=chempot(ne,Te);
   double mu_eV=mu*J2eV;
-  double fermi_factor=eval_fermi_integrand(ne,Te,mu);
+  //double fermi_factor=eval_fermi_integrand(ne,Te,mu);
+  double fermi_factor=1.0;
   if(fermi_factor==-1)
     return -1;
 
-  double kmax_estim=1e4; 
+  // double kmax_estim=1e4; 
+  double nesq=gsl_pow_2(ne);
 
 
   //PREZERO RATE-COEFFS CODEBLOCK 
@@ -2460,7 +2523,7 @@ int colrad_GetCoeffs(N_Vector y,double It,void *user_data)
   fail=0;
 #ifdef OMP
 //#pragma omp parallel for schedule(dynamic,1) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2) num_threads(num_threads)
-  #pragma omp for simd schedule(static) private(j,kronecker,DeltaE,a,expint,G2,I_1,I_2)
+  #pragma omp for simd schedule(static) private(j,kronecker,DeltaE,fparams_exc, winteg_exc)
   // #pragma omp for simd schedule(static) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2)
 #endif
   
@@ -2498,9 +2561,7 @@ if(fail==1)
   ///////////////////////
   fail=0;
 #ifdef OMP
-// #pragma omp parallel for   schedule(dynamic,1) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2) num_threads(num_threads)
-  #pragma omp for simd schedule(static) private(j,kronecker,DeltaE,a,expint,G2,I_1,I_2)
-  // #pragma omp for simd schedule(static) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2)
+  #pragma omp for simd schedule(static) private(j,kronecker,DeltaE,fparams_exc,winteg_exc)
 #endif
   for(i=0;i<z1_len;++i)
   {
@@ -2535,9 +2596,7 @@ if(fail==1)
 
   fail=0;
 #ifdef OMP
-// #pragma omp parallel for   schedule(dynamic,1) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2) num_threads(num_threads)
-  #pragma omp for simd schedule(static) private(j,kronecker,DeltaE,a,expint,G2,I_1,I_2)
-  // #pragma omp for simd schedule(static) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2)
+  #pragma omp for simd schedule(static) private(j,kronecker,DeltaE,fparams_exc,winteg_exc)
 #endif
   for(i=0;i<z2_len;++i)
   {
@@ -2575,9 +2634,7 @@ if(fail==1)
 
   fail=0;
   #ifdef OMP
-  // #pragma omp parallel for   schedule(dynamic,1) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2) num_threads(num_threads)
-  #pragma omp for simd schedule(static) private(j,kronecker,DeltaE,a,expint,G2,I_1,I_2)
-  // #pragma omp for simd schedule(static) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2)
+  #pragma omp for simd schedule(static) private(j,kronecker,DeltaE,fparams_exc,winteg_exc)
   #endif
   for(i=0;i<z3_len;++i)
   {
@@ -2616,9 +2673,7 @@ if(fail==1)
 
   fail=0;
 #ifdef OMP
-// #pragma omp parallel for   schedule(dynamic,1) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2) num_threads(num_threads)
-  #pragma omp for simd schedule(static) private(j,kronecker,DeltaE,a,expint,G2,I_1,I_2)
-  // #pragma omp for simd schedule(static) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2)
+  #pragma omp for simd schedule(static) private(j,kronecker,DeltaE,fparams_exc,winteg_exc)
 #endif
   for(i=0;i<z4_len;++i)
   {
@@ -2657,7 +2712,8 @@ if(fail==1)
   fail=0;
 #ifdef OMP
    // #pragma omp parallel for schedule(static) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2,sigma1,sigma_MPI_2,sigma_MPI_3,tmp0,tmp1,tmp2) num_threads(num_threads)
-   #pragma omp for nowait schedule(static) private(j,kronecker,DeltaE,a,expint,G2,I_1,I_2,sigma1,sigma_MPI_2,sigma_MPI_3,tmp0,tmp1,tmp2)
+   // #pragma omp for nowait schedule(static) private(j,kronecker,DeltaE,a,expint,G2,I_1,I_2,sigma1,sigma_MPI_2,sigma_MPI_3,tmp0,tmp1,tmp2)
+  #pragma omp for simd schedule(static) private(j,kronecker,DeltaE,fparams_inner, fparams_outer, winteg_inner, winteg_outer)
 #endif
   for(i=0;i<z0_len;++i)
   {
@@ -2668,10 +2724,11 @@ if(fail==1)
 if(DeltaE <0 )
   continue;
 
-if(kmax_estim*ne*Ith(y,i+3)>MINRATE)
+
+if(RATEIONIZMAX*ne*fermi_factor*Ith(y,i+3)> MINRATE)
       k_EI_z0_z1[i][j]=MAX(0.0,double_integral_ionization(ne,Te, mu, DeltaE*eV2J));
 
-if(kmax_estim*ne*ne*Ith(y,j+z0_len+3)>MINRATE)    
+if(RATERECOMBMAX*nesq*fermi_factor*Ith(y,j+z0_len+3) > MINRATE)
       k_EI_z1_z0[i][j]=STATES_z0[i][3]/STATES_z1[j][3]*double_integral_recombination(ne,Te, mu, DeltaE*eV2J);      
 
 k_EI_MAX=MAX(k_EI_MAX,k_EI_z0_z1[i][j]);
@@ -2729,7 +2786,8 @@ k_EI_REV_MAX=MAX(k_EI_REV_MAX,k_EI_z1_z0[i][j]);
   fail=0;
 #ifdef OMP
  // #pragma omp parallel for schedule(static) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2,sigma1,sigma_MPI_2,sigma_MPI_3,tmp0,tmp1,tmp2) num_threads(num_threads)
-  #pragma omp for nowait schedule(static) private(j,kronecker,DeltaE,a,expint,G2,I_1,I_2,sigma1,sigma_MPI_2,sigma_MPI_3,tmp0,tmp1,tmp2)
+  // #pragma omp for nowait schedule(static) private(j,kronecker,DeltaE,a,expint,G2,I_1,I_2,sigma1,sigma_MPI_2,sigma_MPI_3,tmp0,tmp1,tmp2)
+  #pragma omp for simd schedule(static) private(j,kronecker,DeltaE,fparams_inner, fparams_outer, winteg_inner, winteg_outer)
 #endif
   for(i=0;i<z1_len;++i)
   {
@@ -2741,10 +2799,11 @@ k_EI_REV_MAX=MAX(k_EI_REV_MAX,k_EI_z1_z0[i][j]);
 if(DeltaE <0 )
   continue;
 
-if(kmax_estim*ne*Ith(y,i+z0_len+3)>MINRATE)
+if(RATEIONIZMAX*ne*fermi_factor*Ith(y,i+z0_len+3)> MINRATE)
       k_EI_z1_z2[i][j]=MAX(0.0,double_integral_ionization(ne,Te, mu, DeltaE*eV2J));
 
-if(kmax_estim*ne*ne*Ith(y,j+z0_len+z1_len+3)>MINRATE)
+// if(kmax_estim*ne*ne*Ith(y,j+z0_len+z1_len+3)>MINRATE)
+if(RATERECOMBMAX*nesq*fermi_factor*Ith(y,j+z0_len+z1_len+3) > MINRATE)      
       k_EI_z2_z1[i][j]=STATES_z1[i][3]/STATES_z2[j][3]*double_integral_recombination(ne,Te, mu, DeltaE*eV2J);
 
 k_EI_MAX=MAX(k_EI_MAX,k_EI_z1_z2[i][j]);
@@ -2807,7 +2866,8 @@ k_EI_REV_MAX=MAX(k_EI_REV_MAX,k_EI_z2_z1[i][j]);
   fail=0;
 #ifdef OMP
   // #pragma omp parallel for   schedule(static) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2,sigma1,sigma_MPI_2,sigma_MPI_3,tmp0,tmp1,tmp2) num_threads(num_threads)
-  #pragma omp for nowait schedule(static) private(j,kronecker,DeltaE,a,expint,G2,I_1,I_2,sigma1,sigma_MPI_2,sigma_MPI_3,tmp0,tmp1,tmp2)
+  // #pragma omp for nowait schedule(static) private(j,kronecker,DeltaE,a,expint,G2,I_1,I_2,sigma1,sigma_MPI_2,sigma_MPI_3,tmp0,tmp1,tmp2)
+  #pragma omp for simd schedule(static) private(j,kronecker,DeltaE,fparams_inner, fparams_outer, winteg_inner, winteg_outer)
 #endif
   for(i=0;i<z2_len;++i)
   {
@@ -2819,10 +2879,11 @@ k_EI_REV_MAX=MAX(k_EI_REV_MAX,k_EI_z2_z1[i][j]);
 if(DeltaE <0 )
   continue;
 
-if(kmax_estim*ne*Ith(y,i+z0_len+z1_len+3)>MINRATE)
+if(RATEIONIZMAX*ne*fermi_factor*Ith(y,i+z0_len+z1_len+3)> MINRATE)
       k_EI_z2_z3[i][j]=MAX(0.0,double_integral_ionization(ne,Te, mu, DeltaE*eV2J));
 
-if(kmax_estim*ne*ne*Ith(y,j+z0_len+z1_len+z2_len+3)>MINRATE)    
+// if(kmax_estim*ne*ne*Ith(y,j+z0_len+z1_len+z2_len+3)>MINRATE)    
+if(RATERECOMBMAX*nesq*fermi_factor*Ith(y,j+z0_len+z1_len+z2_len+3) > MINRATE)
       k_EI_z3_z2[i][j]=STATES_z2[i][3]/STATES_z3[j][3]*double_integral_recombination(ne,Te, mu, DeltaE*eV2J);
 
 k_EI_MAX=MAX(k_EI_MAX,k_EI_z1_z2[i][j]);
@@ -2867,7 +2928,8 @@ k_EI_REV_MAX=MAX(k_EI_REV_MAX,k_EI_z2_z1[i][j]);
   fail=0;
 #ifdef OMP
  // #pragma omp parallel for schedule(static) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2,sigma1,sigma_MPI_2,sigma_MPI_3,tmp0,tmp1,tmp2) num_threads(num_threads)
-  #pragma omp for nowait schedule(static) private(j,kronecker,DeltaE,a,expint,G2,I_1,I_2,sigma1,sigma_MPI_2,sigma_MPI_3,tmp0,tmp1,tmp2)
+  // #pragma omp for nowait schedule(static) private(j,kronecker,DeltaE,a,expint,G2,I_1,I_2,sigma1,sigma_MPI_2,sigma_MPI_3,tmp0,tmp1,tmp2)
+  #pragma omp for simd schedule(static) private(j,kronecker,DeltaE,fparams_inner, fparams_outer, winteg_inner, winteg_outer)
 #endif
   for(i=0;i<z3_len;++i)
   {
@@ -2879,10 +2941,12 @@ k_EI_REV_MAX=MAX(k_EI_REV_MAX,k_EI_z2_z1[i][j]);
 if(DeltaE <0 )
   continue;      
 
-if(kmax_estim*ne*Ith(y,i+z0_len+z1_len+z2_len+3)>MINRATE)
+
+if(RATEIONIZMAX*ne*fermi_factor*Ith(y,i+z0_len+z1_len+z2_len+3)> MINRATE)
       k_EI_z3_z4[i][j]=MAX(0.0,double_integral_ionization(ne,Te, mu, DeltaE*eV2J));
 
-if(kmax_estim*ne*ne*Ith(y,j+z0_len+z1_len+z2_len+z3_len+3)>MINRATE)    
+// if(kmax_estim*ne*ne*Ith(y,j+z0_len+z1_len+z2_len+z3_len+3)>MINRATE)    
+if(RATERECOMBMAX*nesq*fermi_factor*Ith(y,j+z0_len+z1_len+z2_len+z3_len+3) > MINRATE)      
       k_EI_z4_z3[i][j]=STATES_z3[i][3]/STATES_z4[j][3]*double_integral_recombination(ne,Te, mu, DeltaE*eV2J);
 
 k_EI_MAX=MAX(k_EI_MAX,k_EI_z3_z4[i][j]);
@@ -3410,8 +3474,8 @@ double inner_integrand_ionization(double x, void *p) // x=E_strich
 
   // if(Pauli_E_prime_prime < 1e-100) return 0;
 
-  double alpha=0.05;
-  double beta=4.0;
+  // double alpha=0.05;
+  // double beta=4.0;
 
   //if(E_prime==DeltaE) return 0;
 
@@ -3423,12 +3487,14 @@ double inner_integrand_ionization(double x, void *p) // x=E_strich
 
   // double sigma_deriv=4.0*M_PI*bohr_radius_sq*alpha*E_ion_H_sq_J/DeltaE/gsl_pow_3(E_prime)
   //                    *((2.0*DeltaE-E_prime)*log(5.0/4.0*beta*E_prime/DeltaE) - DeltaE + E_prime);
-  double sigma_deriv=4.0*pi*bohr_radius_sq*alpha*E_ion_H_sq_J *
-              (DeltaE*log(5/4*beta*(DeltaE+E_prime+E_prime_prime)/DeltaE)+E_prime+E_prime_prime) / 
-              DeltaE / gsl_pow_2(DeltaE+E_prime + E_prime_prime);
+  //
+  // double sigma_deriv=4.0*pi*bohr_radius_sq*alpha*E_ion_H_sq_J *
+  //             (DeltaE*log(5/4*beta*(DeltaE+E_prime+E_prime_prime)/DeltaE)+E_prime+E_prime_prime) / 
+  //             DeltaE / gsl_pow_2(DeltaE+E_prime + E_prime_prime);
   
 
-  double f=sigma_deriv*Pauli_E_prime*Pauli_E_prime_prime; //F(E) im outer integrand
+
+  double f=Pauli_E_prime*Pauli_E_prime_prime; //F(E), sigmaderiv und sqrt(2*eng1/emass) im outer integrand
   //printf("finner:%.4e %.4e\n",f,E_prime);
   return f;
 }
@@ -3442,38 +3508,51 @@ double inner_integrand_recombination(double x, void *p) // x=incoming elec. ener
   double T=params->T;
   double mu=params->mu;  
   double DeltaE = params->DeltaE;    
-  double E_prime_prime=params->E; 
+  double E=params->E; 
+  
   // Anmerkung: E'' und E' sind die enregien der einfallenden elektronen
   //            während E=DeltaE+E'+E'' energie des sekunddären Elektrons!
-  double E=DeltaE+E_prime+E_prime_prime; 
-  double vel=2.0*sqrt(E_prime * E_prime_prime)/EMASS;
+  // double E=DeltaE+E_prime+E_prime_prime; 
+  double E_prime_prime=E-DeltaE-E_prime;
 
-  if(vel<1e-200) return 0;
+  // double vel=2.0*sqrt(E_prime * E_prime_prime)/EMASS;
 
-  double Pauli_E=1.0-1.0/(1.0+exp((E-mu)/BOLTZMAN/T));
+  // if(vel<1e-200) return 0;
+
+  // double Pauli_E=1.0-1.0/(1.0+exp((E-mu)/BOLTZMAN/T));
   // if(Pauli_E < 1e-100) return 0;
 
-  double fermi_fun=1.0/(1.0+exp((E_prime-mu)/BOLTZMAN/T));
-  // if(fermi_fun < 1e-100) return 0;
+  double fermi_fun_E_prime=      1.0/(1.0+exp((E_prime-mu)/BOLTZMAN/T));
+  double fermi_fun_E_prime_prime=1.0/(1.0+exp((E_prime_prime-mu)/BOLTZMAN/T));
+  
+  // double F_E_prime_prime = double_emass_pow_3_2/2.0/ne/hbar_cub/pi_sq*sqrt(E_prime_prime)*fermi_fun;
+  // double F_E_prime=double_emass_pow_3_2/2.0/ne/hbar_cub/pi_sq*sqrt(E_prime)*fermi_fun;
 
-  double F_E_prime=double_emass_pow_3_2/2.0/ne/hbar_cub/pi_sq*sqrt(E_prime)*fermi_fun;
-  double KR_factor= E/E_prime/E_prime_prime; //Klein-Rosseland relation
-  //der rest des faktors kann aus den integralen gezogen werden (hbar^3/2/me^2)
 
-  //F_E_prime_prime wird vom äußeren Intgral berücksichtigt
 
-  double alpha=0.05;
-  double beta=4.0;
+  // double y=E/DeltaE;
+  // double sigma_deriv = 4.0*M_PI*bohr_radius_sq*E_ion_H_sq_J / gsl_pow_2(DeltaE) * alpha_i*(y-1.0)/gsl_pow_2(y)*log(5*beta_i*y/4) 
+                       // /2.0/(E-DeltaE);      
 
-  double sigma_deriv=4.0*pi*bohr_radius_sq*alpha*E_ion_H_sq_J *
-              (DeltaE*log(5/4*beta*(DeltaE+E_prime+E_prime_prime)/DeltaE)+E_prime+E_prime_prime) / 
-              DeltaE / gsl_pow_2(DeltaE+E_prime + E_prime_prime);
+  // double sigma_deriv_3b= E/E_prime/E_prime_prime * gsl_pow_3(planck)/16.0/M_PI/EMASS*sigma_deriv;
+
+// sigma_morel=@(eng) 4*pi*bohr_radius^2*(E_ion_H/DeltaE).^2 * alpha_i .*((eng./DeltaE)-1)./(eng./DeltaE).^2 * log(5./4*beta_i.*eng./DeltaE);
+// sigma_deriv=@(eng) sigma_morel(eng)./2./(eng-DeltaE); % <-- FLYCHK
+// sigma_deriv_3b=@(eng1,eng2,eng3) gupper/glower.*eng1./eng2./eng3.*planck^3/16/pi/emass.*sigma_deriv(eng1);
+
+            
+// integrand_inner=@(eng2,eng3) sigma_deriv_3b(eng2+eng3+DeltaE,eng2,eng3).*sqrt(4.*eng2.*eng3./emass^2) ... 
+//                  .*F(eng2).*F(eng3).*Pauli(eng2+eng3+DeltaE);
+
+
+
+// printf("Te:%.4e, ne:%.4e, mu:%.4e, E:%.4e, E':%.4e, E'':%.4e, F':%.4e, F'':%.4e, v:%.4e, P:%.4e, integr:%.4e\n",
+        // T, ne, mu, E, E_prime, E_prime_prime, F_E_prime, F_E_prime_prime, vel, Pauli_E, 
+           // )
                        
-// printf("x:%.4e, fermi_fun:%.4e,")                       
-  double f=sigma_deriv*Pauli_E*F_E_prime*vel*KR_factor;
-  // if(isnan(f)!=0) return 0.0;
- // if(myid==3)
- //    printf("finner:%.4e %.4e %.4e %.4e %.4e %.4e\n",E_prime,f,sigma_deriv,F_E_prime,Pauli_E,KR_factor);
+  //F_E_prime_prime wird vom äußeren Intgral berücksichtigt
+  // double f=sigma_deriv_3b*Pauli_E*F_E_prime*F_E_prime_prime*vel;
+  double f= fermi_fun_E_prime * fermi_fun_E_prime_prime;
   return f;
 }
 
@@ -3481,7 +3560,7 @@ double inner_integrand_recombination(double x, void *p) // x=incoming elec. ener
 double outer_integrand_recombination(double x,void *p)
 {
   struct my_f_params * params = (struct my_f_params *)p;
-  double E_prime_prime=x; //other incoming electron (inneres Integral behandelt E_prime)
+  double E=x; //other incoming electron (inneres Integral behandelt E_prime)  
                           //Das sekundäre Elektron hat Energie E,
   double DeltaE = params->DeltaE;  
   double ne=params->ne;
@@ -3489,10 +3568,11 @@ double outer_integrand_recombination(double x,void *p)
   double mu=params->mu;  
 
     
-  double fermi_fun=1.0/(1.0+exp((E_prime_prime-mu)/BOLTZMAN/T));
+  double fermi_fun=1.0/(1.0+exp((E-mu)/BOLTZMAN/T));
+  double Pauli_E = 1.0-fermi_fun;
   // if(fermi_fun<1e-100) return 0;
   
-  double F=double_emass_pow_3_2/2.0/ne/hbar_cub/pi_sq*sqrt(E_prime_prime)*fermi_fun; //velocity macht inner integrand
+  // double F_E_prime_prime = double_emass_pow_3_2/2.0/ne/hbar_cub/pi_sq*sqrt(E_prime_prime)*fermi_fun; //velocity macht inner integrand
   // if(F < 1e-100) return 0;
 
   // if(F < 1e-100)
@@ -3502,7 +3582,7 @@ double outer_integrand_recombination(double x,void *p)
   fparams_inner.ne=ne;
   fparams_inner.mu=mu;
   fparams_inner.DeltaE=DeltaE;
-  fparams_inner.E=E_prime_prime;
+  fparams_inner.E=E;
 
   gsl_function gslfun_inner;
   gslfun_inner.function=&inner_integrand_recombination;
@@ -3511,16 +3591,24 @@ double outer_integrand_recombination(double x,void *p)
   double integ_inner;
   double integ_err;
 
+  double y=E/DeltaE;
+  double sigma_deriv = 4.0*M_PI*bohr_radius_sq*E_ion_H_sq_J / gsl_pow_2(DeltaE) * alpha_i*(y-1.0)/gsl_pow_2(y)*log(5*beta_i*y/4) 
+                       /2.0/(E-DeltaE);   
+
   // gsl_integration_qags (&gslfun_inner, 0.0, muINF, integ_abstol, integ_reltol, integ_meshdim,
                          // winteg_inner, &integ_inner, &integ_err); 
 
   // gsl_integration_qagiu (&gslfun_inner, 0.0, integ_abstol, integ_reltol, integ_meshdim,
                          // winteg_inner, &integ_inner, &integ_err); 
 
-  gsl_integration_qag(&gslfun_inner, 0, muINF, integ_abstol, integ_reltol, integ_meshdim,1,
+  gsl_integration_qag(&gslfun_inner, 0, E-DeltaE, 1e-4, integ_reltol, integ_meshdim,1,
                       winteg_inner, &integ_inner, &integ_err);  
 
-  return F*integ_inner;
+ // printf("T: %.4e,mu: %.4e,ne: %.4e,dE: %.4e, E'': %.4e, integinner: %.4e\n",
+ //         T,mu,ne,DeltaE,E_prime_prime, integ_inner);
+
+  //return F_E_prime_prime*integ_inner;
+  return sigma_deriv*Pauli_E*E*integ_inner;
 
 }
 
@@ -3541,20 +3629,24 @@ double double_integral_recombination(double ne,double T, double mu, double Delta
   double integ_outer=0;
   double integ_err=0;
 
-  double KR_factor2=hbar_cub/2.0/ EMASS / EMASS; //aus inner-integrand herausgezogen
+
+ // integrand_inner=@(eng1,eng2) sigma_deriv(eng1).*sqrt(2*eng1/emass) ...
+                  // .*F(eng1).*Pauli(eng2).*Pauli(eng1-DeltaE-eng2);
+
 
   // gsl_integration_qagiu(&gslfun_outer, 0.0, integ_abstol, integ_reltol, integ_meshdim,
                         // winteg_outer, &integ_outer, &integ_err); 
 
-  gsl_integration_qag(&gslfun_outer, 0, muINF, integ_abstol, integ_reltol, integ_meshdim,1,
+  gsl_integration_qag(&gslfun_outer, DeltaE, muINF, integ_abstol_recomb, integ_reltol, integ_meshdim,1,
                           winteg_outer, &integ_outer, &integ_err);  
 
    //gsl_integration_qags (&gslfun_outer, 0.0, muINF, integ_abstol, integ_reltol, integ_meshdim,
    //                      winteg_outer, &integ_outer, &integ_err); 
 
   //NICHT VERGESSEN: RATIO DER STATISTICAL WEIGHTS
-  // if(integ_outer < MINRATE) integ_outer=0.0;
-  return MAX(integ_outer*KR_factor2,0.0);
+  integ_outer *= recomb_const/ne/ne; //Später ne^2 entfernen und in ydot entfernen!
+  // if(integ_outer < 1e-100) integ_outer=0.0;
+  return MAX(integ_outer,0.0);
 
 }
 
@@ -3569,15 +3661,20 @@ double outer_integrand_ionization(double x,void *p)
   double T=params->T;
   double mu=params->mu;  
 
-  if(x==0) return 0.0; //weil vel=0 wird
+  // if(x==0) return 0.0; //weil vel=0 wird
 
-  double vel=sqrt(2.0*eng/EMASS);
-  if(vel < 1e-200) return 0;
+  // double vel=sqrt(2.0*eng/EMASS);
+  // if(vel < 1e-200) return 0;
 
   double fermi_fun=1.0/(1.0+exp((eng-mu)/BOLTZMAN/T));
   // if(fermi_fun < 1e-100) return 0;
 
-  double F=double_emass_pow_3_2/2.0/ne/hbar_cub/pi_sq*sqrt(eng)*fermi_fun*vel;   //DOS * f_FD * vel / ne
+  // double F=double_emass_pow_3_2/2.0/ne/hbar_cub/pi_sq*sqrt(eng)*fermi_fun*vel;   //DOS * f_FD * vel / ne
+  
+  double y=eng/DeltaE;
+
+  double sigma_deriv = 4.0*M_PI*bohr_radius_sq*E_ion_H_sq_J * gsl_pow_2(1.0/DeltaE)*alpha_i*(y-1.0)/gsl_pow_2(y)*log(5*beta_i*y/4) 
+                       /2.0/(eng-DeltaE);                       
 
   fparams_inner.T=T;
   fparams_inner.ne=ne;
@@ -3599,10 +3696,10 @@ double outer_integrand_ionization(double x,void *p)
   // gsl_integration_qagiu (&gslfun_inner, DeltaE,integ_abstol, integ_reltol, integ_meshdim,
                          // winteg_inner, &integ_inner, &integ_err);    
 
-  gsl_integration_qag(&gslfun_inner, DeltaE, muINF, integ_abstol, integ_reltol, integ_meshdim,1,
+  gsl_integration_qag(&gslfun_inner, 0.0, eng-DeltaE, 1e-4, integ_reltol, integ_meshdim,1,
                       winteg_inner, &integ_inner, &integ_err);  
 
-  return F*integ_inner;
+  return eng*fermi_fun*sigma_deriv*integ_inner;
 
 }
 
@@ -3630,10 +3727,12 @@ double double_integral_ionization(double ne,double T, double mu, double DeltaE)
   // gsl_integration_qagiu(&gslfun_outer, 0, integ_abstol, integ_reltol, integ_meshdim,
                         // winteg_outer, &integ_outer, &integ_err); 
 
-  gsl_integration_qag(&gslfun_outer, 0, muINF, integ_abstol, integ_reltol, integ_meshdim,1,
+  gsl_integration_qag(&gslfun_outer, DeltaE*1.001, muINF, integ_abstol_ioniz, integ_reltol, integ_meshdim,1,
                       winteg_outer, &integ_outer, &integ_err);  
 
   // if(integ_outer<MINRATE) integ_outer=0.0;
+  integ_outer *= ioniz_const / ne; //ACHTUNG: Später ne entfernenu und in ydot nicht mehr multiplizieren!
+  if(integ_outer < 1e-100) integ_outer=0.0;
   return MAX(integ_outer,0.0);
 
 }
@@ -3694,8 +3793,6 @@ double integrand_excitation(double x,void *p)
   double mu=params->mu;  
   int allowed=params->allowed;
 
-  double alpha=0.05;
-  double beta=4.0;
 
   double vel=sqrt(2.0*eng/EMASS);
   if(vel< 1e-200) return 0.0;
@@ -3710,9 +3807,9 @@ double integrand_excitation(double x,void *p)
   // if(Pauli < 1e-100) return 0;
 
   if(allowed==1)
-    sigma=4.0*M_PI*bohr_radius_sq*E_ion_H_sq_J* gsl_pow_2(1.0/DeltaE)*alpha*(y-1.0)/gsl_pow_2(y)*log(5*beta*y/4);
+    sigma=4.0*M_PI*bohr_radius_sq*E_ion_H_sq_J* gsl_pow_2(1.0/DeltaE)*alpha_i*(y-1.0)/gsl_pow_2(y)*log(5*beta_i*y/4);  
   else
-    sigma=4.0*M_PI*bohr_radius_sq*alpha*(y-1.0)/gsl_pow_2(y);
+    sigma=4.0*M_PI*bohr_radius_sq*alpha_i*(y-1.0)/gsl_pow_2(y);
 
   double F=double_emass_pow_3_2/2.0/ne/hbar_cub/pi_sq*sqrt(eng)*fermi_fun;  
   return vel*sigma*F*Pauli;
@@ -3743,12 +3840,6 @@ double eval_excitation_integral(double ne,double T,double mu, double DeltaE, int
   int code= gsl_integration_qag(&fun, DeltaE, muINF, integ_abstol, integ_reltol, integ_meshdim,1,
                           winteg_exc, &integ_result, &integ_err);    
 
-  // size_t neval; 
-  // int code= gsl_integration_qng(&fun, DeltaE, muINF, 1e-20, 1e-3,  //FAST?  failed to reach tolerance with highest-order rule
-  //                               &integ_result, &integ_err, &neval);
-  //Wird sonst immer zu nul
-   // gsl_integration_qagiu(&fun, DeltaE, 1e-200, 1e-30, integ_meshdim,
-                         // winteg_exc, &integ_result, &integ_err);    
 
  gsl_set_error_handler(old_error_handler); //reset the error handler 
 
@@ -3759,7 +3850,8 @@ double eval_excitation_integral(double ne,double T,double mu, double DeltaE, int
     double dx=(muINF-DeltaE)/250;    
     for(i=0;i<250;i++)
     {
-      printf("x:%.4e,integ:%.4e\n",dx*i,integrand_excitation(dx*i,&fparams_exc));
+      printf("x:%.4e,T:%f, ne:%.2e, dE:%.2e, integ:%.4e\n",
+              dx*i,fparams_exc.T, fparams_exc.ne, fparams_exc.DeltaE, integrand_excitation(dx*i,&fparams_exc));
     }
 
     error("ERROR in eval_excitation_integral\n");
@@ -3828,8 +3920,6 @@ double integrand_deexcitation(double x,void *p)
   double mu=params->mu;  
   int allowed=params->allowed;
 
-  double alpha=0.05;
-  double beta=4.0;
 
   double vel=sqrt(2.0*eng/EMASS);
   // if(vel< 1e-100) return 0;
@@ -3844,9 +3934,9 @@ double integrand_deexcitation(double x,void *p)
   // if(Pauli<1e-100) return 0;
 
   if(allowed==1)
-    sigma=4.0*M_PI*bohr_radius_sq*E_ion_H_sq_J* gsl_pow_2(1.0/DeltaE)*alpha*(y-1.0)/gsl_pow_2(y)*log(5*beta*y/4);
+    sigma=4.0*M_PI*bohr_radius_sq*E_ion_H_sq_J* gsl_pow_2(1.0/DeltaE)*alpha_i*(y-1.0)/gsl_pow_2(y)*log(5*beta_i*y/4);
   else
-    sigma=4.0*M_PI*bohr_radius_sq*alpha*(y-1.0)/gsl_pow_2(y);
+    sigma=4.0*M_PI*bohr_radius_sq*alpha_i*(y-1.0)/gsl_pow_2(y);
 
   double F=double_emass_pow_3_2/2.0/ne/hbar_cub/pi_sq*sqrt(eng)*fermi_fun*sqrt(eng/(eng-DeltaE));  //ACHTUNG: Letzter Term --> divergent
   return vel*sigma*F*Pauli;
