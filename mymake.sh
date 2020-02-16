@@ -62,8 +62,8 @@
  # 		  /user/eisfeld/sundials-4.1.0/instdir/lib64/libsundials_nvecserial.a \
  # 		  /user/eisfeld/sundials-4.1.0/instdir/lib64/libsundials_sunlinsollapackdense.a \
  # 		  -lgsl -lgslcblas -llapack"
- OPTFLAGS="-O2 -fopenmp -ffast-math"
- mpicc   $CFLAGS -DMPI  -DNBL -DEAM2 -DTTM -DTMM -DCOLRAD -DLOADBALANCE -c -Wno-unused-variable \
+ OPTFLAGS="-O2 -fopenmp " #-ffast-math"
+ mpicc   $OPTFLAGS $CFLAGS -DMPI  -DNBL -DEAM2 -DTTM -DTMM -DCOLRAD -DLOADBALANCE -c -Wno-unused-variable \
  		 imd_maxwell.c imd_misc.c imd_param.c imd_alloc.c imd_io.c imd_io_3d.c imd_potential.c\
  		 imd_time.c imd_generate.c imd_distrib.c imd_main_3d.c imd_geom_3d.c imd_pictures_3d.c \
  		 imd_geom_mpi_3d.c imd_comm_force_3d.c \
