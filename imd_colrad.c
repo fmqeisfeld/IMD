@@ -43,6 +43,7 @@
 // #else                    //konvergenz für solver
 // #define EXPR(x) exp(x)
 // #endif
+
 #define EXPR(x) exp(x)      //<--NIEMALS expf draus machen!
 
 #ifdef USEFLOAT
@@ -107,6 +108,9 @@ gsl_integration_workspace * winteg_outer=NULL;
 gsl_integration_workspace * winteg_fermi=NULL;
 gsl_integration_workspace * winteg_exc=NULL; //excitation
 
+gsl_integration_romberg_workspace * winteg_rb_inner=NULL;
+gsl_integration_romberg_workspace * winteg_rb_outer=NULL;
+
 
 struct my_f_params { double ne; double T;double mu; double E;double DeltaE; int allowed;};
 struct my_f_params fparams_inner; //For inner integrand
@@ -140,8 +144,8 @@ const double integ_abstol_recomb= 1e-6;
 
 const int    integ_meshdim =1500;
 
-const double alpha_i =0.05; //0.3;
-const double beta_i  =4.0 ; //0.9;
+const double alpha_i =0.3; //0.05; //0.3;
+const double beta_i  =0.9; //4.0 ; //0.9;
 const double ioniz_const = 1.573949440579906e+71; // konstanten zus. gefasst und aus dem doppelintegral gezogen
 const double recomb_const= 6.213703330335829e+72; // selbes für 3b-recomb.
 
@@ -149,7 +153,7 @@ const double recomb_const= 6.213703330335829e+72; // selbes für 3b-recomb.
 
 //wenn geschätzte max. ioniz.rate kleiner als das --> integrale garnicht erst berechnen 
 //Schätzungen mit Hilfe von matlab-script DESCHAUD_TEST.m
-#define MINRATE  1e20            // in 1/s/m^3 --> alles unter 10 Ionisationsereignissen pro fs pro m^3 wird ignoriert
+#define MINRATE  1e16            // in 1/s/m^3 --> alles unter 10 Ionisationsereignissen pro fs pro m^3 wird ignoriert
                                  // habe ich also eine ionenkonz. von 10^26/m^3 und eine rate von  10/m^3/fs
                                  // so ändert sich pro md-step die konz. um den Bruchteil 10/1E26 = 1E-25
                                  // -->wayne
@@ -203,8 +207,6 @@ void do_colrad(double dt)
     gettimeofday(&start, NULL);   
   // }
 #endif
-
-
 
 
   for(i=1;i<local_fd_dim.x-1;i++)
@@ -406,6 +408,10 @@ void colrad_init(void)
   winteg_outer= gsl_integration_workspace_alloc (integ_meshdim); //Integration workspace allocation  
   winteg_fermi= gsl_integration_workspace_alloc (integ_meshdim); //Integration workspace allocation  
   winteg_exc=   gsl_integration_workspace_alloc (integ_meshdim); 
+
+  winteg_rb_inner=gsl_integration_romberg_alloc(20);
+  winteg_rb_outer=gsl_integration_romberg_alloc(20);
+
 	HBAR=planck/2.0/pi;
 	LASERFREQ=LIGHTSPEED/lambda;
 	SUNMatrix A;
@@ -2275,10 +2281,7 @@ if(DeltaE >0)
   if(initial_equi==false)
   {
     double cv=EOS_cve_from_r_te(data->dens, Te);  
-  
-  //pout.z *= 11604.5; // -->J/eV/m^3
-  //pout.z *= 1e-30; // --> J/eV/Angs^3
-  //pout.z *= J2eV; // --> eV/eV/A^3
+
     cv *= 1e30/11604.5*eV2J;   // von eV/(eV*A^3) to  J/(K*m^3) 
     double cvinv=1.0/cv;    
 
@@ -2713,7 +2716,7 @@ if(fail==1)
 #ifdef OMP
    // #pragma omp parallel for schedule(static) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2,sigma1,sigma_MPI_2,sigma_MPI_3,tmp0,tmp1,tmp2) num_threads(num_threads)
    // #pragma omp for nowait schedule(static) private(j,kronecker,DeltaE,a,expint,G2,I_1,I_2,sigma1,sigma_MPI_2,sigma_MPI_3,tmp0,tmp1,tmp2)
-  #pragma omp for simd schedule(static) private(j,kronecker,DeltaE,fparams_inner, fparams_outer, winteg_inner, winteg_outer)
+  #pragma omp for simd schedule(static) private(j,kronecker,DeltaE,fparams_inner, fparams_outer, winteg_inner, winteg_outer,winteg_rb_inner,winteg_rb_outer)
 #endif
   for(i=0;i<z0_len;++i)
   {
@@ -2787,7 +2790,7 @@ k_EI_REV_MAX=MAX(k_EI_REV_MAX,k_EI_z1_z0[i][j]);
 #ifdef OMP
  // #pragma omp parallel for schedule(static) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2,sigma1,sigma_MPI_2,sigma_MPI_3,tmp0,tmp1,tmp2) num_threads(num_threads)
   // #pragma omp for nowait schedule(static) private(j,kronecker,DeltaE,a,expint,G2,I_1,I_2,sigma1,sigma_MPI_2,sigma_MPI_3,tmp0,tmp1,tmp2)
-  #pragma omp for simd schedule(static) private(j,kronecker,DeltaE,fparams_inner, fparams_outer, winteg_inner, winteg_outer)
+  #pragma omp for simd schedule(static) private(j,kronecker,DeltaE,fparams_inner, fparams_outer, winteg_inner, winteg_outer,winteg_rb_inner,winteg_rb_outer)
 #endif
   for(i=0;i<z1_len;++i)
   {
@@ -2867,7 +2870,7 @@ k_EI_REV_MAX=MAX(k_EI_REV_MAX,k_EI_z2_z1[i][j]);
 #ifdef OMP
   // #pragma omp parallel for   schedule(static) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2,sigma1,sigma_MPI_2,sigma_MPI_3,tmp0,tmp1,tmp2) num_threads(num_threads)
   // #pragma omp for nowait schedule(static) private(j,kronecker,DeltaE,a,expint,G2,I_1,I_2,sigma1,sigma_MPI_2,sigma_MPI_3,tmp0,tmp1,tmp2)
-  #pragma omp for simd schedule(static) private(j,kronecker,DeltaE,fparams_inner, fparams_outer, winteg_inner, winteg_outer)
+  #pragma omp for simd schedule(static) private(j,kronecker,DeltaE,fparams_inner, fparams_outer, winteg_inner, winteg_outer,winteg_rb_inner,winteg_rb_outer)
 #endif
   for(i=0;i<z2_len;++i)
   {
@@ -2929,7 +2932,7 @@ k_EI_REV_MAX=MAX(k_EI_REV_MAX,k_EI_z2_z1[i][j]);
 #ifdef OMP
  // #pragma omp parallel for schedule(static) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2,sigma1,sigma_MPI_2,sigma_MPI_3,tmp0,tmp1,tmp2) num_threads(num_threads)
   // #pragma omp for nowait schedule(static) private(j,kronecker,DeltaE,a,expint,G2,I_1,I_2,sigma1,sigma_MPI_2,sigma_MPI_3,tmp0,tmp1,tmp2)
-  #pragma omp for simd schedule(static) private(j,kronecker,DeltaE,fparams_inner, fparams_outer, winteg_inner, winteg_outer)
+  #pragma omp for simd schedule(static) private(j,kronecker,DeltaE,fparams_inner, fparams_outer, winteg_inner, winteg_outer,winteg_rb_inner,winteg_rb_outer)
 #endif
   for(i=0;i<z3_len;++i)
   {
@@ -3467,35 +3470,9 @@ double inner_integrand_ionization(double x, void *p) // x=E_strich
   double E_prime_prime=E-E_prime-DeltaE;
 
   double Pauli_E_prime=1.0-1.0/(1.0+exp((E_prime-mu)/BOLTZMAN/T));
-
-  // if(Pauli_E_prime < 1e-100) return 0;
-
   double Pauli_E_prime_prime=1.0-1.0/(1.0+exp((E_prime_prime-mu)/BOLTZMAN/T));
 
-  // if(Pauli_E_prime_prime < 1e-100) return 0;
-
-  // double alpha=0.05;
-  // double beta=4.0;
-
-  //if(E_prime==DeltaE) return 0;
-
-  // double c1=alpha*4.0*M_PI* gsl_pow_2(bohr_radius)* gsl_pow_2(E_ion_H*eV2J/DeltaE)*DeltaE;
-  // double c2=5.0/4.0*beta/DeltaE;  
-  // double sigma_deriv=c1*((2*DeltaE-E_prime)*log(c2*E_prime)-DeltaE+E_prime)/gsl_pow_3(E_prime);
-  // double sigma_deriv=4.0*M_PI*pow(bohr_radius,2.0)*pow(E_ion_H*eV2J/DeltaE,2.0)*alpha*DeltaE
-  //                    *((2*DeltaE-E_prime)*log(5.0*beta/4.0/DeltaE/E_prime)-DeltaE+E_prime)/pow(E_prime,3.0);
-
-  // double sigma_deriv=4.0*M_PI*bohr_radius_sq*alpha*E_ion_H_sq_J/DeltaE/gsl_pow_3(E_prime)
-  //                    *((2.0*DeltaE-E_prime)*log(5.0/4.0*beta*E_prime/DeltaE) - DeltaE + E_prime);
-  //
-  // double sigma_deriv=4.0*pi*bohr_radius_sq*alpha*E_ion_H_sq_J *
-  //             (DeltaE*log(5/4*beta*(DeltaE+E_prime+E_prime_prime)/DeltaE)+E_prime+E_prime_prime) / 
-  //             DeltaE / gsl_pow_2(DeltaE+E_prime + E_prime_prime);
-  
-
-
   double f=Pauli_E_prime*Pauli_E_prime_prime; //F(E), sigmaderiv und sqrt(2*eng1/emass) im outer integrand
-  //printf("finner:%.4e %.4e\n",f,E_prime);
   return f;
 }
 
@@ -3514,44 +3491,8 @@ double inner_integrand_recombination(double x, void *p) // x=incoming elec. ener
   //            während E=DeltaE+E'+E'' energie des sekunddären Elektrons!
   // double E=DeltaE+E_prime+E_prime_prime; 
   double E_prime_prime=E-DeltaE-E_prime;
-
-  // double vel=2.0*sqrt(E_prime * E_prime_prime)/EMASS;
-
-  // if(vel<1e-200) return 0;
-
-  // double Pauli_E=1.0-1.0/(1.0+exp((E-mu)/BOLTZMAN/T));
-  // if(Pauli_E < 1e-100) return 0;
-
   double fermi_fun_E_prime=      1.0/(1.0+exp((E_prime-mu)/BOLTZMAN/T));
   double fermi_fun_E_prime_prime=1.0/(1.0+exp((E_prime_prime-mu)/BOLTZMAN/T));
-  
-  // double F_E_prime_prime = double_emass_pow_3_2/2.0/ne/hbar_cub/pi_sq*sqrt(E_prime_prime)*fermi_fun;
-  // double F_E_prime=double_emass_pow_3_2/2.0/ne/hbar_cub/pi_sq*sqrt(E_prime)*fermi_fun;
-
-
-
-  // double y=E/DeltaE;
-  // double sigma_deriv = 4.0*M_PI*bohr_radius_sq*E_ion_H_sq_J / gsl_pow_2(DeltaE) * alpha_i*(y-1.0)/gsl_pow_2(y)*log(5*beta_i*y/4) 
-                       // /2.0/(E-DeltaE);      
-
-  // double sigma_deriv_3b= E/E_prime/E_prime_prime * gsl_pow_3(planck)/16.0/M_PI/EMASS*sigma_deriv;
-
-// sigma_morel=@(eng) 4*pi*bohr_radius^2*(E_ion_H/DeltaE).^2 * alpha_i .*((eng./DeltaE)-1)./(eng./DeltaE).^2 * log(5./4*beta_i.*eng./DeltaE);
-// sigma_deriv=@(eng) sigma_morel(eng)./2./(eng-DeltaE); % <-- FLYCHK
-// sigma_deriv_3b=@(eng1,eng2,eng3) gupper/glower.*eng1./eng2./eng3.*planck^3/16/pi/emass.*sigma_deriv(eng1);
-
-            
-// integrand_inner=@(eng2,eng3) sigma_deriv_3b(eng2+eng3+DeltaE,eng2,eng3).*sqrt(4.*eng2.*eng3./emass^2) ... 
-//                  .*F(eng2).*F(eng3).*Pauli(eng2+eng3+DeltaE);
-
-
-
-// printf("Te:%.4e, ne:%.4e, mu:%.4e, E:%.4e, E':%.4e, E'':%.4e, F':%.4e, F'':%.4e, v:%.4e, P:%.4e, integr:%.4e\n",
-        // T, ne, mu, E, E_prime, E_prime_prime, F_E_prime, F_E_prime_prime, vel, Pauli_E, 
-           // )
-                       
-  //F_E_prime_prime wird vom äußeren Intgral berücksichtigt
-  // double f=sigma_deriv_3b*Pauli_E*F_E_prime*F_E_prime_prime*vel;
   double f= fermi_fun_E_prime * fermi_fun_E_prime_prime;
   return f;
 }
@@ -3570,13 +3511,6 @@ double outer_integrand_recombination(double x,void *p)
     
   double fermi_fun=1.0/(1.0+exp((E-mu)/BOLTZMAN/T));
   double Pauli_E = 1.0-fermi_fun;
-  // if(fermi_fun<1e-100) return 0;
-  
-  // double F_E_prime_prime = double_emass_pow_3_2/2.0/ne/hbar_cub/pi_sq*sqrt(E_prime_prime)*fermi_fun; //velocity macht inner integrand
-  // if(F < 1e-100) return 0;
-
-  // if(F < 1e-100)
-    // return 0.0;
 
   fparams_inner.T=T;
   fparams_inner.ne=ne;
@@ -3595,19 +3529,14 @@ double outer_integrand_recombination(double x,void *p)
   double sigma_deriv = 4.0*M_PI*bohr_radius_sq*E_ion_H_sq_J / gsl_pow_2(DeltaE) * alpha_i*(y-1.0)/gsl_pow_2(y)*log(5*beta_i*y/4) 
                        /2.0/(E-DeltaE);   
 
-  // gsl_integration_qags (&gslfun_inner, 0.0, muINF, integ_abstol, integ_reltol, integ_meshdim,
-                         // winteg_inner, &integ_inner, &integ_err); 
 
-  // gsl_integration_qagiu (&gslfun_inner, 0.0, integ_abstol, integ_reltol, integ_meshdim,
-                         // winteg_inner, &integ_inner, &integ_err); 
+  // gsl_integration_qag(&gslfun_inner, 0, E-DeltaE, 1e-4, integ_reltol, integ_meshdim,1,
+                      // winteg_inner, &integ_inner, &integ_err);  
 
-  gsl_integration_qag(&gslfun_inner, 0, E-DeltaE, 1e-4, integ_reltol, integ_meshdim,1,
-                      winteg_inner, &integ_inner, &integ_err);  
+  size_t evals;
+  gsl_integration_romberg(&gslfun_inner, 0, E-DeltaE, 1e-4, integ_reltol, &integ_inner,
+                         &evals, winteg_rb_inner);
 
- // printf("T: %.4e,mu: %.4e,ne: %.4e,dE: %.4e, E'': %.4e, integinner: %.4e\n",
- //         T,mu,ne,DeltaE,E_prime_prime, integ_inner);
-
-  //return F_E_prime_prime*integ_inner;
   return sigma_deriv*Pauli_E*E*integ_inner;
 
 }
@@ -3640,8 +3569,11 @@ double double_integral_recombination(double ne,double T, double mu, double Delta
   gsl_integration_qag(&gslfun_outer, DeltaE, muINF, integ_abstol_recomb, integ_reltol, integ_meshdim,1,
                           winteg_outer, &integ_outer, &integ_err);  
 
-   //gsl_integration_qags (&gslfun_outer, 0.0, muINF, integ_abstol, integ_reltol, integ_meshdim,
-   //                      winteg_outer, &integ_outer, &integ_err); 
+
+  // size_t evals;
+  // gsl_integration_romberg(&gslfun_outer, DeltaE, muINF, 1e-6, integ_reltol, &integ_outer,
+  //                        &evals, winteg_rb_outer);
+
 
   //NICHT VERGESSEN: RATIO DER STATISTICAL WEIGHTS
   integ_outer *= recomb_const/ne/ne; //Später ne^2 entfernen und in ydot entfernen!
@@ -3661,18 +3593,11 @@ double outer_integrand_ionization(double x,void *p)
   double T=params->T;
   double mu=params->mu;  
 
-  // if(x==0) return 0.0; //weil vel=0 wird
-
-  // double vel=sqrt(2.0*eng/EMASS);
-  // if(vel < 1e-200) return 0;
 
   double fermi_fun=1.0/(1.0+exp((eng-mu)/BOLTZMAN/T));
   // if(fermi_fun < 1e-100) return 0;
-
-  // double F=double_emass_pow_3_2/2.0/ne/hbar_cub/pi_sq*sqrt(eng)*fermi_fun*vel;   //DOS * f_FD * vel / ne
   
   double y=eng/DeltaE;
-
   double sigma_deriv = 4.0*M_PI*bohr_radius_sq*E_ion_H_sq_J * gsl_pow_2(1.0/DeltaE)*alpha_i*(y-1.0)/gsl_pow_2(y)*log(5*beta_i*y/4) 
                        /2.0/(eng-DeltaE);                       
 
@@ -3688,16 +3613,14 @@ double outer_integrand_ionization(double x,void *p)
 
   double integ_inner;
   double integ_err;
+ 
 
+  // gsl_integration_qag(&gslfun_inner, 0.0, eng-DeltaE, 1e-4, integ_reltol, integ_meshdim,1,
+  //                     winteg_inner, &integ_inner, &integ_err);  
 
-   // gsl_integration_qags (&gslfun_inner, DeltaE, muINF, integ_abstol, integ_reltol, integ_meshdim,
-   //                       winteg_inner, &integ_inner, &integ_err); 
-
-  // gsl_integration_qagiu (&gslfun_inner, DeltaE,integ_abstol, integ_reltol, integ_meshdim,
-                         // winteg_inner, &integ_inner, &integ_err);    
-
-  gsl_integration_qag(&gslfun_inner, 0.0, eng-DeltaE, 1e-4, integ_reltol, integ_meshdim,1,
-                      winteg_inner, &integ_inner, &integ_err);  
+  size_t evals;
+  gsl_integration_romberg(&gslfun_inner, 0.0, eng-DeltaE, 1e-4, integ_reltol, &integ_inner,
+                         &evals, winteg_rb_inner);
 
   return eng*fermi_fun*sigma_deriv*integ_inner;
 
@@ -3720,15 +3643,14 @@ double double_integral_ionization(double ne,double T, double mu, double DeltaE)
   double integ_outer=0;
   double integ_err=0;
 
-
-  // gsl_integration_qags (&gslfun_outer, 0, muINF, integ_abstol, integ_reltol, integ_meshdim,
-                        // winteg_outer, &integ_outer, &integ_err);    
-
-  // gsl_integration_qagiu(&gslfun_outer, 0, integ_abstol, integ_reltol, integ_meshdim,
-                        // winteg_outer, &integ_outer, &integ_err); 
-
   gsl_integration_qag(&gslfun_outer, DeltaE*1.001, muINF, integ_abstol_ioniz, integ_reltol, integ_meshdim,1,
                       winteg_outer, &integ_outer, &integ_err);  
+
+
+  //Romberg hängt sich hier auf
+  // size_t evals;
+  // gsl_integration_romberg(&gslfun_outer, DeltaE*1.001, muINF,0.0, integ_reltol, &integ_outer,
+  //                         &evals, winteg_rb_outer);
 
   // if(integ_outer<MINRATE) integ_outer=0.0;
   integ_outer *= ioniz_const / ne; //ACHTUNG: Später ne entfernenu und in ydot nicht mehr multiplizieren!

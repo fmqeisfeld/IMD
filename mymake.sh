@@ -51,24 +51,26 @@
  #
  # 
  # #MIT OPENMP
- #make clean
+ # make clean
  AVXFLAGS=" -m64 -mavx2 -march=broadwell "
- CFLAGS="-Wno-unused-variable -I/user/eisfeld/sundials-4.1.0/instdir/include" # -m64"
- LFLAGS="-L/user/eisfeld/sundials-4.1.0/instdir/lib64 -lsundials_cvode -lsundials_nvecserial -lsundials_sunlinsollapackdense -lgsl -lgslcblas"
+ CFLAGS="-Wno-unused-variable -I/user/eisfeld/sundials-4.1.0/instdir/include  \
+ 		  -I/usr/local/include/gsl"  
+ LFLAGS="-L/user/eisfeld/sundials-4.1.0/instdir/lib64 -lsundials_cvode -lsundials_nvecserial \
+ 		  -lsundials_sunlinsollapackdense  -L/usr/local/lib -lgsl -L/usr/local/lib -lgslcblas"
 
  # LFLAGS=" /user/eisfeld/sundials-4.1.0/instdir/lib64/libsundials_cvode.a \
  # 		  /user/eisfeld/sundials-4.1.0/instdir/lib64/libsundials_nvecserial.a \
  # 		  /user/eisfeld/sundials-4.1.0/instdir/lib64/libsundials_sunlinsollapackdense.a \
  # 		  -lgsl -lgslcblas -llapack"
- #
- mpicc  -O2 -fopenmp -ffast-math  $CFLAGS -DMPI  -DNBL -DEAM2 -DTTM -DTMM -DCOLRAD -DLOADBALANCE -c -Wno-unused-variable \
+ OPTFLAGS="-O2 -fopenmp -ffast-math"
+ mpicc   $CFLAGS -DMPI  -DNBL -DEAM2 -DTTM -DTMM -DCOLRAD -DLOADBALANCE -c -Wno-unused-variable \
  		 imd_maxwell.c imd_misc.c imd_param.c imd_alloc.c imd_io.c imd_io_3d.c imd_potential.c\
  		 imd_time.c imd_generate.c imd_distrib.c imd_main_3d.c imd_geom_3d.c imd_pictures_3d.c \
  		 imd_geom_mpi_3d.c imd_comm_force_3d.c \
  		 imd_fix_cells_3d.c imd_mpiio.c imd_mpi_util.c imd.c imd_ttm.c imd_interpol.c fminbnd3.c \
  		 imd_tmm.c imd_colrad.c imd_forces_nbl.c imd_integrate.c \
  		 imd_loadBalance.c imd_loadBalance_direct.c
- mpicc  -o imd_mpi_eam_ttm_tmm_nbl_colrad_loadbalance imd_maxwell.o imd_integrate.o imd_misc.o imd_param.o imd_alloc.o imd_io.o imd_io_3d.o \
+ mpicc   -o imd_mpi_eam_ttm_tmm_nbl_colrad_loadbalance imd_maxwell.o imd_integrate.o imd_misc.o imd_param.o imd_alloc.o imd_io.o imd_io_3d.o \
  		 imd_loadBalance.o imd_loadBalance_direct.o\
 		 imd_potential.o imd_time.o imd_generate.o imd_distrib.o imd_main_3d.o imd_geom_3d.o imd_pictures_3d.o imd_geom_mpi_3d.o \
 		 imd_comm_force_3d.o imd_fix_cells_3d.o imd_mpiio.o imd_mpi_util.o imd.o imd_ttm.o imd_interpol.o fminbnd3.o imd_tmm.o imd_colrad.o \
