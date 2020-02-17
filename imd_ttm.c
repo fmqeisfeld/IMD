@@ -35,10 +35,10 @@
                    // ACHTUNG: FEG Momentan totaler BS --> t_from_e viel zu ungenau (+/- 10 %)
                    // Grund: weiss nicht genau aber vermute Fermi_dirac integral 
                    // Evtl. wäre "manuelles" integrieren zuverlässiger
-#define ADVMODE 0  // 0=NO ADVECTION, 1=DISCRETE FLUX SOLVER (PREDICT ATOMIC FLUXES)
+#define ADVMODE 1  // 0=NO ADVECTION, 1=DISCRETE FLUX SOLVER (PREDICT ATOMIC FLUXES)
 //#define ADVMODE2d  // FALLS y dim offen sein soll, müssen atomic-fluxes auch über kanten kommmuniziert werden
 
-//#define VLATTICE   //VIRTUAL LATTICE HINTER DER PROBE. ACHTUNG: NUR 1D !!!!
+#define VLATTICE   //VIRTUAL LATTICE HINTER DER PROBE. ACHTUNG: NUR 1D !!!!
                     //Falls gewünscht kann mit vlatbuffer die zahl
                     //der zellen (vom ende der probe gezählt) angegeben werden, die NICHT im TTM berücksichtigt
                     //werden soll, da diese als Puffer dienen 
@@ -112,31 +112,27 @@ void calc_ttm()
 
 {
     //Calc internal eng and updt new U after diff
-    // tot_elec_energy_local =0;
-    // for (i=1; i<local_fd_dim.x-1; ++i)
-    // {
-    // for (j=1; j<local_fd_dim.y-1; ++j)
-    // {
-    // for (k=1; k<local_fd_dim.z-1; ++k)
-    // {
-    //       if(node.natoms >= 1)
-    //       {
-    //         //node.U =EOS_ee_from_r_te(node.dens, node.temp * 11604.5) * 26.9815 * AMU * J2eV; //eV/Atom      
-    //         tot_elec_energy_local += node.U*((double) node.natoms);
-    //       }      
-    //       else
-    //       {
-    //         node.U=0.0; //node2.U=0.0;
-    //       }
-    // }
-    // }
-    // }
+    tot_elec_energy_local =0;
+    for (i=1; i<local_fd_dim.x-1; ++i)
+    {
+          if(node.natoms >= 1 && node.dens >= RHOMIN)
+          {
+            node.U =EOS_ee_from_r_te(node.dens, node.temp * 11604.5) * 26.9815 * AMU * J2eV; //eV/Atom      
+            node2.U=node.U;
+            tot_elec_energy_local += node.U*((double) node.natoms);
+          }      
+          else
+          {
+            node.U=0.0; node2.U=0.0;
+          }
+
+    }
 }
 
 MPI_Reduce(&Eabs_local, &Eabs_global, 1, MPI_DOUBLE, MPI_SUM, 0, cpugrid);
 
 if(myid==0)
-  printf("step:%d, It:%.2e, substeps:%d, Finc:%.4e, t-t0:%.4e, Refl:%.4e, laser_active:%d \n",
+  printf("step:%d, It:%.2e, substeps:%d, Eabs:%.4e, t-t0:%.4e, Refl:%.4e, laser_active:%d \n",
           steps,I_t, diff_substeps, Eabs_global * eV2J / laser_spot_area,(tmm_time - laser_t_0) * 1e15,tmm_refl, laser_active);
 
 }

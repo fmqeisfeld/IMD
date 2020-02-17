@@ -161,8 +161,8 @@ const realtype integ_abstol_recomb= 1.0e-4; //1e-6;
 
 const int    integ_meshdim =1500;
 
-const realtype alpha_i =0.05; //0.3;
-const realtype beta_i  =4.0 ; //0.9;
+const realtype alpha_i =0.3; //0.05; //0.3;
+const realtype beta_i  =0.9; //4.0 ; //0.9;
 const realtype ioniz_const = 1.573949440579906e+71; // konstanten zus. gefasst und aus dem doppelintegral gezogen
 const realtype recomb_const= 6.213703330335829e+72; // selbes für 3b-recomb.
 
@@ -3280,22 +3280,13 @@ realtype outer_integrand_ionization(realtype x,void *p)
   realtype mu=params->mu;  
 
 
-#ifdef USEFLOAT
   realtype fermi_fun=1.0/(1.0+EXPR((eng-mu)/BOLTZMAN/T));
-#else
-  float fermi_fun=1.0/(1.0+expf((eng-mu)/BOLTZMAN/T));
-#endif  
+
   // if(fermi_fun < 1e-100) return 0;
 
-#ifdef USEFLOAT
-  float y=eng/DeltaE;
-  float sigma_deriv = 4.0*M_PI*bohr_radius_sq*E_ion_H_sq_J * gsl_pow_2(1.0/DeltaE)*alpha_i*(y-1.0)/gsl_pow_2(y)*LOGR(5*beta_i*y/4) 
-                       /2.0/(eng-DeltaE);                       
-#else
   realtype y=eng/DeltaE;
   realtype sigma_deriv = 4.0*M_PI*bohr_radius_sq*E_ion_H_sq_J * gsl_pow_2(1.0/DeltaE)*alpha_i*(y-1.0)/gsl_pow_2(y)*LOGR(5*beta_i*y/4) 
-                       /2.0/(eng-DeltaE);                        
-#endif
+                       /2.0/(eng-DeltaE); 
 
 
   fparams_inner.T=T;
@@ -3342,7 +3333,7 @@ realtype double_integral_ionization(realtype ne,realtype T, realtype mu, realtyp
   realtype integ_outer=0;
   realtype integ_err=0;
 
-  gsl_integration_qag(&gslfun_outer, DeltaE*1.001, muINF, integ_abstol_ioniz, integ_reltol, integ_meshdim,1,
+  gsl_integration_qag(&gslfun_outer, DeltaE*1.001, 3.0*mu, integ_abstol_ioniz, integ_reltol, integ_meshdim,1,
                       winteg_outer, &integ_outer, &integ_err);  
 
   // integ_outer = integral_simpson(&outer_integrand_ionization, DeltaE*1.001, 20*DeltaE, 5000, &fparams_outer);
