@@ -38,7 +38,7 @@
 // #define ADVMODE 1  // 0=NO ADVECTION, 1=DISCRETE FLUX SOLVER (PREDICT ATOMIC FLUXES)
 //#define ADVMODE2d  // FALLS y dim offen sein soll, müssen atomic-fluxes auch über kanten kommmuniziert werden
 
-#define VLATTICE   //VIRTUAL LATTICE HINTER DER PROBE. ACHTUNG: NUR 1D !!!!
+//#define VLATTICE   //VIRTUAL LATTICE HINTER DER PROBE. ACHTUNG: NUR 1D !!!!
                     //Falls gewünscht kann mit vlatbuffer die zahl
                     //der zellen (vom ende der probe gezählt) angegeben werden, die NICHT im TTM berücksichtigt
                     //werden soll, da diese als Puffer dienen 

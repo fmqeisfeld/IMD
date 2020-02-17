@@ -73,62 +73,6 @@ const int MAX_LINE_LENGTH=3000; //wird von colrad_read benuthzt
                                 //sollte eigentlich besser dynamisch berechnet werden
 
 
-// **********************************************************************************************
-// *          PAR INTEGRAL STUFF
-// **********************************************************************************************
-realtype  integral_simpson(realtype (*f)(realtype, void*), realtype a, realtype b,int n,void* p);
-
-int simpson_error;
-const realtype tolmax=1e-20;
-#define INITIAL_STACK_SIZE 128   /* initial size of new stacks */
-
-
-
-realtype  
-integral_simpson_par(
-     realtype (*f)(realtype,void*), /* function to integrate */
-     realtype ah,           /* left interval boundary  */
-     realtype bh,           /* right interval boundary */
-     realtype tolh,
-     realtype S,
-     realtype fa,
-     realtype fb,
-     realtype fm,
-     int rec,
-     void* p); 
-
-
-/* the stack structure */
-struct stack_s{               
-  int el_count;            /* count of elements on stack */    
-  int el_size;             /* size of an element */
-  int mem_reserve;         /* allocated memory for stack */
-  void* elements;          /* pointer to begin of stack */
-};
-
-typedef struct _work_t{
-  realtype a;
-  realtype b;
-  realtype tol;
-  realtype S;
-  realtype fa;
-  realtype fb;
-  realtype fm;
-  realtype rec;
-} work_t;
-
-
-typedef struct stack_s* stack_t;
-
-
-void create_stack(stack_t* stack, int element_size);
-int  empty_stack(stack_t stack);
-void push_stack(stack_t stack, void* element);
-void pop_stack(stack_t stack, void* element);
-
-
-
-
 // *********************************************************
 // PHYSICAL CONSTANTS
 // *********************************************************
@@ -229,6 +173,62 @@ const realtype recomb_const= 6.213703330335829e+72; // selbes für 3b-recomb.
 #define MINCONC 1e-60   //im Saha-init sollen zu kleine konzentrationen ignoriert werden
 
 realtype k_EE_MAX, k_EI_MAX, k_EE_REV_MAX, k_EI_REV_MAX; //DEBUG PURPOSE
+
+
+
+// **********************************************************************************************
+// *          PAR INTEGRAL STUFF
+// **********************************************************************************************
+realtype  integral_simpson(realtype (*f)(realtype, void*), realtype a, realtype b,int n,void* p);
+
+int simpson_error;
+const realtype tolmax=1e-20;
+#define INITIAL_STACK_SIZE 128   /* initial size of new stacks */
+
+
+
+realtype  
+integral_simpson_par(
+     realtype (*f)(realtype,void*), /* function to integrate */
+     realtype ah,           /* left interval boundary  */
+     realtype bh,           /* right interval boundary */
+     realtype tolh,
+     realtype S,
+     realtype fa,
+     realtype fb,
+     realtype fm,
+     int rec,
+     struct my_f_params* p); 
+
+
+/* the stack structure */
+struct stack_s{               
+  int el_count;            /* count of elements on stack */    
+  int el_size;             /* size of an element */
+  int mem_reserve;         /* allocated memory for stack */
+  void* elements;          /* pointer to begin of stack */
+};
+
+typedef struct _work_t{
+  realtype a;
+  realtype b;
+  realtype tol;
+  realtype S;
+  realtype fa;
+  realtype fb;
+  realtype fm;
+  realtype rec;
+} work_t;
+
+
+typedef struct stack_s* stack_t;
+
+
+void create_stack(stack_t* stack, int element_size);
+int  empty_stack(stack_t stack);
+void push_stack(stack_t stack, void* element);
+void pop_stack(stack_t stack, void* element);
+
 
 // *********************************************************
 //             CVODE-STRUCT FOR SOLVER PARAMS
@@ -3369,16 +3369,16 @@ realtype outer_integrand_ionization(realtype x,void *p)
   gslfun_inner.function=&inner_integrand_ionization;
   gslfun_inner.params=&fparams_inner;  
 
-  realtype integ_inner;
+  realtype integ_inner=0.0;
   realtype integ_err;
  
 
   // gsl_integration_qag(&gslfun_inner, 0.0, eng-DeltaE, integ_abstol, integ_reltol, integ_meshdim,1,
-                      // winteg_inner, &integ_inner, &integ_err);  
+  //                     winteg_inner, &integ_inner, &integ_err);  
 
-  // size_t evals;
-  // gsl_integration_romberg(&gslfun_inner, 0.0, eng-DeltaE, 1e-4, integ_reltol, &integ_inner,
-                         // &evals, winteg_rb_inner);
+   // size_t evals;
+   // gsl_integration_romberg(&gslfun_inner, 0.0, eng-DeltaE, 1e-4, integ_reltol, &integ_inner,
+                          // &evals, winteg_rb_inner);
   
   // integ_inner = integral_simpson(&inner_integrand_ionization, 1e-40, eng-DeltaE, 5000, &fparams_inner);
 
@@ -3387,10 +3387,15 @@ realtype outer_integrand_ionization(realtype x,void *p)
   realtype fm=inner_integrand_ionization((eng-DeltaE)/2,p);
   realtype h=eng-DeltaE-0.0;
   realtype Sinit=h/6*(fa+4*fm+fb);
+
+  fparams_inner.E=eng+1e-20;
   #pragma omp parallel
   {
-    integ_inner = integral_simpson_par(inner_integrand_ionization, 1e-20, eng-DeltaE, 1e-4,Sinit,fa,fb,fm,10,p);
+    integ_inner = integral_simpson_par(inner_integrand_ionization, 1e-20, eng-DeltaE, 1e-4,Sinit,fa,fb,fm,50,&fparams_inner);
   } 
+
+if(myid==1)
+  printf("YAY:%.4e\n",integ_inner);
 
   return eng*fermi_fun*sigma_deriv*integ_inner;
 
@@ -3722,7 +3727,7 @@ realtype  integral_simpson_par(
      realtype fbh,
      realtype fmid,
      int recmax, 
-     void* p)   //param. struct
+     struct my_f_params* p)   //param. struct
 
 {
   simpson_error=0;
@@ -3761,7 +3766,7 @@ realtype  integral_simpson_par(
 #pragma omp parallel default(none) \
     shared(stack, integral_result,f,busy,simpson_error,p) \
     private(a,b,tolerance, work, h, mid, \
-            idle, ready)
+            idle, ready,myid)
   {
 
     ready = 0;
@@ -3815,13 +3820,18 @@ realtype  integral_simpson_par(
 
       realtype flm=f(lm,p);
       realtype frm=f(rm,p);
-      
+
+//struct my_f_params { realtype ne; realtype T;realtype mu; realtype E;realtype DeltaE; int allowed;};
+// if(myid==0)
+// printf("S:%.4e,lm:%.4e, rm:%.4e, a:%.4e, b:%.4e, flm:%.4e, frm:%.4e, ne:%.4e, T:%.4e, E:%.4e, De:%.4e\n",
+//         S,lm,rm,a,b,flm,frm,p->ne, p->T, p->E,p->DeltaE);
+
       realtype Sl=h/6*(fa+4*flm+fm);
       realtype Sr=h/6*(fm+4*frm+fb);
 
       realtype delta=Sl+Sr-S;
 
-      if(rec <= 0 || fabs(delta) <= 15*tolerance)
+      if(rec <= 0 || (ABS(delta) <= 15*tolerance)) // && (Sl != 0 || Sr !=0 || S !=0) )) 
       {
 #pragma omp critical (integral_result) //hier stand davor nur result (war ein fehler)
         integral_result += Sl+Sr+delta/15;
@@ -3829,7 +3839,7 @@ realtype  integral_simpson_par(
       else // error not acceptable
       {
         // serious numerical trouble: it won't converge
-        if ((tolerance/2 == tolerance) || fabs(a-lm) <= tolerance || tolerance < tolmax) 
+        if ((tolerance/2 == tolerance) || a==lm) // <= tolerance) // || tolerance < tolmax) 
         { 
             simpson_error = 1; 
 #pragma omp critical (integral_result)            
