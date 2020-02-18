@@ -23,14 +23,15 @@
 //#define USEFLOAT  // hauptsächlich in der funktion genexptint. Profiling zeigte, dass
                   // hier die meiste zeit verbraucht wird -> float verdoppelt performance
 
-#ifdef USEFLOAT
-typedef float realtype;
-#define REALTYPE MPI_FLOAT
-#else
-typedef double realtype;
-#define REALTYPE MPI_DOUBLE
-#endif
+// #ifdef USEFLOAT
+// typedef float realtype;
+// #define REALTYPE MPI_FLOAT
+// #else
+// typedef double realtype;
+// #define REALTYPE MPI_DOUBLE
+// #endif
 
+#define REALTYPE MPI_DOUBLE
 
 #ifdef USEFLOAT
   #define EXPR     exp //exp zu floaten ist eine ganz mieeese idee
@@ -2886,8 +2887,8 @@ if(RATEIONIZMAX*ne*fermi_factor*Ith(y,i+z0_len+3)> MINRATE)
 
  k_EI_z1_z2[i][j]=MAX(0.0,double_integral_ionization(ne,Te, mu, DeltaE*eV2J));
 
- if(myid==1)
-  printf("EVAL dE:%.4e, kEI:%.4e,i:%d,j:%d\n", DeltaE, k_EI_z1_z2[i][j],i,j); 
+ // if(myid==1)
+  // printf("EVAL dE:%.4e, kEI:%.4e,i:%d,j:%d\n", DeltaE, k_EI_z1_z2[i][j],i,j); 
 }
 
 // if(kmax_estim*ne*ne*Ith(y,j+z0_len+z1_len+3)>MINRATE)
@@ -3455,20 +3456,18 @@ realtype double_integral_ionization(realtype ne,realtype T, realtype mu, realtyp
 {
   // return 0;
 
-  // gsl_function gslfun_outer;
-  // gslfun_outer.function = &outer_integrand_ionization;
+  gsl_function gslfun_outer;
+  gslfun_outer.function = &outer_integrand_ionization;
 
-  // fparams_outer.T=T;
-  // fparams_outer.ne=ne;
-  // fparams_outer.mu=mu;
-  // fparams_outer.DeltaE=DeltaE;
+  fparams_outer.T=T;
+  fparams_outer.ne=ne;
+  fparams_outer.mu=mu;
+  fparams_outer.DeltaE=DeltaE;
 
-  // gslfun_outer.params = &fparams_outer;
+  gslfun_outer.params = &fparams_outer;
 
   realtype integ_outer=0;
   realtype integ_err=0;
-
-
   realtype eupper=0.0;
   if(mu> 0) eupper=POWR(3*T,0.33) * eV2J + mu +DeltaE; //entartet
   else      eupper=10.0*T/11604* eV2J+ DeltaE;         //nicht-entartet
@@ -3496,19 +3495,36 @@ realtype double_integral_ionization(realtype ne,realtype T, realtype mu, realtyp
   {
     integ_outer = integral_simpson_par(outer_integrand_ionization2, DeltaE*1.001, eupper, 1e-3,Sinit,fa,fb,fm,50,&p);
   } 
-// if(myid==1 && integ_outer > 0)  
-  // printf("dE:%.4e, T:%.4e, mu:%.4e, ne:%.4e, integ:%.4e\n",DeltaE*J2eV,T,mu,ne,integ_outer);
 
+  // if(simpson_error)
+  //   printf("myid:%d, simpson error!\n",myid);
 
-
-  if(simpson_error)
-    printf("myid:%d, simpson error!\n",myid);
-
+  if(steps> 1)  
+  if(myid==1 && integ_outer > 0)  
+  {
+    if(DeltaE*J2eV > 5.9062 && DeltaE*J2eV < 5.9064) // && T> 1.9826e+03 && T > 1.9828e+03 && mu >1.6238e-18 && mu <1.6240e-18)
+    printf("dE:%.4e, T:%.6e, mu:%.15e, ne:%.15e, integ:%.4e\n",DeltaE*J2eV,T,mu,ne,integ_outer);
+  }
 
 
   // if(integ_outer<MINRATE) integ_outer=0.0;
   integ_outer *= 2.0*M_PI*bohr_radius_sq*E_ion_H_sq_J * gsl_pow_2(1.0/DeltaE)*alpha_i; //konstanten aus sigma_deriv herausgezogen
   integ_outer *= ioniz_const / ne; //ACHTUNG: Später ne entfernenu und in ydot nicht mehr multiplizieren!
+
+  // if(steps> 1)
+  // if(myid==1 && integ_outer > 0)  
+  // {
+  //   if(DeltaE*J2eV > 5.9062 && DeltaE*J2eV < 5.9064) // && T> 1.9826e+03 && T > 1.9828e+03 && mu >1.6238e-18 && mu <1.6240e-18)
+  //   printf("AFTER: dE:%.4e, T:%.6e, mu:%.15e, ne:%.15e, integ:%.4e\n",DeltaE*J2eV,T,mu,ne,integ_outer);
+  // }
+
+
+//WTF???
+// dE:5.9063e+00, T:1.208983e+03, mu:1.624114145844772e-18, ne:1.465920522460179e+29, integ:8.1974e-105
+// dE:5.9063e+00, T:1.208983e+03, mu:1.624114145844772e-18, ne:1.465920522460179e+29, integ:2.5497e-104
+// dE:5.9063e+00, T:1.208983e+03, mu:1.624114145844772e-18, ne:1.465920522460179e+29, integ:1.6998e-104
+
+
   return MAX(integ_outer,0.0);
 
 }
@@ -3799,15 +3815,15 @@ realtype  integral_simpson_par(
      struct my_f_params* p)
      //struct my_f_params* p)   //param. struct
 {
-  // simpson_error=0;
 
   realtype a, b, tolerance;       /* vars poped from stack */
   realtype integral_result;       /* value to return */
   realtype h;                     /* interval size */
   realtype mid;                   /* center of interval */
-  // realtype one_trapezoid_area;    /* area of one trapezoid */
-  // realtype two_trapezoid_area;    /* area of two trapezoids */
-
+  // double one_trapezoid_area;    /* area of one trapezoid */
+  // double two_trapezoid_area;    /* area of two trapezoids */
+  // double left_area;             /* integral of left half interval */
+  // double right_area;                 "       right    "         
 
   stack_t stack;
   work_t work;
@@ -3825,39 +3841,39 @@ realtype  integral_simpson_par(
   work.fm=fmid;
   work.p=p;
 
+  
   create_stack(&stack, sizeof(work_t));
   push_stack(stack, &work);
 
   integral_result = 0.0;
+
   busy = 0;
 
 #pragma omp parallel default(none) \
     shared(stack, integral_result,f,busy,simpson_error) \
     private(a,b,tolerance, work, h, mid, \
-            idle, ready,myid)
+            idle, ready)
   {
 
     ready = 0;
     idle = 1;
 
-    while(!ready) // && !simpson_error)
+    while(!ready )//&& !simpson_error) //<-- so NICHT!
     {
 
 #pragma omp critical (stack)
       {
-        if (!empty_stack(stack))
-        {
+        if (!empty_stack(stack)){
           /* we have new work */ 
           pop_stack(stack, &work);
-          if (idle)
-          {
+
+          if (idle){
             /* say others i'm busy */
             busy += 1;
             idle = 0;
           }
-        }
-        else
-        {
+
+        }else{
           /* no new work on stack */
           if (!idle){
             busy -= 1;
@@ -3881,25 +3897,22 @@ realtype  integral_simpson_par(
       realtype fa=work.fa;
       realtype fb=work.fb;
       realtype fm=work.fm;
-
       int rec=work.rec;
 
       h = (b - a)/2;
       mid = (a+b)/2;
       realtype lm=(a+mid)/2;
-      realtype rm=(mid+b)/2;    
-
+      realtype rm=(mid+b)/2;      
 
       realtype flm=f(lm,work.p);
       realtype frm=f(rm,work.p);
-
-
+      
       realtype Sl=h/6*(fa+4*flm+fm);
       realtype Sr=h/6*(fm+4*frm+fb);
 
       realtype delta=Sl+Sr-S;
 
-      if(rec <= 0 || (ABS(delta) <= 15*tolerance)) // && (Sl != 0 || Sr !=0 || S !=0) )) 
+      if(rec <= 0 || ABS(delta) <= 15*tolerance)
       {
 #pragma omp critical (integral_result) //hier stand davor nur result (war ein fehler)
         integral_result += Sl+Sr+delta/15;
@@ -3907,17 +3920,16 @@ realtype  integral_simpson_par(
       else // error not acceptable
       {
         // serious numerical trouble: it won't converge
-        if ((tolerance/2 == tolerance) || ABS(a-lm) <= tolerance || tolerance < tolmax) //a==lm) // <= tolerance) // || tolerance < tolmax) 
+        if ((tolerance/2 == tolerance) || ABS(a-lm) <= tolerance || tolerance < tolmax) 
         { 
-            simpson_error = 1; 
-            printf("\n\n myid:%d,simpson error!\n",myid);
-
-#pragma omp critical (integral_result)            
-            integral_result = S;      
+             simpson_error = 1; 
+             //printf("ERRNÖÖ\n");
+  #pragma omp critical (integral_result)            
+             integral_result = S;      
         }
         else
         {
-          // //push new subintervals to stack
+          //push new subintervals to stack
           work.a = a;
           work.b = mid;
           work.tol = tolerance/2;
@@ -3927,9 +3939,9 @@ realtype  integral_simpson_par(
           work.fm=flm;
           work.rec=rec-1;
 
+
     #pragma omp critical (stack)
           {
-
             //Linke Seite
             push_stack(stack, &work);      
             //Rechte seite
@@ -3949,14 +3961,6 @@ realtype  integral_simpson_par(
       }
     } /* while */
   } /* end omp parallel */
-  
-  // #pragma omp critical (stack)
-  // {
-    free(stack->elements);
-    free(stack);    
-  // }
-
-  return integral_result;
 }
 
 /******************************************
@@ -4058,8 +4062,9 @@ void pop_stack(
 
   stack->el_count--;
   memcpy(element, 
-         (char*)stack->elements + stack->el_count*stack->el_size, 
-         stack->el_size);
+          (char*)stack->elements + stack->el_count*stack->el_size, 
+          stack->el_size);
+
 }
 
 

@@ -13,7 +13,7 @@
 int num_threads;
 int simpson_error;
 int funcevals;
-const double tolmax=1e-20;
+const double tolmax=1e-30;
 #define INITIAL_STACK_SIZE 128   /* initial size of new stacks */
 
 
@@ -29,7 +29,7 @@ struct stack_s{
 
 
 struct my_f_params { double ne; double T;double mu; double E;double DeltaE; int allowed;};
-struct my_f_params fpar; 
+
 
 
 typedef struct _work_t{
@@ -53,21 +53,15 @@ int empty_stack(stack_t stack);
 void push_stack(stack_t stack, void* element);
 void pop_stack(stack_t stack, void* element);
 
+
 double  
 integral2(
-     double (*f)(double,struct my_f_params*), /* function to integrate */
-     double ah,           /* left interval boundary  */
-     double bh,           /* right interval boundary */
-     double tolh,
-     double S,
-     double fa,
-     double fb,
-     double fm,
-     int rec,
-     struct my_f_params* p); 
+     double (*f)(double, struct my_f_params*), /* function to integrate */
+     stack_t stack);
 
 
 static double myfun(double x,struct my_f_params* p){  funcevals++; return  exp(-x*x)/p->T+log(x*pow(p->T,2.0))/p->ne;}
+//static double myfun(double x,struct my_f_params* p){  funcevals++; return  exp(-x*x);}; ///p->T+log(x*pow(p->T,2.0))/p->ne;}
 // static float sinfc(float x) { return sinf(x); } 
 // static double frand48c(double x) { funcevals++; return (double) drand48(); } 
 
@@ -75,19 +69,29 @@ int main(int argc,char** argv)
 {
   num_threads=omp_get_num_threads();
   funcevals=0;
+  simpson_error=0;
+
   double pi=3.141592653589793;
   double xmin, xmax;
   double answer = 0.0;
 
   int i;
 
-  xmin = 1.0;
-  xmax = 14.0;
+  xmin = -4.0;
+  xmax = 4.0;
+
+  xmin=60;
+  xmax=200; 
+
+  /* prepare stack */
+  stack_t stack;
+  work_t work;  
+  create_stack(&stack, sizeof(work_t));
   
-  // double (*func)(double)= frand48c;
+  // ***********************************************
 double T0=10;
 double ne0=1e10;
-for(i=0;i<50;i++)  
+for(i=0;i<100;i++)  
 {  
   struct my_f_params ptest;
   ptest.T=T0+10*i;
@@ -100,94 +104,89 @@ for(i=0;i<50;i++)
   double Sinit=h/6*(fa+4*fm+fb);
   // printf("Sinit:%.4e\n",Sinit);
 
+  work.a = xmin;
+  work.b = xmax;
+  work.tol = 1e-16;
+  work.S=Sinit;
+  work.fa=fa;
+  work.fb=fb;
+  work.rec=1000;
+  work.fm=fm;
+  work.p=&ptest;
 
-  #pragma omp parallel
+
+  push_stack(stack, &work);
+
+  //#pragma omp parallel
   {
-    answer = integral2(myfun, xmin, xmax, 1e-6,Sinit,fa,fb,fm,50, &ptest);
+    answer = integral2(myfun, stack);
   } /* omp parallel */
+  printf("The integral is approximately %.12f,sqrt(pi):%.12f\n",answer,sqrt(pi));  
 
-  // printf("err:%d,feval:%d\n",simpson_error,funcevals);
-  printf("The integral is approximately %.15e\n", answer);
-}
-  // printf("The exact answer is           %.12f\n", sqrt(pi));
+  if(simpson_error)
+  {
+    printf("ERROR: Integral wont converge..cleanup\n");        
+    while(!empty_stack(stack))
+    {
+      pop_stack(stack, &work);
+    }    
+    simpson_error=0;
+  }  
+}   // for i
+free(stack);
+  
+
+
+
+
+//   stack->el_count--;
+//   memcpy(element, 
+//          (char*)stack->elements + stack->el_count*stack->el_size, 
+//          stack->el_size);
+
+
+
+
 
   return 0;
 }
 
 
-double  
-integral2(
-     double (*f)(double, struct my_f_params*), /* function to integrate */
-     double ah,           /* left interval boundary  */
-     double bh,           /* right interval boundary */
-     double tolh,
-     double S,
-     double fah,
-     double fbh,
-     double fmid,
-     int recmax,
-     struct my_f_params* p)
+double integral2(double (*f)(double, struct my_f_params*), stack_t stack)
 {
-  simpson_error=0;
-
-  double a, b, tolerance;       /* vars poped from stack */
-  double integral_result;       /* value to return */
-  double h;                     /* interval size */
-  double mid;                   /* center of interval */
-  // double one_trapezoid_area;    /* area of one trapezoid */
-  // double two_trapezoid_area;    /* area of two trapezoids */
-  // double left_area;             /* integral of left half interval */
-  // double right_area;                 "       right    "         
-
-  stack_t stack;
   work_t work;
-
   int ready, idle, busy;
-
-  /* prepare stack */
-  work.a = ah;
-  work.b = bh;
-  work.tol = tolh;
-  work.S=S;
-  work.fa=fah;
-  work.fb=fbh;
-  work.rec=recmax;
-  work.fm=fmid;
-  work.p=p;
-
-  
-  create_stack(&stack, sizeof(work_t));
-  push_stack(stack, &work);
-
-  integral_result = 0.0;
+  double integral_result = 0.0;
 
   busy = 0;
-
+  
 #pragma omp parallel default(none) \
     shared(stack, integral_result,f,busy,simpson_error) \
-    private(a,b,tolerance, work, h, mid, \
-            idle, ready)
+    private(work, idle, ready)
   {
+
+printf("me:%d, err:%d\n",omp_get_thread_num(),simpson_error);    
 
     ready = 0;
     idle = 1;
 
-    while(!ready )//&& !simpson_error) //<-- so NICHT!
+    while(!ready  && !simpson_error) //<-- so NICHT!
     {
-
 #pragma omp critical (stack)
       {
-        if (!empty_stack(stack)){
+        if (!empty_stack(stack))
+        {
           /* we have new work */ 
           pop_stack(stack, &work);
 
-          if (idle){
+          if (idle)
+          {
             /* say others i'm busy */
             busy += 1;
             idle = 0;
           }
-
-        }else{
+        }
+        else{
           /* no new work on stack */
           if (!idle){
             busy -= 1;
@@ -196,25 +195,29 @@ integral2(
 
           /* nobody has anything to do; let us leave the loop */
           if (busy == 0)
+          {
             ready = 1;
-
+            int i=0;            
+            for(i=0;i<stack->el_count;i++)
+              free(stack->elements+i);            
+          }
         }
       } /* end critical(stack) */
 
       if (idle)
-        continue;
+        continue; //if ready==1 --> leave loop
 
-      b = work.b;
-      a = work.a;
-      tolerance = work.tol;
-      double S=work.S; // vorheriges TOTAL integral
+      double b = work.b;
+      double a = work.a;
+      double tol = work.tol;
+      double S=work.S; // previous TOTAL integral
       double fa=work.fa;
       double fb=work.fb;
       double fm=work.fm;
-      int rec=work.rec;
+      int    rec=work.rec;
 
-      h = (b - a)/2;
-      mid = (a+b)/2;
+      double h = (b - a)/2;
+      double mid = (a+b)/2;
       double lm=(a+mid)/2;
       double rm=(mid+b)/2;      
 
@@ -226,70 +229,53 @@ integral2(
 
       double delta=Sl+Sr-S;
 
-      if(rec <= 0 || fabs(delta) <= 15*tolerance)
+      // serious numerical trouble: it won't converge
+      if ((tol/2 == tol) || fabs(a-lm) <= tol) // || tol < tolmax) 
+      { 
+             simpson_error = 1; 
+#pragma omp critical (integral_result)            
+             integral_result = S;      
+      }
+
+      if(rec <= 0 || fabs(delta) <= 15*tol) //error acceptable
       {
-#pragma omp critical (integral_result) //hier stand davor nur result (war ein fehler)
+#pragma omp critical (integral_result)
         integral_result += Sl+Sr+delta/15;
       }
       else // error not acceptable
-      {
-        // serious numerical trouble: it won't converge
-        if ((tolerance/2 == tolerance) || fabs(a-lm) <= tolerance || tolerance < tolmax) 
-        { 
-             simpson_error = 1; 
-             //printf("ERRNÖÖ\n");
-  #pragma omp critical (integral_result)            
-             integral_result = S;      
-        }
-        else
+      {          
+        //push new subintervals to stack
+        work.a = a;
+        work.b = mid;
+        work.tol = tol/2;
+        work.S = Sl;
+        work.fa=fa;
+        work.fb=fm;
+        work.fm=flm;
+        work.rec=rec-1;
+
+  #pragma omp critical (stack)
         {
-          //push new subintervals to stack
-          work.a = a;
-          work.b = mid;
-          work.tol = tolerance/2;
-          work.S = Sl;
-          work.fa=fa;
-          work.fb=fm;
-          work.fm=flm;
+          //LEFT
+          push_stack(stack, &work);      
+          //prepare RIGHT side and push to stack
+          work.a = mid;
+          work.b = b;
+          work.tol = tol/2;
+          work.S=Sr;
+          work.fa=fm;
+          work.fb=fb;
+          work.fm=frm;
           work.rec=rec-1;
 
+          push_stack(stack, &work);
 
-    #pragma omp critical (stack)
-          {
-            //Linke Seite
-            push_stack(stack, &work);      
-            //Rechte seite
-            work.a = mid;
-            work.b = b;
-            work.tol = tolerance/2;
-            work.S=Sr;
-            work.fa=fm;
-            work.fb=fb;
-            work.fm=frm;
-            work.rec=rec-1;
-
-            push_stack(stack, &work);
-
-          }
-        }
+        }        
       }
     } /* while */
   } /* end omp parallel */
 
- //int i;
- //for(i=0;i<stack->el_count;i++)
- free(stack->elements);
 
-// int * p;
-// p=malloc(sizeof(int)*10000);
-// printf("size2:%ld\n",sizeof(p));
-// printf("size:%ld\n",sizeof(stack->elements));
-
-
-  // pop_stack(stack, NULL);
-
-
-// printf("stack-count:%d\n",stack->el_count);
   return integral_result;
 }
 
@@ -391,6 +377,8 @@ void pop_stack(
   memcpy(element, 
          (char*)stack->elements + stack->el_count*stack->el_size, 
          stack->el_size);
+
+  
 }
 
 

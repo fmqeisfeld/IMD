@@ -48,12 +48,12 @@
 # #CUSTOM MAKE MIT OPENMP ABER NUR FUER COLRAD
  # optflags=" -funroll-loops -march=corei7-avx -mtune=corei7-avx -mavx2 -ftree-vectorize -m64 -ffast-math"
 
-# gcc simpson_omp.c -fopenmp -lm -o a.out
-# exit 0
+gcc simpson_omp.c -pg -g -fopenmp -lm -o a.out
+exit 0
  #
  # 
  # #MIT OPENMP
- make clean
+ # make clean
  AVXFLAGS=" -m64 -mavx2 -march=broadwell "
  CFLAGS="-Wno-unused-variable -I/user/eisfeld/sundials-4.1.0/instdir/include  \
  		  -I/usr/local/include/gsl"  
