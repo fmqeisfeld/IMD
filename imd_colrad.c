@@ -130,6 +130,8 @@ struct my_f_params fparams_exc;
 
 realtype inner_integrand_ionization(realtype x, void *p); // integrate along E'
 realtype outer_integrand_ionization(realtype x,void *p);  // integrate along E
+realtype outer_integrand_ionization2(realtype x,struct my_f_params* p);
+
 realtype double_integral_ionization(realtype ne,realtype T, realtype mu, realtype DeltaE); //evaluates double integral
 
 
@@ -182,14 +184,12 @@ realtype k_EE_MAX, k_EI_MAX, k_EE_REV_MAX, k_EI_REV_MAX; //DEBUG PURPOSE
 realtype  integral_simpson(realtype (*f)(realtype, void*), realtype a, realtype b,int n,void* p);
 
 int simpson_error;
-const realtype tolmax=1e-20;
+const realtype tolmax=1e-24;
 #define INITIAL_STACK_SIZE 128   /* initial size of new stacks */
 
 
-
-realtype  
-integral_simpson_par(
-     realtype (*f)(realtype,void*), /* function to integrate */
+realtype  integral_simpson_par(
+     realtype (*f)(realtype, struct my_f_params*), /* function to integrate */
      realtype ah,           /* left interval boundary  */
      realtype bh,           /* right interval boundary */
      realtype tolh,
@@ -198,7 +198,8 @@ integral_simpson_par(
      realtype fb,
      realtype fm,
      int rec,
-     struct my_f_params* p); 
+     struct my_f_params* p);
+     // struct my_f_params* p); 
 
 
 /* the stack structure */
@@ -218,6 +219,7 @@ typedef struct _work_t{
   realtype fb;
   realtype fm;
   realtype rec;
+  struct my_f_params *p;
 } work_t;
 
 
@@ -2805,7 +2807,7 @@ if(DeltaE <0 )
   continue;
 
 
-if(RATEIONIZMAX*ne*fermi_factor*Ith(y,i+3)> MINRATE)
+if(RATEIONIZMAX*ne*fermi_factor*Ith(y,i+3)> MINRATE)  
       k_EI_z0_z1[i][j]=MAX(0.0,double_integral_ionization(ne,Te, mu, DeltaE*eV2J));
 
 if(RATERECOMBMAX*nesq*fermi_factor*Ith(y,j+z0_len+3) > MINRATE)
@@ -2880,7 +2882,13 @@ if(DeltaE <0 )
   continue;
 
 if(RATEIONIZMAX*ne*fermi_factor*Ith(y,i+z0_len+3)> MINRATE)
-      k_EI_z1_z2[i][j]=MAX(0.0,double_integral_ionization(ne,Te, mu, DeltaE*eV2J));
+{
+
+ k_EI_z1_z2[i][j]=MAX(0.0,double_integral_ionization(ne,Te, mu, DeltaE*eV2J));
+
+ if(myid==1)
+  printf("EVAL dE:%.4e, kEI:%.4e,i:%d,j:%d\n", DeltaE, k_EI_z1_z2[i][j],i,j); 
+}
 
 // if(kmax_estim*ne*ne*Ith(y,j+z0_len+z1_len+3)>MINRATE)
 if(RATERECOMBMAX*nesq*fermi_factor*Ith(y,j+z0_len+z1_len+3) > MINRATE)      
@@ -2964,7 +2972,10 @@ if(RATEIONIZMAX*ne*fermi_factor*Ith(y,i+z0_len+z1_len+3)> MINRATE)
 
 // if(kmax_estim*ne*ne*Ith(y,j+z0_len+z1_len+z2_len+3)>MINRATE)    
 if(RATERECOMBMAX*nesq*fermi_factor*Ith(y,j+z0_len+z1_len+z2_len+3) > MINRATE)
+{
       k_EI_z3_z2[i][j]=STATES_z2[i][3]/STATES_z3[j][3]*double_integral_recombination(ne,Te, mu, DeltaE*eV2J);
+}
+
 
 k_EI_MAX=MAX(k_EI_MAX,k_EI_z1_z2[i][j]);
 k_EI_REV_MAX=MAX(k_EI_REV_MAX,k_EI_z2_z1[i][j]);
@@ -3373,8 +3384,8 @@ realtype outer_integrand_ionization(realtype x,void *p)
   realtype integ_err;
  
 
-  // gsl_integration_qag(&gslfun_inner, 0.0, eng-DeltaE, integ_abstol, integ_reltol, integ_meshdim,1,
-  //                     winteg_inner, &integ_inner, &integ_err);  
+   gsl_integration_qag(&gslfun_inner, 0.0, eng-DeltaE, integ_abstol, integ_reltol, integ_meshdim,1,
+                       winteg_inner, &integ_inner, &integ_err);  
 
    // size_t evals;
    // gsl_integration_romberg(&gslfun_inner, 0.0, eng-DeltaE, 1e-4, integ_reltol, &integ_inner,
@@ -3382,38 +3393,77 @@ realtype outer_integrand_ionization(realtype x,void *p)
   
   // integ_inner = integral_simpson(&inner_integrand_ionization, 1e-40, eng-DeltaE, 5000, &fparams_inner);
 
-  realtype fa=inner_integrand_ionization(1e-20,p);
-  realtype fb=inner_integrand_ionization(eng-DeltaE,p);
-  realtype fm=inner_integrand_ionization((eng-DeltaE)/2,p);
-  realtype h=eng-DeltaE-0.0;
-  realtype Sinit=h/6*(fa+4*fm+fb);
-
-  fparams_inner.E=eng+1e-20;
-  #pragma omp parallel
-  {
-    integ_inner = integral_simpson_par(inner_integrand_ionization, 1e-20, eng-DeltaE, 1e-4,Sinit,fa,fb,fm,50,&fparams_inner);
-  } 
-
-if(myid==1)
-  printf("YAY:%.4e\n",integ_inner);
 
   return eng*fermi_fun*sigma_deriv*integ_inner;
 
 }
 
+realtype outer_integrand_ionization2(realtype x, struct my_f_params* p)
+{
+  realtype eng=x;
+  realtype DeltaE=p->DeltaE;
+  realtype T=p->T;
+  realtype ne=p->ne;
+  realtype mu=p->mu;
+
+  realtype fermi_fun=1.0/(1.0+EXPR((eng-mu)/BOLTZMAN/T));
+
+  // if(fermi_fun < 1e-100) return 0;
+
+  if(eng <= DeltaE)
+    return 0.0; //Cross section wird zu 0
+
+  realtype y=eng/DeltaE;
+
+  // realtype sigma_deriv = 4.0*M_PI*bohr_radius_sq*E_ion_H_sq_J * gsl_pow_2(1.0/DeltaE)*alpha_i*(y-1.0)/gsl_pow_2(y)*LOGR(5*beta_i*y/4) 
+                       // /2.0/(eng-DeltaE); 
+
+  //sigma_deriv: konstanten rausgezogen und nach double_integral_ionization verfrachtet
+  realtype sigma_deriv = (y-1.0)/POWR(y,2.0)*LOGR(beta_i*1.25*y)/(eng-DeltaE);
+
+
+  fparams_inner.T=p->T;
+  fparams_inner.ne=p->ne;
+  fparams_inner.mu=p->mu;
+  fparams_inner.DeltaE=p->DeltaE;
+  fparams_inner.E=eng;
+
+  gsl_function gslfun_inner;
+  gslfun_inner.function=&inner_integrand_ionization;
+  gslfun_inner.params=&fparams_inner;  
+
+  realtype integ_inner=0.0;
+  realtype integ_err;
+ 
+
+   gsl_integration_qag(&gslfun_inner, 0.0, eng-DeltaE, integ_abstol, integ_reltol, integ_meshdim,1,
+                       winteg_inner, &integ_inner, &integ_err);  
+
+   // size_t evals;
+   // gsl_integration_romberg(&gslfun_inner, 0.0, eng-DeltaE, 1e-4, integ_reltol, &integ_inner,
+                          // &evals, winteg_rb_inner);
+  
+  // integ_inner = integral_simpson(&inner_integrand_ionization, 1e-40, eng-DeltaE, 5000, &fparams_inner);
+
+
+  return eng*fermi_fun*sigma_deriv*integ_inner;
+
+}
+
+
 realtype double_integral_ionization(realtype ne,realtype T, realtype mu, realtype DeltaE)
 {
   // return 0;
 
-  gsl_function gslfun_outer;
-  gslfun_outer.function = &outer_integrand_ionization;
+  // gsl_function gslfun_outer;
+  // gslfun_outer.function = &outer_integrand_ionization;
 
-  fparams_outer.T=T;
-  fparams_outer.ne=ne;
-  fparams_outer.mu=mu;
-  fparams_outer.DeltaE=DeltaE;
+  // fparams_outer.T=T;
+  // fparams_outer.ne=ne;
+  // fparams_outer.mu=mu;
+  // fparams_outer.DeltaE=DeltaE;
 
-  gslfun_outer.params = &fparams_outer;
+  // gslfun_outer.params = &fparams_outer;
 
   realtype integ_outer=0;
   realtype integ_err=0;
@@ -3424,19 +3474,40 @@ realtype double_integral_ionization(realtype ne,realtype T, realtype mu, realtyp
   else      eupper=10.0*T/11604* eV2J+ DeltaE;         //nicht-entartet
 
 
-  gsl_integration_qag(&gslfun_outer, DeltaE*1.001, eupper, integ_abstol_ioniz, integ_reltol, integ_meshdim,1,
-                      winteg_outer, &integ_outer, &integ_err);  
+  // gsl_integration_qag(&gslfun_outer, DeltaE*1.001, eupper, integ_abstol_ioniz, integ_reltol, integ_meshdim,1,
+  //                     winteg_outer, &integ_outer, &integ_err);  
 
   // integ_outer = integral_simpson(&outer_integrand_ionization, DeltaE*1.001, eupper, 1000, &fparams_outer);
 
-  integ_outer *= 2.0*M_PI*bohr_radius_sq*E_ion_H_sq_J * gsl_pow_2(1.0/DeltaE)*alpha_i; //konstanten aus sigma_deriv herausgezogen
+  struct my_f_params p;
+  p.T=T;
+  p.ne=ne;
+  p.mu=mu;
+  p.DeltaE=DeltaE;
 
-  //Romberg hängt sich hier auf
-  // size_t evals;
-  // gsl_integration_romberg(&gslfun_outer, DeltaE*1.001, muINF,0.0, integ_reltol, &integ_outer,
-                          // &evals, winteg_rb_outer);
+  realtype fa=outer_integrand_ionization2(DeltaE*1.001,&p);
+  realtype fb=outer_integrand_ionization2(eupper,&p);
+  realtype fm=outer_integrand_ionization2((eupper-DeltaE*1.001)/2,&p);
+  realtype h=eupper-DeltaE*1.001;
+
+  realtype Sinit=h/6*(fa+4*fm+fb);
+  simpson_error=0;
+  #pragma omp parallel
+  {
+    integ_outer = integral_simpson_par(outer_integrand_ionization2, DeltaE*1.001, eupper, 1e-3,Sinit,fa,fb,fm,50,&p);
+  } 
+// if(myid==1 && integ_outer > 0)  
+  // printf("dE:%.4e, T:%.4e, mu:%.4e, ne:%.4e, integ:%.4e\n",DeltaE*J2eV,T,mu,ne,integ_outer);
+
+
+
+  if(simpson_error)
+    printf("myid:%d, simpson error!\n",myid);
+
+
 
   // if(integ_outer<MINRATE) integ_outer=0.0;
+  integ_outer *= 2.0*M_PI*bohr_radius_sq*E_ion_H_sq_J * gsl_pow_2(1.0/DeltaE)*alpha_i; //konstanten aus sigma_deriv herausgezogen
   integ_outer *= ioniz_const / ne; //ACHTUNG: Später ne entfernenu und in ydot nicht mehr multiplizieren!
   return MAX(integ_outer,0.0);
 
@@ -3715,10 +3786,8 @@ realtype integrand_excitation(realtype x,void *p)
 // ****************************************************************************
 // *  PARALLEL SIMPSON INTEGERAL STUFF
 // ****************************************************************************
-
-
 realtype  integral_simpson_par(
-     realtype (*f)(realtype,void*), /* function to integrate */
+     realtype (*f)(realtype,struct my_f_params*),
      realtype ah,                   /* left interval boundary  */
      realtype bh,                   /* right interval boundary */
      realtype tolh,
@@ -3727,10 +3796,10 @@ realtype  integral_simpson_par(
      realtype fbh,
      realtype fmid,
      int recmax, 
-     struct my_f_params* p)   //param. struct
-
+     struct my_f_params* p)
+     //struct my_f_params* p)   //param. struct
 {
-  simpson_error=0;
+  // simpson_error=0;
 
   realtype a, b, tolerance;       /* vars poped from stack */
   realtype integral_result;       /* value to return */
@@ -3738,8 +3807,7 @@ realtype  integral_simpson_par(
   realtype mid;                   /* center of interval */
   // realtype one_trapezoid_area;    /* area of one trapezoid */
   // realtype two_trapezoid_area;    /* area of two trapezoids */
-  realtype left_area;             /* integral of left half interval */
-  realtype right_area;            /*     "       right    "         */
+
 
   stack_t stack;
   work_t work;
@@ -3755,16 +3823,16 @@ realtype  integral_simpson_par(
   work.fb=fbh;
   work.rec=recmax;
   work.fm=fmid;
+  work.p=p;
 
   create_stack(&stack, sizeof(work_t));
   push_stack(stack, &work);
 
   integral_result = 0.0;
-
   busy = 0;
 
 #pragma omp parallel default(none) \
-    shared(stack, integral_result,f,busy,simpson_error,p) \
+    shared(stack, integral_result,f,busy,simpson_error) \
     private(a,b,tolerance, work, h, mid, \
             idle, ready,myid)
   {
@@ -3772,22 +3840,24 @@ realtype  integral_simpson_par(
     ready = 0;
     idle = 1;
 
-    while(!ready && !simpson_error)
+    while(!ready) // && !simpson_error)
     {
 
 #pragma omp critical (stack)
       {
-        if (!empty_stack(stack)){
+        if (!empty_stack(stack))
+        {
           /* we have new work */ 
           pop_stack(stack, &work);
-
-          if (idle){
+          if (idle)
+          {
             /* say others i'm busy */
             busy += 1;
             idle = 0;
           }
-
-        }else{
+        }
+        else
+        {
           /* no new work on stack */
           if (!idle){
             busy -= 1;
@@ -3811,6 +3881,7 @@ realtype  integral_simpson_par(
       realtype fa=work.fa;
       realtype fb=work.fb;
       realtype fm=work.fm;
+
       int rec=work.rec;
 
       h = (b - a)/2;
@@ -3818,13 +3889,10 @@ realtype  integral_simpson_par(
       realtype lm=(a+mid)/2;
       realtype rm=(mid+b)/2;    
 
-      realtype flm=f(lm,p);
-      realtype frm=f(rm,p);
 
-//struct my_f_params { realtype ne; realtype T;realtype mu; realtype E;realtype DeltaE; int allowed;};
-// if(myid==0)
-// printf("S:%.4e,lm:%.4e, rm:%.4e, a:%.4e, b:%.4e, flm:%.4e, frm:%.4e, ne:%.4e, T:%.4e, E:%.4e, De:%.4e\n",
-//         S,lm,rm,a,b,flm,frm,p->ne, p->T, p->E,p->DeltaE);
+      realtype flm=f(lm,work.p);
+      realtype frm=f(rm,work.p);
+
 
       realtype Sl=h/6*(fa+4*flm+fm);
       realtype Sr=h/6*(fm+4*frm+fb);
@@ -3839,15 +3907,17 @@ realtype  integral_simpson_par(
       else // error not acceptable
       {
         // serious numerical trouble: it won't converge
-        if ((tolerance/2 == tolerance) || a==lm) // <= tolerance) // || tolerance < tolmax) 
+        if ((tolerance/2 == tolerance) || ABS(a-lm) <= tolerance || tolerance < tolmax) //a==lm) // <= tolerance) // || tolerance < tolmax) 
         { 
             simpson_error = 1; 
+            printf("\n\n myid:%d,simpson error!\n",myid);
+
 #pragma omp critical (integral_result)            
             integral_result = S;      
         }
         else
         {
-          //push new subintervals to stack
+          // //push new subintervals to stack
           work.a = a;
           work.b = mid;
           work.tol = tolerance/2;
@@ -3857,9 +3927,9 @@ realtype  integral_simpson_par(
           work.fm=flm;
           work.rec=rec-1;
 
-
     #pragma omp critical (stack)
           {
+
             //Linke Seite
             push_stack(stack, &work);      
             //Rechte seite
@@ -3879,6 +3949,12 @@ realtype  integral_simpson_par(
       }
     } /* while */
   } /* end omp parallel */
+  
+  // #pragma omp critical (stack)
+  // {
+    free(stack->elements);
+    free(stack);    
+  // }
 
   return integral_result;
 }
@@ -3886,8 +3962,7 @@ realtype  integral_simpson_par(
 /******************************************
  * create new stack
  ******************************************/
-void 
-create_stack(
+void create_stack(
              stack_t* stack,     /* stack to create */
              int element_size)   /* size of a stack element */
 {
@@ -3919,9 +3994,7 @@ create_stack(
 /*****************************************
  * check if the stack is empty 
  *****************************************/
-int 
-empty_stack
-(stack_t stack)
+int empty_stack(stack_t stack)
 {
   return stack->el_count <= 0;
 }
@@ -3930,16 +4003,15 @@ empty_stack
 /*****************************************
  * push a element on stack
  *****************************************/
-void 
-push_stack(
-           stack_t stack,    /* target stack */
+void push_stack(stack_t stack,    /* target stack */
            void* element)    /* element to push */
 {
   int i, new_reserve;
   int log2_count;
 
   /* check if we need more memory for stack */    
-  if (stack->el_count >= stack->mem_reserve){
+  if (stack->el_count >= stack->mem_reserve)
+  {
 
       /* calculate new size for the stack
          it should be a power of two */
@@ -3973,8 +4045,7 @@ push_stack(
 /*****************************************
  * pop an element from stack
  *****************************************/
-void 
-pop_stack(
+void pop_stack(
           stack_t stack,    /* target stack */
           void* element)    /* where poped el. should be stored */
 {

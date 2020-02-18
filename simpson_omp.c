@@ -19,19 +19,6 @@ const double tolmax=1e-20;
 
 
 
-double  
-integral2(
-     double (*f)(double), /* function to integrate */
-     double ah,           /* left interval boundary  */
-     double bh,           /* right interval boundary */
-     double tolh,
-     double S,
-     double fa,
-     double fb,
-     double fm,
-     int rec); 
-
-
 /* the stack structure */
 struct stack_s{               
   int el_count;            /* count of elements on stack */    
@@ -39,6 +26,11 @@ struct stack_s{
   int mem_reserve;         /* allocated memory for stack */
   void* elements;          /* pointer to begin of stack */
 };
+
+
+struct my_f_params { double ne; double T;double mu; double E;double DeltaE; int allowed;};
+struct my_f_params fpar; 
+
 
 typedef struct _work_t{
   double a;
@@ -49,6 +41,7 @@ typedef struct _work_t{
   double fb;
   double fm;
   double rec;
+  struct my_f_params * p; //pointer auf params
 } work_t;
 
 
@@ -60,10 +53,23 @@ int empty_stack(stack_t stack);
 void push_stack(stack_t stack, void* element);
 void pop_stack(stack_t stack, void* element);
 
+double  
+integral2(
+     double (*f)(double,struct my_f_params*), /* function to integrate */
+     double ah,           /* left interval boundary  */
+     double bh,           /* right interval boundary */
+     double tolh,
+     double S,
+     double fa,
+     double fb,
+     double fm,
+     int rec,
+     struct my_f_params* p); 
 
-static double myfun(double x){  funcevals++; return  exp(-x*x);}
-static float sinfc(float x) { return sinf(x); } 
-static double frand48c(double x) { funcevals++; return (double) drand48(); } 
+
+static double myfun(double x,struct my_f_params* p){  funcevals++; return  exp(-x*x)/p->T+log(x*pow(p->T,2.0))/p->ne;}
+// static float sinfc(float x) { return sinf(x); } 
+// static double frand48c(double x) { funcevals++; return (double) drand48(); } 
 
 int main(int argc,char** argv)
 {
@@ -72,29 +78,38 @@ int main(int argc,char** argv)
   double pi=3.141592653589793;
   double xmin, xmax;
   double answer = 0.0;
-  double tm;
+
   int i;
 
-  xmin = -4.0;
-  xmax = 4.0;
+  xmin = 1.0;
+  xmax = 14.0;
   
-  double (*func)(double)= frand48c;
-  //double (*func)(double)=  myfun;
+  // double (*func)(double)= frand48c;
+double T0=10;
+double ne0=1e10;
+for(i=0;i<50;i++)  
+{  
+  struct my_f_params ptest;
+  ptest.T=T0+10*i;
+  ptest.ne=pow(ne0,i/2);
 
-  double fa=func(xmin);
-  double fb=func(xmax);
-  double fm=func((xmin+xmax)/2);
+  double fa=myfun(xmin,&ptest);
+  double fb=myfun(xmax,&ptest);
+  double fm=myfun((xmin+xmax)/2, &ptest);
   double h=xmax-xmin;
   double Sinit=h/6*(fa+4*fm+fb);
-  printf("Sinit:%.4e\n",Sinit);
+  // printf("Sinit:%.4e\n",Sinit);
+
+
   #pragma omp parallel
   {
-    answer = integral2(func, xmin, xmax, 1e-6,Sinit,fa,fb,fm,50);
+    answer = integral2(myfun, xmin, xmax, 1e-6,Sinit,fa,fb,fm,50, &ptest);
   } /* omp parallel */
 
-  printf("err:%d,feval:%d\n",simpson_error,funcevals);
-  printf("The integral is approximately %.12f\n", answer);
-  printf("The exact answer is           %.12f\n", sqrt(pi));
+  // printf("err:%d,feval:%d\n",simpson_error,funcevals);
+  printf("The integral is approximately %.15e\n", answer);
+}
+  // printf("The exact answer is           %.12f\n", sqrt(pi));
 
   return 0;
 }
@@ -102,7 +117,7 @@ int main(int argc,char** argv)
 
 double  
 integral2(
-     double (*f)(double), /* function to integrate */
+     double (*f)(double, struct my_f_params*), /* function to integrate */
      double ah,           /* left interval boundary  */
      double bh,           /* right interval boundary */
      double tolh,
@@ -110,8 +125,8 @@ integral2(
      double fah,
      double fbh,
      double fmid,
-     int recmax)
-
+     int recmax,
+     struct my_f_params* p)
 {
   simpson_error=0;
 
@@ -121,8 +136,8 @@ integral2(
   double mid;                   /* center of interval */
   // double one_trapezoid_area;    /* area of one trapezoid */
   // double two_trapezoid_area;    /* area of two trapezoids */
-  double left_area;             /* integral of left half interval */
-  double right_area;            /*     "       right    "         */
+  // double left_area;             /* integral of left half interval */
+  // double right_area;                 "       right    "         
 
   stack_t stack;
   work_t work;
@@ -138,7 +153,9 @@ integral2(
   work.fb=fbh;
   work.rec=recmax;
   work.fm=fmid;
+  work.p=p;
 
+  
   create_stack(&stack, sizeof(work_t));
   push_stack(stack, &work);
 
@@ -155,7 +172,7 @@ integral2(
     ready = 0;
     idle = 1;
 
-    while(!ready && !simpson_error)
+    while(!ready )//&& !simpson_error) //<-- so NICHT!
     {
 
 #pragma omp critical (stack)
@@ -201,8 +218,8 @@ integral2(
       double lm=(a+mid)/2;
       double rm=(mid+b)/2;      
 
-      double flm=f(lm);
-      double frm=f(rm);
+      double flm=f(lm,work.p);
+      double frm=f(rm,work.p);
       
       double Sl=h/6*(fa+4*flm+fm);
       double Sr=h/6*(fm+4*frm+fb);
@@ -219,9 +236,10 @@ integral2(
         // serious numerical trouble: it won't converge
         if ((tolerance/2 == tolerance) || fabs(a-lm) <= tolerance || tolerance < tolmax) 
         { 
-            simpson_error = 1; 
-#pragma omp critical (integral_result)            
-            integral_result = S;      
+             simpson_error = 1; 
+             //printf("ERRNÖÖ\n");
+  #pragma omp critical (integral_result)            
+             integral_result = S;      
         }
         else
         {
@@ -258,6 +276,20 @@ integral2(
     } /* while */
   } /* end omp parallel */
 
+ //int i;
+ //for(i=0;i<stack->el_count;i++)
+ free(stack->elements);
+
+// int * p;
+// p=malloc(sizeof(int)*10000);
+// printf("size2:%ld\n",sizeof(p));
+// printf("size:%ld\n",sizeof(stack->elements));
+
+
+  // pop_stack(stack, NULL);
+
+
+// printf("stack-count:%d\n",stack->el_count);
   return integral_result;
 }
 
@@ -346,8 +378,7 @@ push_stack(
 /*****************************************
  * pop an element from stack
  *****************************************/
-void 
-pop_stack(
+void pop_stack(
           stack_t stack,    /* target stack */
           void* element)    /* where poped el. should be stored */
 {
