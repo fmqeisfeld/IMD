@@ -161,27 +161,32 @@ double tmm_K2(double nu);
 double tmm_K1(double nu);
 #endif
 
+
+// Verschoben nach imd_colrad.h
 #ifdef COLRAD
-int colrad_ydot(double t, N_Vector u, N_Vector udot, void *user_data);
-void do_Saha(double Te,double totalc,double ne,N_Vector y);
-int colrad_GetCoeffs(N_Vector y,double It, void * user_data);
 void do_colrad(double dt);
-
-//double ExpInt(double x);
-// double fak(double t, double x, double j,double s); //aux. function for genexpint
-// double genexpint(double x,double ss,double j);
-// double EscapeFactor(double w,double tau0);
-// double StarkWidth(double nu,double nl,double Te,double Ti,double Tr,double Ne,double Ni);
-// double EinsteinCoeff(double n1,double n2,double g2,double DeltaE);
-
-//folgende funcs sind alle für Berechnung des Transmission/Escape-Faktors!
-// double Lorentzian(double w,double lambda); //both params in angs!
-// double integrand(double w,double lambda,double tau,double phi0); // integrant von T=int[ exp(-tau*phi*phi0)*phi dx ]
-// double trapz(double a,double b,int n,double w,double tau); //integriert die func. "integrand"
-void colrad_read_states(void);
 void colrad_init(void);
-void colrad_Saha_init(int i,int j,int k);
+// int colrad_ydot(double t, N_Vector u, N_Vector udot, void *user_data);
+// void do_Saha(double Te,double totalc,double ne,N_Vector y);
+// int colrad_GetCoeffs(N_Vector y,double It, void * user_data);
+// void do_colrad(double dt);
+
+// //double ExpInt(double x);
+// // double fak(double t, double x, double j,double s); //aux. function for genexpint
+// // double genexpint(double x,double ss,double j);
+// // double EscapeFactor(double w,double tau0);
+// // double StarkWidth(double nu,double nl,double Te,double Ti,double Tr,double Ne,double Ni);
+// // double EinsteinCoeff(double n1,double n2,double g2,double DeltaE);
+
+// //folgende funcs sind alle für Berechnung des Transmission/Escape-Faktors!
+// // double Lorentzian(double w,double lambda); //both params in angs!
+// // double integrand(double w,double lambda,double tau,double phi0); // integrant von T=int[ exp(-tau*phi*phi0)*phi dx ]
+// // double trapz(double a,double b,int n,double w,double tau); //integriert die func. "integrand"
+// void colrad_read_states(void);
+// void colrad_init(void);
+// void colrad_Saha_init(int i,int j,int k);
 #endif
+
 #ifdef FDTD
 int init_fdtd(void);
 void init_pml(void);
