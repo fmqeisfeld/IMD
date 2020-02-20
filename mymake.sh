@@ -48,7 +48,7 @@
 # #CUSTOM MAKE MIT OPENMP ABER NUR FUER COLRAD
 
 
-gcc simpson_omp.c -O2 -fopenmp -lm -lgsl -lgslcblas -o a.out
+gcc simpson_omp.c -g -fopenmp -lm -lgsl -lgslcblas -o a.out
 exit 0
  #
  # 
