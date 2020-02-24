@@ -638,6 +638,10 @@ void move_atoms_ttm(void)
 #ifdef LOADBALANCE
       int i_global=(int) (ORT(p,i,X)/fd_h.x) ;
       fd_xi=xiarr_global[i_global];
+#ifdef VLATTICE
+      if(i_global >= last_active_cell_global)
+        fx_xi=0.0;
+#endif      
 #endif
 
 #ifdef DEBUG
@@ -688,6 +692,12 @@ void move_atoms_ttm(void)
   #endif
 #endif
 
+
+#ifdef NRB
+    if(NRBBND(p,i) == 0) //Nur nicht-bnd atome werden aufgeheizt!
+    {
+#endif  
+
 #ifdef LOADBALANCE    
       IMPULS(p,i,X) += timestep * ( KRAFT(p,i,X) + fd_xi * MASSE(p,i) * ( IMPULS(p,i,X)/MASSE(p,i) - vcomxglobal[i_global]) );
       IMPULS(p,i,Y) += timestep * ( KRAFT(p,i,Y) + fd_xi * MASSE(p,i) * ( IMPULS(p,i,Y)/MASSE(p,i) - vcomyglobal[i_global]) );
@@ -697,6 +707,9 @@ void move_atoms_ttm(void)
       IMPULS(p,i,Y) += timestep * ( KRAFT(p,i,Y) + fd_xi * MASSE(p,i) * ( IMPULS(p,i,Y)/MASSE(p,i) - l1[fd_i][fd_j][fd_k].vcomy) );
       IMPULS(p,i,Z) += timestep * ( KRAFT(p,i,Z) + fd_xi * MASSE(p,i) * ( IMPULS(p,i,Z)/MASSE(p,i) - l1[fd_i][fd_j][fd_k].vcomz) );
 #endif
+#ifdef NRB      
+    }
+#endif      
 
       /* MY MOD DEBUG */
       //IMPULS(p,i,X)=0;
