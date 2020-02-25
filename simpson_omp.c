@@ -75,11 +75,14 @@ typedef struct _work_t_gkq{
   double fb;
   double *y; //pointer auf y-array
   struct my_f_params * p; //pointer auf params
+  double (*f)(double, struct my_f_params*);
+  double *result;
 } work_gkq;
 
 
 typedef struct stack_s* stack_t;
 
+stack_t stack;  //global stack
 
 
 // **************************************** FUNCTION DEFS *************************************************
@@ -95,8 +98,8 @@ integral2(
      stack_t stack);
 
 
-double gkq_adapt(double (*f)(double, struct my_f_params*), stack_t stack);
-double gkq(double (*f)(double, struct my_f_params*), double a, double b, double TOL, struct my_f_params* p,stack_t stack);
+double gkq_adapt(void);//, stack_t stack);
+double gkq(double (*f)(double, struct my_f_params*), double a, double b, double TOL, struct my_f_params* p);//,stack_t stack);
 double gkq_adapt_serial(double (*f)(double, struct my_f_params*), double a, double b, double fa,double fb, double toler,double I_13, struct my_f_params* p);
 int terminate_serial;
 int terminate_gkq;
@@ -161,11 +164,11 @@ static double myfun(double x,struct my_f_params* p)
   //                      gsinner2, &result, &err);  
 
   // gsl_integration_workspace_free(gsinner2);
-  stack_t stack2;  
-  create_stack(&stack2, sizeof(work_gkq));
+  // stack_t stack2;  
+  // create_stack(&stack2, sizeof(work_gkq));
 
-  double result=gkq(inner_integrand2, x, 600, 1e-3, p, stack2);
-  free(stack2->elements);
+  double result=gkq(inner_integrand2, x, 600, 1e-3, p);//, stack);
+  // free(stack2->elements);
 
 
   return sigma*result;
@@ -260,14 +263,15 @@ int main(int argc,char** argv)
 
   printf("gslres:%.12e, gsltime:%.4e\n", gslinteg, gsltime);
   // *************************************************
-  stack_t stack;  
+  
   create_stack(&stack, sizeof(work_gkq));
 
   gettimeofday(&start, NULL);     
-  double integ=gkq(myfun, xmin, xmax, 1e-8, &ptest,stack);
+  double integ=gkq(myfun, xmin, xmax, 1e-8, &ptest);//,stack);
   
   gettimeofday(&end, NULL);
   free(stack->elements);
+  free(stack);
 
   double partime = ((end.tv_sec  - start.tv_sec) * 1000000u + 
                      end.tv_usec - start.tv_usec) /1.e6;
@@ -388,7 +392,7 @@ void pop_stack(
 // ***************************************************************************
 // *      Gauss-kronard quadrature
 // ***************************************************************************
-double gkq(double (*f)(double, struct my_f_params*), double a, double b, double TOL, struct my_f_params* p,stack_t stack)
+double gkq(double (*f)(double, struct my_f_params*), double a, double b, double TOL, struct my_f_params* p)//,stack_t stack)
 {
   //1st integration
 
@@ -431,9 +435,9 @@ double gkq(double (*f)(double, struct my_f_params*), double a, double b, double 
   I_13=fabs(I_13);
 
   
+  
   //Prepare work and push onto stack
   work_gkq work;
-
   work.a = a;
   work.b = b;
   work.toler = toler;
@@ -442,13 +446,16 @@ double gkq(double (*f)(double, struct my_f_params*), double a, double b, double 
   work.fb=fb;
   work.p=p;
   work.y=y;
+  work.result=&result;
+  work.f=f;
+
   
   // ALLOC INNER WS FOR INTEGR.
   // gsl_integration_workspace *gsinner2=  gsl_integration_workspace_alloc (1000); 
   
 
   push_stack(stack, &work); 
-  result=gkq_adapt(f,stack);
+  gkq_adapt();//,stack);
   
 
   // result=gkq_adapt_serial(f,a,b,fa,fb,toler,I_13, p);  
@@ -508,16 +515,15 @@ double gkq_adapt_serial(double (*f)(double, struct my_f_params*), double a, doub
 
 }
 
-double gkq_adapt(double (*f)(double, struct my_f_params*), stack_t stack)
+double gkq_adapt(void) //, stack_t stack)
 {
   work_gkq work;
   int ready, idle, busy;
-  double integral_result = 0.0;  
-
+  double integral_result = 0.0;    
   busy = 0;
-  
+  double *result=NULL;
 #pragma omp parallel default(none) \
-    shared(stack, integral_result,f,busy,terminate_gkq) \
+    shared(stack, integral_result,busy,terminate_gkq,result) \
     private(work, idle, ready)
   {  
 // printf("me:%d, err:%d\n",omp_get_thread_num(),simpson_error);    
@@ -525,7 +531,7 @@ double gkq_adapt(double (*f)(double, struct my_f_params*), stack_t stack)
     ready = 0;
     idle = 1;
 
-    while(!ready && !terminate_gkq)//  && !simpson_error) //<-- so NICHT!
+    while(!ready) // && !terminate_gkq)//  && !simpson_error) //<-- so NICHT!
     {
       #pragma omp critical (stack)
       {
@@ -558,7 +564,7 @@ double gkq_adapt(double (*f)(double, struct my_f_params*), stack_t stack)
 
       if (idle)
         continue; //if ready==1 --> leave loop
-
+      double (*f)(double, struct my_f_params*) = work.f;
       double a = work.a;
       double b = work.b;      
       double toler = work.toler;    
@@ -582,19 +588,25 @@ double gkq_adapt(double (*f)(double, struct my_f_params*), stack_t stack)
       double fmrr=f(mrr,p);
       double I_4=h/6.0*(fa+fb+5.0*(fml+fmr));   // 4-point Gauss-Lobatto formula.
       double I_7=h/1470.0*(77.0*(fa+fb)+432.0*(fmll+fmrr)+625.0*(fml+fmr)+672.0*fm);
+
+// double *result=NULL;
+
+result=work.result;
       
 
       if (fabs(I_7-I_4) <= toler*I_13 || mll <= a || b <= mrr) 
       {
-        if ((mll <= a || b <= mrr) && !terminate_gkq) //Error
+        if ((mll <= a || b <= mrr))// && !terminate_gkq) //Error
          {
            // out_of_tolerance=true; // Interval contains no more machine numbers
            printf("OUT OF TOLERANCE !!!, mll:%.4e, a:%.4e, b:%.4e, mrr:%.4e\n", mll,b,b,mrr);
            terminate_gkq=1;  
          }
-        #pragma omp critical (integral_result)            
+        //#pragma omp critical (integral_result)            
+        #pragma omp task           
         {
-          integral_result += I_7;      //Terminate recursion.  
+          //integral_result += I_7;      //Terminate recursion.  
+          *result=*result+I_7;
         }        
 // printf("me ok:%d, a:%f,b:%f, tler:%.5e,I_4:%f,I_7:%f,ubteg;%.4e\n", omp_get_thread_num(), a,b,toler,I_4,I_7,integral_result);        
 
@@ -649,7 +661,7 @@ double gkq_adapt(double (*f)(double, struct my_f_params*), stack_t stack)
 
 
 
-  return integral_result;    
+  return 0;    
 }
 
 
