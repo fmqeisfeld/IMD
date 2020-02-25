@@ -47,9 +47,8 @@
 
 # #CUSTOM MAKE MIT OPENMP ABER NUR FUER COLRAD
 
-
-gcc simpson_omp.c -g -fopenmp -lm -lgsl -lgslcblas -o a.out
-exit 0
+# gcc simpson_omp.c -g -fopenmp -lm -lgsl -lgslcblas -o a.out
+# exit 0
  #
  # 
  # #MIT OPENMP
@@ -74,7 +73,7 @@ exit 0
  		 imd_fix_cells_3d.c imd_mpiio.c imd_mpi_util.c imd.c imd_ttm.c imd_interpol.c fminbnd3.c \
  		 imd_tmm.c imd_colrad.c imd_forces_nbl.c imd_integrate.c \
  		 imd_loadBalance.c imd_loadBalance_direct.c
- mpicc   -o imd_mpi_eam_ttm_tmm_nbl_colrad_loadbalance imd_maxwell.o imd_integrate.o imd_misc.o imd_param.o imd_alloc.o imd_io.o imd_io_3d.o \
+ mpicc   -O2 -o imd_mpi_eam_ttm_tmm_nbl_colrad_loadbalance imd_maxwell.o imd_integrate.o imd_misc.o imd_param.o imd_alloc.o imd_io.o imd_io_3d.o \
  		 imd_loadBalance.o imd_loadBalance_direct.o\
 		 imd_potential.o imd_time.o imd_generate.o imd_distrib.o imd_main_3d.o imd_geom_3d.o imd_pictures_3d.o imd_geom_mpi_3d.o \
 		 imd_comm_force_3d.o imd_fix_cells_3d.o imd_mpiio.o imd_mpi_util.o imd.o imd_ttm.o imd_interpol.o fminbnd3.o imd_tmm.o imd_colrad.o \

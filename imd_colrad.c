@@ -76,8 +76,8 @@ const int    integ_meshdim =1500;
 // const Real alpha_i =0.3; //0.05; //0.3;
 // const Real beta_i  =0.9; //4.0 ; //0.9;
 
-const Real alpha_i =0.05; //0.3;
-const Real beta_i  =4.0 ; //0.9;
+const Real alpha_i =0.3; //0.05; //0.3;
+const Real beta_i  =0.9; //4.0 ; //0.9;
 
 const Real ioniz_const = 1.573949440579906e+71; // konstanten zus. gefasst und aus dem doppelintegral gezogen
 const Real recomb_const= 6.213703330335829e+72; // selbes für 3b-recomb.
@@ -2496,7 +2496,7 @@ int colrad_GetCoeffs(N_Vector y,Real It,void *user_data)
 
 #ifdef OMP
 //#pragma omp parallel for schedule(dynamic,1) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2) num_threads(num_threads)
-  #pragma omp for simd schedule(static) private(j,kronecker,DeltaE,fparams_exc, winteg_exc)
+  // #pragma omp for simd schedule(static) private(j,kronecker,DeltaE,fparams_exc, winteg_exc)
   // #pragma omp for simd schedule(static) collapse(2) private(kronecker,DeltaE,a,expint,G2,I_1,I_2)
 #endif
   
@@ -2533,7 +2533,7 @@ int colrad_GetCoeffs(N_Vector y,Real It,void *user_data)
   ///////////////////////
   fail=0;
 #ifdef OMP
-  #pragma omp for simd schedule(static) private(j,kronecker,DeltaE,fparams_exc,winteg_exc)
+  // #pragma omp for simd schedule(static) private(j,kronecker,DeltaE,fparams_exc,winteg_exc)
 #endif
   for(i=0;i<z1_len;++i)
   {
@@ -2568,7 +2568,7 @@ int colrad_GetCoeffs(N_Vector y,Real It,void *user_data)
 
   fail=0;
 #ifdef OMP
-  #pragma omp for simd schedule(static) private(j,kronecker,DeltaE,fparams_exc,winteg_exc)
+  // #pragma omp for simd schedule(static) private(j,kronecker,DeltaE,fparams_exc,winteg_exc)
 #endif
   for(i=0;i<z2_len;++i)
   {
@@ -2606,7 +2606,7 @@ int colrad_GetCoeffs(N_Vector y,Real It,void *user_data)
 
   fail=0;
   #ifdef OMP
-  #pragma omp for simd schedule(static) private(j,kronecker,DeltaE,fparams_exc,winteg_exc)
+  // #pragma omp for simd schedule(static) private(j,kronecker,DeltaE,fparams_exc,winteg_exc)
   #endif
   for(i=0;i<z3_len;++i)
   {
@@ -2644,7 +2644,7 @@ int colrad_GetCoeffs(N_Vector y,Real It,void *user_data)
 
   fail=0;
 #ifdef OMP
-  #pragma omp for simd schedule(static) private(j,kronecker,DeltaE,fparams_exc,winteg_exc)
+  // #pragma omp for simd schedule(static) private(j,kronecker,DeltaE,fparams_exc,winteg_exc)
 #endif
   for(i=0;i<z4_len;++i)
   {
@@ -2696,7 +2696,7 @@ if(DeltaE <0 )
 
 
 if(RATEIONIZMAX*ne*fermi_factor*Ith(y,i+3)> MINRATE)  
-      k_EI_z0_z1[i][j]=MAX(0.0,double_integral_ionization(ne,Te, mu, DeltaE*eV2J));
+      k_EI_z0_z1[i][j]=MAX(0.0,double_integral_ionization2(ne,Te, mu, DeltaE*eV2J));
 
 if(RATERECOMBMAX*nesq*fermi_factor*Ith(y,j+z0_len+3) > MINRATE)
       k_EI_z1_z0[i][j]=STATES_z0[i][3]/STATES_z1[j][3]*double_integral_recombination(ne,Te, mu, DeltaE*eV2J);      
@@ -2772,7 +2772,7 @@ if(DeltaE <0 )
 if(RATEIONIZMAX*ne*fermi_factor*Ith(y,i+z0_len+3)> MINRATE)
 {
 
- k_EI_z1_z2[i][j]=MAX(0.0,double_integral_ionization(ne,Te, mu, DeltaE*eV2J));
+ k_EI_z1_z2[i][j]=MAX(0.0,double_integral_ionization2(ne,Te, mu, DeltaE*eV2J));
 
  // if(myid==1)
   // printf("EVAL dE:%.4e, kEI:%.4e,i:%d,j:%d\n", DeltaE, k_EI_z1_z2[i][j],i,j); 
@@ -2855,7 +2855,7 @@ if(DeltaE <0 )
   continue;
 
 if(RATEIONIZMAX*ne*fermi_factor*Ith(y,i+z0_len+z1_len+3)> MINRATE)
-      k_EI_z2_z3[i][j]=MAX(0.0,double_integral_ionization(ne,Te, mu, DeltaE*eV2J));
+      k_EI_z2_z3[i][j]=MAX(0.0,double_integral_ionization2(ne,Te, mu, DeltaE*eV2J));
 
 // if(kmax_estim*ne*ne*Ith(y,j+z0_len+z1_len+z2_len+3)>MINRATE)    
 if(RATERECOMBMAX*nesq*fermi_factor*Ith(y,j+z0_len+z1_len+z2_len+3) > MINRATE)
@@ -2921,7 +2921,7 @@ if(DeltaE <0 )
 
 
 if(RATEIONIZMAX*ne*fermi_factor*Ith(y,i+z0_len+z1_len+z2_len+3)> MINRATE)
-      k_EI_z3_z4[i][j]=MAX(0.0,double_integral_ionization(ne,Te, mu, DeltaE*eV2J));
+      k_EI_z3_z4[i][j]=MAX(0.0,double_integral_ionization2(ne,Te, mu, DeltaE*eV2J));
 
 // if(kmax_estim*ne*ne*Ith(y,j+z0_len+z1_len+z2_len+z3_len+3)>MINRATE)    
 if(RATERECOMBMAX*nesq*fermi_factor*Ith(y,j+z0_len+z1_len+z2_len+z3_len+3) > MINRATE)      
@@ -3148,6 +3148,7 @@ double outer_integrand_recombination(double x,void *p)
   Real fermi_fun=1.0/(1.0+EXPR((E-mu)/BOLTZMAN/T));
   Real Pauli_E = 1.0-fermi_fun;
 
+  struct my_f_params fparams_inner;
   fparams_inner.T=T;
   fparams_inner.ne=ne;
   fparams_inner.mu=mu;
@@ -3173,9 +3174,20 @@ double outer_integrand_recombination(double x,void *p)
   // gsl_integration_qag(&gslfun_inner, 1e-21, E-DeltaE, 1e-4, 1e-4, integ_meshdim,1,
                       // winteg_inner, &integ_inner, &integ_err);  
 
-  size_t evals;
-  gsl_integration_romberg(&gslfun_inner, 1e-21, E-DeltaE, 1e-4, 1e-4, &integ_inner,
-                         &evals, winteg_rb_inner);
+  // size_t evals;
+  // gsl_integration_romberg(&gslfun_inner, 1e-21, E-DeltaE, 1e-4, 1e-4, &integ_inner,
+                         // &evals, winteg_rb_inner);
+
+
+  stack_t stack2;  
+  create_stack(&stack2, sizeof(work_gkq));
+
+  integ_inner=gkq(inner_integrand_recombination, 1e-21, E-DeltaE, 1e-3, &fparams_inner, stack2);
+
+  free(stack2->elements);
+  free(stack2);
+
+
 
   return ((Real) sigma_deriv*Pauli_E*E*integ_inner);
 
@@ -3187,6 +3199,8 @@ Real double_integral_recombination(Real ne,Real T, Real mu, Real DeltaE)
 // return 0;
   gsl_function gslfun_outer;
   gslfun_outer.function = &outer_integrand_recombination;
+
+  struct my_f_params fparams_outer;
 
   fparams_outer.T=T;
   fparams_outer.ne=ne;
@@ -3210,11 +3224,20 @@ Real double_integral_recombination(Real ne,Real T, Real mu, Real DeltaE)
   // gsl_integration_qagiu(&gslfun_outer, 0.0, integ_abstol, integ_reltol, integ_meshdim,
                         // winteg_outer, &integ_outer, &integ_err); 
 
-  gsl_integration_qag(&gslfun_outer, DeltaE, eupper, integ_abstol_recomb, integ_reltol, integ_meshdim,1,
-                       winteg_outer, &integ_outer, &integ_err);  
+  // gsl_integration_qag(&gslfun_outer, DeltaE, eupper, integ_abstol_recomb, integ_reltol, integ_meshdim,1,
+                       // winteg_outer, &integ_outer, &integ_err);  
 
 
-  // integ_outer = integral_simpson(&outer_integrand_recombination, DeltaE, eupper, 1000, &fparams_inner);
+
+  stack_t stack;  
+  create_stack(&stack, sizeof(work_gkq));
+  integ_outer=gkq(outer_integrand_recombination,DeltaE*1.001, eupper, 1e-3, &fparams_outer,stack);  
+
+  free(stack->elements);
+  free(stack);
+
+
+
   integ_outer *= 2.0*M_PI*bohr_radius_sq*E_ion_H_sq_J * gsl_pow_2(1.0/DeltaE)*alpha_i; //konstanten aus sigma_deriv herausgezogen
 
   // size_t evals;
@@ -3231,171 +3254,6 @@ Real double_integral_recombination(Real ne,Real T, Real mu, Real DeltaE)
 
 
 
-double outer_integrand_ionization(double x,void *p)
-{
-  struct my_f_params * params = (struct my_f_params *)p;
-  Real eng=x;
-  Real DeltaE = params->DeltaE;  
-  Real ne=params->ne;
-  Real T=params->T;
-  Real mu=params->mu;  
-
-
-  Real fermi_fun=1.0/(1.0+EXPR((eng-mu)/BOLTZMAN/T));
-
-  // if(fermi_fun < 1e-100) return 0;
-
-  if(eng <= DeltaE)
-    return 0.0; //Cross section wird zu 0
-
-  Real y=eng/DeltaE;
-
-  // Real sigma_deriv = 4.0*M_PI*bohr_radius_sq*E_ion_H_sq_J * gsl_pow_2(1.0/DeltaE)*alpha_i*(y-1.0)/gsl_pow_2(y)*LOGR(5*beta_i*y/4) 
-                       // /2.0/(eng-DeltaE); 
-
-  //sigma_deriv: konstanten rausgezogen und nach double_integral_ionization verfrachtet
-  Real sigma_deriv = (y-1.0)/POWR(y,2.0)*LOGR(beta_i*1.25*y)/(eng-DeltaE);
-
-
-  fparams_inner.T=T;
-  fparams_inner.ne=ne;
-  fparams_inner.mu=mu;
-  fparams_inner.DeltaE=DeltaE;
-  fparams_inner.E=eng;
-
-  gsl_function gslfun_inner;
-  gslfun_inner.function=&inner_integrand_ionization;
-  gslfun_inner.params=&fparams_inner;  
-
-  double integ_inner=0.0;
-  double integ_err;
-
-   // gsl_integration_qag(&gslfun_inner, 1e-21, eng-DeltaE, 1e-20, 1e-4, integ_meshdim,1,
-                       // winteg_inner, &integ_inner, &integ_err);  
-
-   // gsl_integration_qags(&gslfun_inner, 1e-21, eng-DeltaE, 1e-20, 1e-4, integ_meshdim, 
-                      // winteg_inner, &integ_inner, &integ_err);
-   size_t evals;
-   gsl_integration_romberg(&gslfun_inner, 1e-21, eng-DeltaE, 1e-4, 1e-4, &integ_inner,
-                          &evals, winteg_rb_inner);
-  
-   // integ_inner = integral_simpson(&inner_integrand_ionization, 1e-40, eng-DeltaE, 5000, &fparams_inner);
-
-
-  return ((Real) eng*fermi_fun*sigma_deriv*integ_inner);
-
-}
-
-
-
-
-Real double_integral_ionization(Real ne,Real T, Real mu, Real DeltaE)
-{
-  // return 0;
-
-  gsl_function gslfun_outer;
-  gslfun_outer.function = &outer_integrand_ionization;
-
-  fparams_outer.T=T;
-  fparams_outer.ne=ne;
-  fparams_outer.mu=mu;
-  fparams_outer.DeltaE=DeltaE;
-
-  gslfun_outer.params = &fparams_outer;
-
-  double integ_outer=0;
-  double integ_err=0;
-  double eupper=0.0;
-  if(mu> 0) eupper=POWR(3*T,0.33) * eV2J + mu +DeltaE; //entartet
-  else      eupper=10.0*T/11604* eV2J+ DeltaE;         //nicht-entartet
-
-
-  // gsl_integration_qag(&gslfun_outer, DeltaE*1.001, eupper, 1e-6, 1e-4, integ_meshdim,1,
-  //                     winteg_outer, &integ_outer, &integ_err);  
-
-
-  // serial simpson rule
-  // integ_outer = integral_simpson(&outer_integrand_ionization, DeltaE*1.001, eupper, 1000, &fparams_outer);
-
-
-  //omp simpson rule
-  stack_t stack;
-  work_t work;  
-  create_stack(&stack, sizeof(work_t));
-  double xmin=DeltaE*1.001;
-  double xmax=eupper;
-  double answer=0.0;
-  struct my_f_params ptest;
-  ptest.T=T;
-  ptest.ne=ne;
-  ptest.DeltaE=DeltaE;
-  ptest.mu=mu;
-             
-
-  double fa=outer_integrand_ionization2(xmin,&ptest);
-  double fb=outer_integrand_ionization2(xmax,&ptest);
-  double fm=outer_integrand_ionization2((xmin+xmax)/2, &ptest);
-  double h=xmax-xmin;
-  double Sinit=h/6*(fa+4*fm+fb);
-  // printf("Sinit:%.4e\n",Sinit);
-
-  work.a = xmin;
-  work.b = xmax;
-  work.tol = 1e-4;
-  work.S=Sinit;
-  work.fa=fa;
-  work.fb=fb;
-  work.rec=1000;
-  work.fm=fm;
-  work.p=&ptest;
-  work.iter=0;
-
-
-  push_stack(stack, &work);
-  {
-    answer = integral_simpson_par(outer_integrand_ionization2, stack);  
-  }
-  
-
-  while(!empty_stack(stack))
-  {
-     pop_stack(stack, &work);
-  }   
-
-  if(simpson_error)
-  {
-    // answer=0.0;
-    // printf("ERROR: Integral wont converge..cleanup\n");        
-    simpson_error=0;
-  }  
-
-  integ_outer=answer;
-  free(stack->elements);
-  free(stack);
-//  *****************************************************
-
-  // if(integ_outer<MINRATE) integ_outer=0.0;
-  integ_outer *= 2.0*M_PI*bohr_radius_sq*E_ion_H_sq_J * gsl_pow_2(1.0/DeltaE)*alpha_i; //konstanten aus sigma_deriv herausgezogen
-  integ_outer *= ioniz_const / ne; //ACHTUNG: Später ne entfernenu und in ydot nicht mehr multiplizieren!
-
-  
-  // if(steps> 1)
-  // if(myid==1 && integ_outer > 0)  
-  // {
-  //   if(DeltaE*J2eV > 5.9062 && DeltaE*J2eV < 5.9064) // && T> 1.9826e+03 && T > 1.9828e+03 && mu >1.6238e-18 && mu <1.6240e-18)
-  //   printf("AFTER: dE:%.4e, T:%.6e, mu:%.15e, ne:%.15e, integ:%.4e\n",DeltaE*J2eV,T,mu,ne,integ_outer);
-  // }
-
-
-//WTF???
-// dE:5.9063e+00, T:1.208983e+03, mu:1.624114145844772e-18, ne:1.465920522460179e+29, integ:8.1974e-105
-// dE:5.9063e+00, T:1.208983e+03, mu:1.624114145844772e-18, ne:1.465920522460179e+29, integ:2.5497e-104
-// dE:5.9063e+00, T:1.208983e+03, mu:1.624114145844772e-18, ne:1.465920522460179e+29, integ:1.6998e-104
-
-
-  return MAX((Real) integ_outer,0.0);
-
-}
 
 double fermi_integrand(double x, void *p)
 {
@@ -3413,6 +3271,7 @@ double fermi_integrand(double x, void *p)
 }
 Real eval_fermi_integrand(Real ne,Real T, Real mu)
 {
+  struct my_f_params fparams_fermi;
   fparams_fermi.T=T;
   fparams_fermi.ne=ne;
   fparams_fermi.mu=mu; 
@@ -3453,6 +3312,8 @@ Real eval_excitation_integral(Real ne,Real T,Real mu, Real DeltaE, int allowed)
   gsl_function fun;
   fun.function = &integrand_excitation;
 
+  struct my_f_params fparams_exc;
+
   fparams_exc.T=T;
   fparams_exc.ne=ne;
   fparams_exc.mu=mu;
@@ -3472,35 +3333,39 @@ Real eval_excitation_integral(Real ne,Real T,Real mu, Real DeltaE, int allowed)
 // integ_result = integral_simpson(&integrand_excitation, DeltaE, 20*DeltaE, 5000, &fparams_exc);
 
 
-  gsl_error_handler_t *old_error_handler=gsl_set_error_handler_off ();
+ //  gsl_error_handler_t *old_error_handler=gsl_set_error_handler_off ();
 
-  // int code= gsl_integration_qags (&fun, DeltaE, muINF, integ_abstol, integ_reltol, integ_meshdim,
-  //                         winteg_exc, &integ_result, &integ_err);    
+ //  // int code= gsl_integration_qags (&fun, DeltaE, muINF, integ_abstol, integ_reltol, integ_meshdim,
+ //  //                         winteg_exc, &integ_result, &integ_err);    
   
-  //Abstol ist zwar nicht streng aber scheint ausreichend...ergebnisse sind genauso gut 
-  int code= gsl_integration_qag(&fun, (double) DeltaE, (double) eupper, 1e-6, (double) integ_reltol, integ_meshdim,1,
-                          winteg_exc, &integ_result, &integ_err);    
+ //  //Abstol ist zwar nicht streng aber scheint ausreichend...ergebnisse sind genauso gut 
+ //  int code= gsl_integration_qag(&fun, (double) DeltaE, (double) eupper, 1e-6, (double) integ_reltol, integ_meshdim,1,
+ //                          winteg_exc, &integ_result, &integ_err);    
 
 
- gsl_set_error_handler(old_error_handler); //reset the error handler 
+ // gsl_set_error_handler(old_error_handler); //reset the error handler 
 
-  if (code != GSL_SUCCESS)
-  {
-    //print integrand
-    int i=0;
-    Real dx=(muINF-DeltaE)/250;    
-    for(i=0;i<250;i++)
-    {
-      printf("x:%.4e,T:%f, ne:%.2e, dE:%.2e, integ:%.4e\n",
-              dx*i,fparams_exc.T, fparams_exc.ne, fparams_exc.DeltaE, integrand_excitation_debug(dx*i,&fparams_exc));
-    }
+ //  if (code != GSL_SUCCESS)
+ //  {
+ //    //print integrand
+ //    int i=0;
+ //    Real dx=(muINF-DeltaE)/250;    
+ //    for(i=0;i<250;i++)
+ //    {
+ //      printf("x:%.4e,T:%f, ne:%.2e, dE:%.2e, integ:%.4e\n",
+ //              dx*i,fparams_exc.T, fparams_exc.ne, fparams_exc.DeltaE, integrand_excitation_debug(dx*i,&fparams_exc));
+ //    }
 
-    error("ERROR in eval_excitation_integral\n");
-  }
+ //    error("ERROR in eval_excitation_integral\n");
+ //  }
 
-  //return integ_result;
-  // if(myid==1) printf("integ:%.4e\n",integ_result);
-  // if(integ_result < MINRATE) integ_result=0.0;
+
+  stack_t stack;  
+  create_stack(&stack, sizeof(work_gkq));
+  integ_result=gkq(integrand_excitation, DeltaE*1.001, eupper, 1e-3, &fparams_exc,stack);  
+  free(stack->elements);
+  free(stack);
+
 
   
   return MAX((Real) integ_result,0.0);
@@ -3512,6 +3377,8 @@ Real eval_dexcitation_integral(Real ne,Real T,Real mu, Real DeltaE, int allowed)
 {  
   gsl_function fun;
   fun.function = &integrand_deexcitation;
+
+  struct my_f_params fparams_exc;
 
   fparams_exc.T=T;
   fparams_exc.ne=ne;
@@ -3535,7 +3402,7 @@ Real eval_dexcitation_integral(Real ne,Real T,Real mu, Real DeltaE, int allowed)
   // gsl_integration_qags (&fun, DeltaE, muINF, integ_abstol, integ_reltol, integ_meshdim,
   //                         winteg_exc, &integ_result, &integ_err);    
 
-  //Variante Aslan
+  //Variante Aslan: effektives chem.pot und integriere wieder excitation_integrand statt de-exc.integrand
   fparams_exc.mu=mu+DeltaE;
   fun.function = &integrand_excitation;
 
@@ -3543,15 +3410,18 @@ Real eval_dexcitation_integral(Real ne,Real T,Real mu, Real DeltaE, int allowed)
    // gsl_integration_qags (&fun, DeltaE, muINF, integ_abstol, integ_reltol, integ_meshdim,
                          // winteg_exc, &integ_result, &integ_err);    
 
-   gsl_integration_qag(&fun, DeltaE, eupper, 1e-6, integ_reltol, integ_meshdim,1,
-                          winteg_exc, &integ_result, &integ_err);    
+   // gsl_integration_qag(&fun, DeltaE, eupper, 1e-6, integ_reltol, integ_meshdim,1,
+   //                        winteg_exc, &integ_result, &integ_err);    
 
 
-    // size_t neval;
-    // gsl_integration_qng(&fun, DeltaE, muINF, integ_abstol, integ_reltol,  //FAST?
-    //                             &integ_result, &integ_err, &neval);
 
-  // if(integ_result < MINRATE) integ_result=0.0;
+  stack_t stack;  
+  create_stack(&stack, sizeof(work_gkq));
+  integ_result=gkq(integrand_excitation, DeltaE*1.001, eupper, 1e-3, &fparams_exc,stack);  
+  free(stack->elements);
+  free(stack);
+
+
   return MAX((Real) integ_result,0.0);
 
 }
@@ -3589,47 +3459,6 @@ double integrand_deexcitation(double x,void *p)
   // Real F=double_emass_pow_3_2/2.0/ne/hbar_cub/pi_sq*SQRTR(eng)*fermi_fun*SQRTR(eng/(eng-DeltaE));  //ACHTUNG: Letzter Term --> divergent
   Real F=1.062234185782204e+56/ne*SQRTR(eng/(eng-DeltaE))*fermi_fun;
   return vel*sigma*F*Pauli;
-}
-
-
-
-Real  integral_simpson(Real (*f)(Real, void*), Real a, Real b, int n, void* p)
-{
-  // struct my_f_params * params = (struct my_f_params *)p;
-  Real nd=(Real) n;
-  Real h=(b-a)/nd;
-  Real h_half=h*0.5;
-
-  Real f0=f(a,p);
-  Real fn=f(b,p);
-  
-  int i;
-  //summation 1
-  Real sum1=0.0;
-  Real sum2=0.0;
-
-  sum2+=f((2*b-h)*0.5,p); // weil die loop nur von 1 bis N-1 geht, aber summation 2 muss von 1 bis N gehen.
-                                // deswegen wird das letzte Elemn. bereits hier addiert
-
-  #ifdef OMP
-   #pragma omp parallel for reduction(+: sum1, sum2)
-  #endif
-  for(i=1;i<n-1;i++)
-  {
-    Real xk=a+i*h;
-    Real f_xk=f(xk,p);
-    sum1+=f_xk;
-    //Real xhalf=(x_k-1 + x_k)/2 = (x_k-h + x_k)/2
-    //Real xhalf=(2*xk-h)*0.5;
-    Real xhalf=0.5*xk-h_half;
-    Real f_xhalf=f(xhalf,p);
-    sum2+=f_xhalf;
-
-    // printf("a:%.4e,b:%.4e, xk:%.4e, f_xk:%.5e, fhalf:%.4e\n", a,b, xk, f_xk, f_xhalf);
-  }
-  Real result= h/6.0*(f0+fn+2.0*sum1+4.0*sum2); 
-  return MAX(0.0,result);
-  
 }
 
 double integrand_excitation(double x,void *p)
@@ -3670,132 +3499,6 @@ double integrand_excitation(double x,void *p)
 
 
 
-// ****************************************************************************
-// *  PARALLEL SIMPSON INTEGERAL STUFF
-// ****************************************************************************
-double integral_simpson_par(double (*f)(double, struct my_f_params*), stack_t stack)
-{
-  work_t work;
-  int ready, idle, busy;
-  double integral_result = 0.0;
-
-  busy = 0;
-
-  #pragma omp private(winteg_inner,winteg_outer,winteg_rb_inner)
-  
-#pragma omp parallel default(none) \
-    shared(stack, integral_result,f,busy,simpson_error) \
-    private(work, idle, ready, winteg_rb_inner)
-  {
-    ready = 0;
-    idle = 1;
-
-    while(!ready  && !simpson_error) //<-- so NICHT!
-    {
-#pragma omp critical (stack)
-      {
-        if (!empty_stack(stack))
-        {
-          /* we have new work */ 
-          pop_stack(stack, &work);
-          if (idle)
-          {
-            /* say others i'm busy */
-            busy += 1;
-            idle = 0;
-          }
-        }
-        else{
-          /* no new work on stack */
-          if (!idle){
-            busy -= 1;
-            idle = 1;
-          }
-
-          /* nobody has anything to do; let us leave the loop */
-          if (busy == 0)
-          {
-            ready = 1;        
-          }
-        }
-      } /* end critical(stack) */
-
-      if (idle)
-        continue; //if ready==1 --> leave loop
-
-      double b = work.b;
-      double a = work.a;
-      double tol = work.tol;
-      double S=work.S; // previous TOTAL integral
-      double fa=work.fa;
-      double fb=work.fb;
-      double fm=work.fm;
-      int    rec=work.rec;
-
-      double h = (b - a)/2;
-      double mid = (a+b)/2;
-      double lm=(a+mid)/2;
-      double rm=(mid+b)/2;      
-
-      double flm=f(lm,work.p);
-      double frm=f(rm,work.p);
-      
-      double Sl=h/6*(fa+4*flm+fm);
-      double Sr=h/6*(fm+4*frm+fb);
-
-      double delta=Sl+Sr-S;
-
-      // serious numerical trouble: it won't converge
-      if ((tol/2 == tol) || fabs(a-lm) <= tolmax)// || work.iter > simpson_itermax) // || tol < tolmax) 
-      { 
-             // simpson_error = 1; 
-#pragma omp critical (integral_result)            
-             integral_result += S;      //use previous approx and get new work
-             continue;
-      }
-      //need something against spurious convergence
-      //for now: iter > 5 (c.f. numerical recipes)
-      if( work.iter > 5 &&  (rec <= 0 || fabs(delta) <= 15*tol))// || fabs(delta) < 1e-4))  //error acceptable
-      {
-#pragma omp critical (integral_result)
-        integral_result += Sl+Sr+delta/15;
-      }
-      else // error not acceptable
-      {          
-        //push new subintervals to stack
-        work.a = a;
-        work.b = mid;
-        work.tol = tol/2;
-        work.S = Sl;
-        work.fa=fa;
-        work.fb=fm;
-        work.fm=flm;
-        work.rec=rec-1;
-        work.iter=work.iter+1;
-
-  #pragma omp critical (stack)
-        {
-          //LEFT
-          push_stack(stack, &work);      
-          //prepare RIGHT side and push to stack
-          work.a = mid;
-          work.b = b;
-          work.tol = tol/2;
-          work.S=Sr;
-          work.fa=fm;
-          work.fb=fb;
-          work.fm=frm;
-          work.rec=rec-1;
-          push_stack(stack, &work);
-
-        }        
-      }
-    } /* while */
-  } /* end omp parallel */
-
-
-  return integral_result;
-}
 
 
 
@@ -3847,6 +3550,82 @@ double integrand_excitation_debug(double x,void *p)
 
 
 
+
+
+
+
+
+double outer_integrand_ionization(double x,void *p)
+{
+  struct my_f_params * params = (struct my_f_params *)p;
+  Real eng=x;
+  Real DeltaE = params->DeltaE;  
+  Real ne=params->ne;
+  Real T=params->T;
+  Real mu=params->mu;  
+
+
+  Real fermi_fun=1.0/(1.0+EXPR((eng-mu)/BOLTZMAN/T));
+
+  // if(fermi_fun < 1e-100) return 0;
+
+  if(eng <= DeltaE)
+    return 0.0; //Cross section wird zu 0
+
+  Real y=eng/DeltaE;
+
+  // Real sigma_deriv = 4.0*M_PI*bohr_radius_sq*E_ion_H_sq_J * gsl_pow_2(1.0/DeltaE)*alpha_i*(y-1.0)/gsl_pow_2(y)*LOGR(5*beta_i*y/4) 
+                       // /2.0/(eng-DeltaE); 
+
+  //sigma_deriv: konstanten rausgezogen und nach double_integral_ionization verfrachtet
+  Real sigma_deriv = (y-1.0)/POWR(y,2.0)*LOGR(beta_i*1.25*y)/(eng-DeltaE);
+
+  struct my_f_params fparams_inner; 
+
+  fparams_inner.T=T;
+  fparams_inner.ne=ne;
+  fparams_inner.mu=mu;
+  fparams_inner.DeltaE=DeltaE;
+  fparams_inner.E=eng;
+
+  gsl_function gslfun_inner;
+  gslfun_inner.function=&inner_integrand_ionization;
+  gslfun_inner.params=&fparams_inner;  
+
+  double integ_inner=0.0;
+  double integ_err;
+
+  gsl_integration_qag(&gslfun_inner, 1e-21, eng-DeltaE, 1e-20, 1e-4, integ_meshdim,1,
+                       winteg_inner, &integ_inner, &integ_err);  
+
+   // gsl_integration_qags(&gslfun_inner, 1e-21, eng-DeltaE, 1e-20, 1e-4, integ_meshdim, 
+                      // winteg_inner, &integ_inner, &integ_err);
+   // size_t evals;
+   // gsl_integration_romberg(&gslfun_inner, 1e-21, eng-DeltaE, 1e-4, 1e-4, &integ_inner,
+                          // &evals, winteg_rb_inner);
+
+  stack_t stack2;  
+  create_stack(&stack2, sizeof(work_gkq));
+  double res2=0.0;
+  
+  terminate_gkq=0;
+  res2=gkq(inner_integrand_ionization2, 1e-21, eng-DeltaE, 1e-4, &fparams_inner, stack2);
+  
+  
+  work_gkq wtmp;    
+  free(stack2->elements);    
+  free(stack2);//hatte ich vorher vergessen
+
+  // double res2=gkq_serial(inner_integrand_ionization2, 1e-21, eng-DeltaE, 1e-4, &fparams_inner);
+
+ if(myid==1 && (res2 >0))
+ printf("gsl:%.4e, gkq:%.4e\n", integ_inner, res2);
+
+  return ((Real) eng*fermi_fun*sigma_deriv*integ_inner);
+
+}
+
+
 double outer_integrand_ionization2(double x, struct my_f_params* p)
 {
   Real eng=x;
@@ -3854,6 +3633,14 @@ double outer_integrand_ionization2(double x, struct my_f_params* p)
   Real T=p->T;
   Real ne=p->ne;
   Real mu=p->mu;
+
+  struct my_f_params fparams_inner;
+  fparams_inner.T=T;
+  fparams_inner.ne=ne;
+  fparams_inner.mu=mu;
+  fparams_inner.DeltaE=DeltaE;
+  fparams_inner.E=eng;
+
 
   Real fermi_fun=1.0/(1.0+EXPR((eng-mu)/BOLTZMAN/T));
 
@@ -3871,30 +3658,129 @@ double outer_integrand_ionization2(double x, struct my_f_params* p)
   Real sigma_deriv = (y-1.0)/POWR(y,2.0)*LOGR(beta_i*1.25*y)/(eng-DeltaE);
 
 
-  fparams_inner.T=p->T;
-  fparams_inner.ne=p->ne;
-  fparams_inner.mu=p->mu;
-  fparams_inner.DeltaE=p->DeltaE;
-  fparams_inner.E=eng;
+  terminate_gkq=0;
+  stack_t stack2;  
+  create_stack(&stack2, sizeof(work_gkq));
 
-  gsl_function gslfun_inner;
-  gslfun_inner.function=&inner_integrand_ionization;
-  gslfun_inner.params=&fparams_inner;  
+  double integ_inner=gkq(inner_integrand_ionization2, 1e-21, eng-DeltaE, 1e-3, &fparams_inner, stack2);
 
-  double integ_inner=0.0;
-  double integ_err;
- 
+  free(stack2->elements);
+  free(stack2);
 
-   // gsl_integration_qag(&gslfun_inner, 1e-20, eng-DeltaE, 1e-4, 1e-4, integ_meshdim,1,
-   //                     winteg_inner, &integ_inner, &integ_err);  
-
-   size_t evals;
-   gsl_integration_romberg(&gslfun_inner, 1e-21, eng-DeltaE, 1e-4, 1e-4, &integ_inner,
-                          &evals, winteg_rb_inner);
-  
-  // integ_inner = integral_simpson(&inner_integrand_ionization, 1e-40, eng-DeltaE, 5000, &fparams_inner);
 
 
   return ((Real) eng*fermi_fun*sigma_deriv*integ_inner);
 
+}
+
+Real double_integral_ionization(Real ne,Real T, Real mu, Real DeltaE)
+{
+  // return 0;
+
+  gsl_function gslfun_outer;
+  gslfun_outer.function = &outer_integrand_ionization;
+
+  struct my_f_params fparams_outer;
+
+  fparams_outer.T=T;
+  fparams_outer.ne=ne;
+  fparams_outer.mu=mu;
+  fparams_outer.DeltaE=DeltaE;
+
+  gslfun_outer.params = &fparams_outer;
+
+  double integ_outer=0;
+  double integ_err=0;
+  double eupper=0.0;
+  if(mu> 0) eupper=POWR(3*T,0.33) * eV2J + mu +DeltaE; //entartet
+  else      eupper=10.0*T/11604* eV2J+ DeltaE;         //nicht-entartet
+
+
+  gsl_integration_qag(&gslfun_outer, DeltaE*1.001, eupper, 1e-6, 1e-4, integ_meshdim,1,
+                       winteg_outer, &integ_outer, &integ_err);  
+
+
+  // serial simpson rule
+  // integ_outer = integral_simpson(&outer_integrand_ionization, DeltaE*1.001, eupper, 1000, &fparams_outer);
+
+//  *****************************************************
+
+  // if(integ_outer<MINRATE) integ_outer=0.0;
+  integ_outer *= 2.0*M_PI*bohr_radius_sq*E_ion_H_sq_J * gsl_pow_2(1.0/DeltaE)*alpha_i; //konstanten aus sigma_deriv herausgezogen
+  integ_outer *= ioniz_const / ne; //ACHTUNG: Später ne entfernenu und in ydot nicht mehr multiplizieren!
+
+  
+  // if(steps> 1)
+  // if(myid==1 && integ_outer > 0)  
+  // {
+  //   if(DeltaE*J2eV > 5.9062 && DeltaE*J2eV < 5.9064) // && T> 1.9826e+03 && T > 1.9828e+03 && mu >1.6238e-18 && mu <1.6240e-18)
+  //   printf("AFTER: dE:%.4e, T:%.6e, mu:%.15e, ne:%.15e, integ:%.4e\n",DeltaE*J2eV,T,mu,ne,integ_outer);
+  // }
+
+
+//WTF???
+// dE:5.9063e+00, T:1.208983e+03, mu:1.624114145844772e-18, ne:1.465920522460179e+29, integ:8.1974e-105
+// dE:5.9063e+00, T:1.208983e+03, mu:1.624114145844772e-18, ne:1.465920522460179e+29, integ:2.5497e-104
+// dE:5.9063e+00, T:1.208983e+03, mu:1.624114145844772e-18, ne:1.465920522460179e+29, integ:1.6998e-104
+
+
+  return MAX((Real) integ_outer,0.0);
+
+}
+
+
+Real double_integral_ionization2(Real ne,Real T, Real mu, Real DeltaE)
+{
+  // return 0;
+
+  struct my_f_params fparams_outer;
+
+  fparams_outer.T=T;
+  fparams_outer.ne=ne;
+  fparams_outer.mu=mu;
+  fparams_outer.DeltaE=DeltaE;
+ 
+  terminate_gkq=0;
+
+  double integ_outer=0;
+  double integ_err=0;
+  double eupper=0.0;
+  if(mu> 0) eupper=POWR(3*T,0.33) * eV2J + mu +DeltaE; //entartet
+  else      eupper=10.0*T/11604* eV2J+ DeltaE;         //nicht-entartet
+
+
+  stack_t stack;  
+  create_stack(&stack, sizeof(work_gkq));
+  integ_outer=gkq(outer_integrand_ionization2, DeltaE*1.001, eupper, 1e-3, &fparams_outer,stack);  
+
+  free(stack->elements);
+  free(stack);
+
+//  *****************************************************
+
+  // if(integ_outer<MINRATE) integ_outer=0.0;
+  integ_outer *= 2.0*M_PI*bohr_radius_sq*E_ion_H_sq_J * gsl_pow_2(1.0/DeltaE)*alpha_i; //konstanten aus sigma_deriv herausgezogen
+  integ_outer *= ioniz_const / ne; //ACHTUNG: Später ne entfernenu und in ydot nicht mehr multiplizieren!
+
+
+  return MAX((Real) integ_outer,0.0);
+
+}
+
+double inner_integrand_ionization2(double x, struct my_f_params* p) // x=E_strich
+{
+  //struct my_f_params * params = (struct my_f_params *)p;
+  Real E_prime=x;
+  Real ne=p->ne;
+  Real T=p->T;
+  Real mu=p->mu;  
+  Real DeltaE = p->DeltaE;  
+  Real E=p->E; //brauche ich nachher für E''=E-E'-DELTAE
+  Real E_prime_prime=E-E_prime-DeltaE;
+
+  Real Pauli_E_prime=1.0-1.0/(1.0+EXPR((E_prime-mu)/BOLTZMAN/T));
+  Real Pauli_E_prime_prime=1.0-1.0/(1.0+EXPR((E_prime_prime-mu)/BOLTZMAN/T));
+
+  Real f=Pauli_E_prime*Pauli_E_prime_prime; //F(E), sigmaderiv und SQRTR(2*eng1/emass) im outer integrand
+  return f;
 }
