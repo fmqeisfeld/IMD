@@ -13,6 +13,8 @@
 int num_threads;
 int simpson_error;
 int funcevals;
+int iter;
+
 const double tolmax=1e-30;
 #define INITIAL_STACK_SIZE 128; //128   /* initial size of new stacks */
 
@@ -66,6 +68,9 @@ typedef struct _work_t{
   struct my_f_params * p; //pointer auf params
 } work_t;
 
+
+typedef struct stack_s* stack_t;
+
 typedef struct _work_t_gkq{
   double a;
   double b;
@@ -73,16 +78,16 @@ typedef struct _work_t_gkq{
   double I_13;
   double fa;
   double fb;
-  double *y; //pointer auf y-array
   struct my_f_params * p; //pointer auf params
   double (*f)(double, struct my_f_params*);
-  double *result;
+  stack_t stack_inner;
+  short int is_parent;
+  short int subtask_nr;
+  double inner_integrals[5];
 } work_gkq;
 
 
-typedef struct stack_s* stack_t;
 
-stack_t stack;  //global stack
 
 
 // **************************************** FUNCTION DEFS *************************************************
@@ -93,14 +98,23 @@ void pop_stack(stack_t stack, void* element);
 
 
 double  
-integral2(
-     double (*f)(double, struct my_f_params*), /* function to integrate */
+integral2(     double (*f)(double, struct my_f_params*), /* function to integrate */
      stack_t stack);
 
 
-double gkq_adapt(void);//, stack_t stack);
-double gkq(double (*f)(double, struct my_f_params*), double a, double b, double TOL, struct my_f_params* p);//,stack_t stack);
+double gkq_adapt_double(stack_t stack);
+double gkq_adapt_single(stack_t stack); //for single integral, first integral
+
+double gkq_double(double (*f)(double, struct my_f_params*), double (*finner)(double, struct my_f_params*), 
+                  double a, double b, 
+                  double TOL, struct my_f_params* p,stack_t stack);
+
 double gkq_adapt_serial(double (*f)(double, struct my_f_params*), double a, double b, double fa,double fb, double toler,double I_13, struct my_f_params* p);
+
+work_gkq gkq_create_inner_task(double (*f)(double, struct my_f_params*), double a, double b, double TOL, struct my_f_params* p);
+double gkq_single(double (*f)(double, struct my_f_params*), double a, double b, 
+                       double TOL, struct my_f_params* p,stack_t stack);
+
 int terminate_serial;
 int terminate_gkq;
 
@@ -136,14 +150,20 @@ static double inner_integrand(double x,void *pv)
   double T=p->T;  
   double fermi=1/(1+exp(-x/T));
   double fermi2=1- 1/(1+exp(-x/T));    
+  return exp(-x*x); //fermi*fermi2;
 }
 static double inner_integrand2(double x,struct my_f_params* p)
 {
   double T=p->T;  
   double fermi=1/(1+exp(-x/T));
-  double fermi2=1- 1/(1+exp(-x/T));    
+  double fermi2=1- 1/(1+exp(-x/T));
+  return fermi*fermi2;
 }
-
+void get_integ_bounds_inner(double *integ_bnd, double x, struct my_f_params *p)
+{
+  integ_bnd[0]=-4;
+  integ_bnd[1]=4;
+}
 
 gsl_integration_workspace * gsinner;
 gsl_integration_workspace * gsinner2;
@@ -167,11 +187,11 @@ static double myfun(double x,struct my_f_params* p)
   // stack_t stack2;  
   // create_stack(&stack2, sizeof(work_gkq));
 
-  double result=gkq(inner_integrand2, x, 600, 1e-3, p);//, stack);
+  //double result=gkq(inner_integrand2, x, 600, 1e-3, p);//, stack);
   // free(stack2->elements);
 
 
-  return sigma*result;
+  return sigma;
   //return  exp(-x*x);
 }; 
 
@@ -206,6 +226,7 @@ static double myfun_gsl(double x,void* pv)
 // *************************************************************************************************************
 int main(int argc,char** argv)
 {
+  iter=0;
   num_threads=omp_get_num_threads();
   funcevals=0;
   simpson_error=0;
@@ -263,11 +284,12 @@ int main(int argc,char** argv)
 
   printf("gslres:%.12e, gsltime:%.4e\n", gslinteg, gsltime);
   // *************************************************
-  
+
+  stack_t stack;  //global stack
   create_stack(&stack, sizeof(work_gkq));
 
   gettimeofday(&start, NULL);     
-  double integ=gkq(myfun, xmin, xmax, 1e-8, &ptest);//,stack);
+  double integ=gkq_double(myfun,inner_integrand2, xmin, xmax, 1e-8, &ptest,stack);
   
   gettimeofday(&end, NULL);
   free(stack->elements);
@@ -286,8 +308,7 @@ int main(int argc,char** argv)
 /******************************************
  * create new stack
  ******************************************/
-void 
-create_stack(
+void create_stack(
              stack_t* stack,     /* stack to create */
              int element_size)   /* size of a stack element */
 {
@@ -316,10 +337,12 @@ create_stack(
 /*****************************************
  * check if the stack is empty 
  *****************************************/
-int 
-empty_stack
-(stack_t stack)
+int empty_stack(stack_t stack)
 {
+  //MYMOD
+  if(stack==NULL)
+    return 1;
+  //ENDOF MYMOD
   return stack->el_count <= 0;
 }
 
@@ -327,8 +350,7 @@ empty_stack
 /*****************************************
  * push a element on stack
  *****************************************/
-void 
-push_stack(
+void push_stack(
            stack_t stack,    /* target stack */
            void* element)    /* element to push */
 {
@@ -392,19 +414,19 @@ void pop_stack(
 // ***************************************************************************
 // *      Gauss-kronard quadrature
 // ***************************************************************************
-double gkq(double (*f)(double, struct my_f_params*), double a, double b, double TOL, struct my_f_params* p)//,stack_t stack)
+work_gkq gkq_create_inner_task(double (*f)(double, struct my_f_params*), double a, double b, double TOL, struct my_f_params* p)
 {
-  //1st integration
+  work_gkq work;
 
-  /* prepare stack */
-  terminate_serial=0;
-
-  terminate_gkq=0;
-  // stack_t stack;  
-  // create_stack(&stack, sizeof(work_gkq));
-
-  double result=0.0;
-// *********************************************                
+  work.f=f;
+  struct my_f_params* pinner;
+  pinner=(struct my_f_params*) malloc(sizeof(struct my_f_params)); //ACHTUNG: Muss wieder gefreed werden
+  pinner->mu= p->mu;
+  pinner->T=p->T;
+  pinner->ne=p->ne;
+  work.p=pinner;
+  work.a=a;
+  work.b=b;
 
   double m=0.5*(a+b);
   double h=0.5*(b-a);
@@ -414,6 +436,227 @@ double gkq(double (*f)(double, struct my_f_params*), double a, double b, double 
   int i;
   for(i=1;i<12;i++)
     y[i]=f(m+xgkq[i]*h,p);
+
+  double I_4= (h/6.0)*(y[0]+y[12]+5.0*(y[4]+y[8]));  // 4-point gauss-lobatto
+  double I_7= (h/1470.0)*(77.0*(y[0]+y[12])+432.0*(y[2]+y[10])+  // 7-point kronrod
+               625.0*(y[4]+y[8])+672.0*y[6]);
+
+  double I_13= h*(0.0158271919734802*(y[0]+y[12])+0.0942738402188500*(y[1]+y[11])+0.155071987336585*(y[2]+y[10])+
+                  0.188821573960182*(y[3]+y[9])+0.199773405226859*(y[4]+y[8])+0.224926465333340*(y[5]+y[7])+
+                  0.242611071901408*y[6]);   //13-point Kronrod
+
+  
+  double Err1=fabs(I_7-I_13);
+  double Err2=fabs(I_4-I_13);
+
+  double r=(Err2 != 0.0) ? Err1/Err2 : 1.0;
+  double toler=(r > 0.0 && r < 1.0) ? TOL/r : TOL; 
+
+  if(I_13 == 0)
+    I_13=b-a;
+  I_13=fabs(I_13);
+
+printf("create inner tast: a:%f, b:%f, I4:%f,I7:%f,I13:%f\n",a,b,I_4,I_7,I_13);
+  work.toler = toler;
+  work.I_13=I_13;
+  work.fa=fa;
+  work.fb=fb;
+  
+  work.is_parent=0;
+  for(i=0;i<5;i++)
+    work.inner_integrals[i]=0.0;
+  return work;
+
+}
+
+
+
+double gkq_double(double (*f)(double, struct my_f_params*), double (*finner)(double, struct my_f_params*), 
+                  double a, double b, 
+                  double TOL, struct my_f_params* p,stack_t stack)
+{
+  //1st integration
+  //create parent task
+
+  double result=0.0;
+// *********************************************                
+
+  double m=0.5*(a+b);
+  double h=0.5*(b-a);
+  int i;
+
+
+  double y[13];
+
+  stack_t st;
+  create_stack(&st, sizeof(work_gkq));
+
+  double integ_bnd[2];
+
+  get_integ_bounds_inner(integ_bnd, a, p);
+  y[0]=f(a,p)* gkq_single(finner,integ_bnd[0],integ_bnd[1],1e-3, p, st);
+
+  for(i=1;i<12;i++)
+  {
+    get_integ_bounds_inner(integ_bnd, m+xgkq[i]*h, p);
+    y[i]=f(m+xgkq[i]*h,p)*gkq_single(finner,integ_bnd[0],integ_bnd[1],1e-3,p,st);
+  }
+
+  get_integ_bounds_inner(integ_bnd, b, p);
+  y[12]=f(b,p)*gkq_single(finner,integ_bnd[0],integ_bnd[1],1e-3, p, st);
+
+
+  free(st->elements);
+  free(st);
+
+
+  
+  double fa=y[0];
+  double fb=y[12];
+
+
+  double I_4= (h/6.0)*(y[0]+y[12]+5.0*(y[4]+y[8]));  // 4-point gauss-lobatto
+  double I_7= (h/1470.0)*(77.0*(y[0]+y[12])+432.0*(y[2]+y[10])+  // 7-point kronrod
+               625.0*(y[4]+y[8])+672.0*y[6]);
+
+  double I_13= h*(0.0158271919734802*(y[0]+y[12])+0.0942738402188500*(y[1]+y[11])+0.155071987336585*(y[2]+y[10])+
+                  0.188821573960182*(y[3]+y[9])+0.199773405226859*(y[4]+y[8])+0.224926465333340*(y[5]+y[7])+
+                  0.242611071901408*y[6]);   //13-point Kronrod
+
+  
+ 
+
+  double Err1=fabs(I_7-I_13);
+  double Err2=fabs(I_4-I_13);
+
+  double r=(Err2 != 0.0) ? Err1/Err2 : 1.0;
+  double toler=(r > 0.0 && r < 1.0) ? TOL/r : TOL; 
+
+  if(I_13 == 0)
+    I_13=b-a;
+  I_13=fabs(I_13);
+
+  printf("First approx I_13:%.4e\n",I_13); 
+  
+  //Prepare work and push onto stack
+  work_gkq work;
+  work.a = a;
+  work.b = b;
+  work.toler = toler;
+  work.I_13=I_13;
+  work.fa=fa;
+  work.fb=fb;
+
+  work.p=p;
+  work.f=f;
+  work.is_parent=1;
+
+  for(i=0;i<5;i++)
+    work.inner_integrals[i]=0.0;
+  
+  // ALLOC INNER WS FOR INTEGR.
+  // gsl_integration_workspace *gsinner2=  gsl_integration_workspace_alloc (1000); 
+  
+  stack_t stack_inner; 
+  create_stack(&stack_inner, sizeof(work_gkq));
+  work.stack_inner=stack_inner;
+
+  //push work on inner stack
+  //for comp of 5 inner intgrals
+  work_gkq winner;
+  double m_inner, h_inner, mll_inner,ml_inner, mr_inner, mrr_inner;
+
+  m_inner=  (work.a+work.b)/2;
+  h_inner=  (work.a+work.b)/2;
+  mll_inner=(m_inner-alpha*h_inner);
+  ml_inner= (m_inner-beta*h_inner);
+  mr_inner= (m_inner+beta*h_inner);
+  mrr_inner=(m_inner+alpha*h_inner);            
+
+
+  //1st subtask
+  get_integ_bounds_inner(integ_bnd, mll_inner, work.p);            
+  winner=gkq_create_inner_task(inner_integrand2,integ_bnd[0], integ_bnd[1],1e-3, work.p);
+  winner.subtask_nr=0;
+  push_stack(work.stack_inner,&winner);
+
+  //2nd subtask
+  get_integ_bounds_inner(integ_bnd, ml_inner, work.p);            
+  winner=gkq_create_inner_task(inner_integrand2,integ_bnd[0], integ_bnd[1],1e-3, work.p);
+  winner.subtask_nr=1;
+  push_stack(work.stack_inner,&winner); 
+
+  //3rd subtask
+  get_integ_bounds_inner(integ_bnd, m_inner, work.p);            
+  winner=gkq_create_inner_task(inner_integrand2,integ_bnd[0], integ_bnd[1],1e-3, work.p);
+  winner.subtask_nr=2;
+  push_stack(work.stack_inner,&winner);     
+
+  //4th subtask
+  get_integ_bounds_inner(integ_bnd, mr_inner, work.p);            
+  winner=gkq_create_inner_task(inner_integrand2,integ_bnd[0], integ_bnd[1],1e-3, work.p);
+  winner.subtask_nr=3;
+  push_stack(work.stack_inner,&winner);     
+
+  //5th subtask
+  get_integ_bounds_inner(integ_bnd, mrr_inner, work.p);            
+  winner=gkq_create_inner_task(inner_integrand2,integ_bnd[0], integ_bnd[1],1e-3, work.p);
+  winner.subtask_nr=4;
+  push_stack(work.stack_inner,&winner);
+
+  //push outer integtand work on outer stack
+  push_stack(stack, &work);                   
+
+
+/*
+  int elemsinner=work.stack_inner->el_count;
+  int elout=stack->el_count;
+
+
+  work_gkq* top=(work_gkq*) stack->elements +(stack->el_count-1); //get top element
+  
+  int inner2=0;
+  inner2=top->stack_inner->el_count;
+*/
+  // printf("elemsinner:%d,ou:%d,in2:%d\n",elemsinner,elout, inner2);
+  
+
+  // int in2=  top->stack_inner->el_count;
+
+
+  result=gkq_adapt_double(stack);//,stack);
+
+
+
+  // result=gkq_adapt_serial(f,a,b,fa,fb,toler,I_13, p);  
+  // gsl_integration_workspace_free(gsinner2);
+  
+
+  // free(stack->elements);
+
+  return result;
+}
+
+
+
+double gkq_single(double (*f)(double, struct my_f_params*), double a, double b, 
+                       double TOL, struct my_f_params* p,stack_t stack)
+{
+  double result=0.0;
+// *********************************************                
+
+  double m=0.5*(a+b);
+  double h=0.5*(b-a);
+  int i;
+
+
+  double y[13];
+  double fa=y[0]=f(a,p);
+  double fb=y[12]=f(b,p);
+  
+  for(i=1;i<12;i++)           //hier müssen direkt 13 integrale berechnet werden!!!
+    y[i]=f(m+xgkq[i]*h,p);    //auch das sollte parallel erfolgen (pragma parfor?)
+
 
   double I_4= (h/6.0)*(y[0]+y[12]+5.0*(y[4]+y[8]));  // 4-point gauss-lobatto
   double I_7= (h/1470.0)*(77.0*(y[0]+y[12])+432.0*(y[2]+y[10])+  // 7-point kronrod
@@ -445,33 +688,21 @@ double gkq(double (*f)(double, struct my_f_params*), double a, double b, double 
   work.fa=fa;
   work.fb=fb;
   work.p=p;
-  work.y=y;
-  work.result=&result;
+  work.a=a;
   work.f=f;
 
-  
-  // ALLOC INNER WS FOR INTEGR.
-  // gsl_integration_workspace *gsinner2=  gsl_integration_workspace_alloc (1000); 
-  
 
   push_stack(stack, &work); 
-  gkq_adapt();//,stack);
-  
-
-  // result=gkq_adapt_serial(f,a,b,fa,fb,toler,I_13, p);  
-  // gsl_integration_workspace_free(gsinner2);
-  
-
-  // free(stack->elements);
+  result=gkq_adapt_single(stack);//,stack);
 
   return result;
 }
 
-
-double gkq_adapt_serial(double (*f)(double, struct my_f_params*), double a, double b, double fa,double fb, double toler,double I_13, struct my_f_params* p)
+double gkq_adapt_serial(double (*f)(double, struct my_f_params*), double a, double b, 
+                        double fa,double fb, double toler,double I_13, struct my_f_params* p)
 {
   double m = (a+b)/2;
-  double h = (b -a)/2;
+  double h = (b-a)/2;
   double mll=m-alpha*h;
   double ml=m-beta*h;
   double mr=m+beta*h;
@@ -515,15 +746,19 @@ double gkq_adapt_serial(double (*f)(double, struct my_f_params*), double a, doub
 
 }
 
-double gkq_adapt(void) //, stack_t stack)
+
+double gkq_adapt_single(stack_t stack)
 {
   work_gkq work;
+  // work.iter=0;
   int ready, idle, busy;
-  double integral_result = 0.0;    
+  double integral_result = 0.0;  
+
   busy = 0;
-  double *result=NULL;
+  terminate_gkq=0;
+
 #pragma omp parallel default(none) \
-    shared(stack, integral_result,busy,terminate_gkq,result) \
+    shared(stack, integral_result,busy) \
     private(work, idle, ready)
   {  
 // printf("me:%d, err:%d\n",omp_get_thread_num(),simpson_error);    
@@ -564,13 +799,17 @@ double gkq_adapt(void) //, stack_t stack)
 
       if (idle)
         continue; //if ready==1 --> leave loop
-      double (*f)(double, struct my_f_params*) = work.f;
+// double I_prev=work.I_prev;
+
+double (*f)(double, struct my_f_params*)=work.f; 
+
       double a = work.a;
       double b = work.b;      
       double toler = work.toler;    
       double I_13=work.I_13; 
       double fa=work.fa;
       double fb=work.fb;
+      // int iter=work.iter;
       // double *y= work.y; // brauch ich nicht!
       struct my_f_params * p = work.p;
       
@@ -588,35 +827,32 @@ double gkq_adapt(void) //, stack_t stack)
       double fmrr=f(mrr,p);
       double I_4=h/6.0*(fa+fb+5.0*(fml+fmr));   // 4-point Gauss-Lobatto formula.
       double I_7=h/1470.0*(77.0*(fa+fb)+432.0*(fmll+fmrr)+625.0*(fml+fmr)+672.0*fm);
-
-// double *result=NULL;
-
-result=work.result;
       
+// if(myid==1)
+//   printf("I_7:%.4e, I_13:%.4e,I_4:%.4e, minus:%.4e, to:%.4e\n",I_7,I_13,I_4,I_7-I_4, toler*I_13);
+// int maxiter=50; //max. subdivisions
+// double abstol=1e-30;
+// work.I_prev=I_7; // für abstolcheck in nächster recursion
 
-      if (fabs(I_7-I_4) <= toler*I_13 || mll <= a || b <= mrr) 
+      if (fabs(I_7-I_4) <= toler*I_13 || mll <= a || b <= mrr) // || iter > maxiter || fabs(I_7-I_prev) < abstol ) 
       {
-        if ((mll <= a || b <= mrr))// && !terminate_gkq) //Error
+        if ((mll <= a || b <= mrr)) //Error
          {
            // out_of_tolerance=true; // Interval contains no more machine numbers
-           printf("OUT OF TOLERANCE !!!, mll:%.4e, a:%.4e, b:%.4e, mrr:%.4e\n", mll,b,b,mrr);
-           terminate_gkq=1;  
-         }
-        //#pragma omp critical (integral_result)            
-        #pragma omp task           
-        {
-          //integral_result += I_7;      //Terminate recursion.  
-          *result=*result+I_7;
-        }        
-// printf("me ok:%d, a:%f,b:%f, tler:%.5e,I_4:%f,I_7:%f,ubteg;%.4e\n", omp_get_thread_num(), a,b,toler,I_4,I_7,integral_result);        
+           // printf("OUT OF TOLERANCE !!!, mll:%.4e, a:%.4e, b:%.4e, mrr:%.4e,I_7-I_4:%.4e, tol:%.4e,I_13:%.4e\n", 
+           //        mll,b,b,mrr,I_7-I_4, toler*I_13,I_13);
 
+         }
+        #pragma omp critical (integral_result)            
+        {
+          integral_result += I_7;      //Terminate recursion.  
+        }        
       }
       else  //subdivide interval and push new work on stack
       {
         #pragma omp critical (stack)
-        {
-
-          // printf("me NOOOO:%d, a:%f,b:%f, tler:%.5e,I_4:%f,I_7:%f\n", omp_get_thread_num(), a,b,toler,I_4,I_7);
+        {          
+          // work.iter=iter+1;
 
           work.a=a;
           work.b=mll;
@@ -658,10 +894,622 @@ result=work.result;
       }   // else ..non-acceptable error
     } // while
   } /* end omp parallel */
+  return integral_result;    
+}
+
+double gkq_adapt_double(stack_t stack)
+{
+  work_gkq work;
+  work_gkq* pwork_outer;
+
+  int ready, idle, busy;
+  double integral_result = 0.0;    
+  busy = 0;
+  int myid;
+#pragma omp parallel default(none) \
+    shared(stack, integral_result,busy,iter) \
+    private(work, idle, ready,myid,pwork_outer)
+  {      
+
+    myid=omp_get_thread_num();
+
+    ready = 0;
+    idle = 1;
+
+    while(!ready) // && !terminate_gkq)//  && !simpson_error) //<-- so NICHT!
+    {
+
+//getchar();
+printf("\n NEXT, curapprox:%.4e\n",integral_result);
+
+      #pragma omp critical (stack)
+      {
+        //pointer to outer work element
+        //work_gkq* pwork=(work_gkq*) stack->elements + stack->el_count*stack->el_size;
+
+        int elcnt=stack->el_count;
+        printf("myid:%d,elcnt:%d\n",myid,elcnt);        
+        
+        stack_t stack_inner;
+        if(elcnt>0)
+        {
+          pwork_outer=(work_gkq*) stack->elements +(elcnt-1); //get top element
+          stack_inner=pwork_outer->stack_inner;
+        }
+        else
+          stack_inner=NULL;
+
+
+        //#pragma omp critical (stack_inner)
+        { //stackinner gehört zu work, und work ist private!
+          if(!empty_stack(stack_inner))
+          {           
+            printf("myid:%d,iter:%d, inner stack not empty,pop..\n",myid,iter);  
+            pop_stack(stack_inner, &work);
+            iter++;
+
+            if (idle)
+            {          
+              busy += 1;
+              idle = 0;
+            }              
+          }
+          else //inner stack is empty, pop from outer
+          {
+            printf("myid:%d,iter:%d, inner stack empty\n",myid,iter);
+
+            if (!empty_stack(stack))
+            {
+              printf("myid:%d,iter:%d, outer stack not empty\n",myid,iter);
+
+              pop_stack(stack, &work);
+              iter++;
+              if (idle)
+              {            
+                busy += 1;
+                idle = 0;
+              }              
+            }
+            else //auch outer stack ist leer
+            {           
+              printf("myid:%d,iter:%d, outer stack empty too\n",myid,iter);   
+              if (!idle)
+              {
+                busy -= 1;
+                idle = 1;
+              }
+              if (busy == 0)
+              {
+                ready = 1;        
+              }
+            }
+          }            
+        } // critical inner stack
+      } //critical outer stack
+
+
+      if (idle)
+      {
+        printf("myid:%d,iter:%d, noth8ing to do\n",myid,iter);
+        continue; //if ready==1 --> leave loop
+      }
+
+
+      //work on inner tasks first,  if available
+      if(work.is_parent==0)
+      {
+        printf("myid:%d,iter:%d, work is not parent\n",myid,iter);
+
+        double (*f)(double, struct my_f_params*) = work.f;
+        double a = work.a;
+        double b = work.b;      
+        double toler = work.toler;    
+        double I_13=work.I_13; 
+        double fa=work.fa;
+        double fb=work.fb;
+        // double *y= work.y; // brauch ich nicht!
+        struct my_f_params * p = work.p;
+        
+        double m = (a+b)/2;
+        double h = (b -a)/2;
+        double mll=m-alpha*h;
+        double ml=m-beta*h;
+        double mr=m+beta*h;
+        double mrr=m+alpha*h;
+
+        double fmll=f(mll,p);
+        double fml=f(ml,p);
+        double fm=f(m,p);
+        double fmr=f(mr,p);
+        double fmrr=f(mrr,p);
+        double I_4=h/6.0*(fa+fb+5.0*(fml+fmr));   // 4-point Gauss-Lobatto formula.
+        double I_7=h/1470.0*(77.0*(fa+fb)+432.0*(fmll+fmrr)+625.0*(fml+fmr)+672.0*fm);
+      
+printf("myid:%d,iter:%d non parent checkpoint 1 passed\n",myid,iter);
+
+        if (fabs(I_7-I_4) <= toler*I_13 || mll <= a || b <= mrr) 
+        {
+          if ((mll <= a || b <= mrr))// && !terminate_gkq) //Error
+           {             
+             printf("OUT OF TOLERANCE !!!, mll:%.4e, a:%.4e, b:%.4e, mrr:%.4e\n", mll,a,b,mrr);
+           }
+            
+printf("myid:%d,iter:%d non parent checkpoint 2.1 passed\n",myid,iter);
+
+          int tasknr=work.subtask_nr;
+          printf("myid:%d,iter:%d, winner error acceptable: I_7:%.4e, I_4:%.4e, I_13:%.4e,toler*I_13:%.4e,toler:%.4e\n",
+                  myid,iter,I_7,I_4, I_13,toler*I_13,toler);
+
+
+          // #pragma omp critical
+          {
+            double *inner_integrals=pwork_outer->inner_integrals;
+
+printf("myid:%d,iter:%d non parent checkpoint 3 passed\n",myid,iter);            
+
+            //integral_result += I_7;      //Terminate recursion.  
+            inner_integrals[tasknr]+=I_7;
+            printf("myid:%d,iter:%d, inner_integral[%d]:%.4e added:%.4e\n",myid,iter,tasknr,inner_integrals[tasknr],I_7);
+          }            
+        }
+        else  //subdivide interval and push new work on stack
+        {
+          stack_t stack_inner =  pwork_outer->stack_inner;          
+
+printf("myid:%d,iter:%d non parent checkpoint 2.2 passed\n",myid,iter);
+
+//          #pragma omp critical (stack_inner)
+          { 
+
+            printf("myid:%d,iter:%d, inner_integral approx not accurate..subdivide: I_4:%f,I_7:%f,I_13:%f\n",
+                    myid,iter,I_4,I_7,I_13);
+
+printf("myid:%d,iter:%d non parent checkpoint 2.4 passed\n",myid,iter);
+
+            work.a=a;
+            work.b=mll;
+            work.fa=fa;
+            work.fb=fmll;
+            push_stack(stack_inner, &work);   
+
+            work.a=mll;
+            work.b=ml;
+            work.fa=fmll;
+            work.fb=fml;
+            push_stack(stack_inner, &work);   
+
+            work.a=ml;
+            work.b=m;
+            work.fa=fml;
+            work.fb=fm;
+            push_stack(stack_inner, &work);             
+
+            work.a=m;
+            work.b=mr;
+            work.fa=fm;
+            work.fb=fmr;
+            push_stack(stack_inner, &work);             
+
+            work.a=mr;
+            work.b=mrr;
+            work.fa=fmr;
+            work.fb=fmrr;
+            push_stack(stack_inner, &work);             
+
+            work.a=mrr;
+            work.b=b;
+            work.fa=fmrr;
+            work.fb=fb;
+            push_stack(stack_inner, &work);                       
+
+printf("myid:%d,iter:%d non parent checkpoint 2.4 passed\n",myid,iter);
+
+
+          } // pragma critical stack_inner
+        }   // else ..non-acceptable error
+      }// !isparent
+      else  //parent task without any inner tasks
+      {
+
+printf("myid:%d,iter:%d, work is parent\n",myid,iter);
+
+        stack_t stack_inner = work.stack_inner;
+        // free(stack_inner->elements);
+        // free(stack_inner);
+
+        double (*f)(double, struct my_f_params*) = work.f;
+        double a = work.a;
+        double b = work.b;      
+        double toler = work.toler;    
+        double I_13=work.I_13; 
+        double fa=work.fa;
+        double fb=work.fb;
+        // double *y= work.y; // brauch ich nicht!
+        struct my_f_params * p = work.p;
+        
+        double m = (a+b)/2;
+        double h = (b -a)/2;
+        double mll=m-alpha*h;
+        double ml=m-beta*h;
+        double mr=m+beta*h;
+        double mrr=m+alpha*h;
+
+        //the inner intergrals are pre-calculated and saved in an array
+        //the function only calculates a prefactor...
+        double fmll=f(mll,p)*work.inner_integrals[0];
+        double fml=  f(ml,p)*work.inner_integrals[1];
+        double fm=   f(m,p)*work.inner_integrals[2];
+        double fmr=  f(mr,p)*work.inner_integrals[3];
+        double fmrr= f(mrr,p)*work.inner_integrals[4];
+
+        double I_4=h/6.0*(fa+fb+5.0*(fml+fmr));   // 4-point Gauss-Lobatto formula.
+        double I_7=h/1470.0*(77.0*(fa+fb)+432.0*(fmll+fmrr)+625.0*(fml+fmr)+672.0*fm);        
+
+        if (fabs(I_7-I_4) <= toler*I_13 || mll <= a || b <= mrr) 
+        {
+          if ((mll <= a || b <= mrr))// && !terminate_gkq) //Error
+           {
+             // out_of_tolerance=true; // Interval contains no more machine numbers
+             printf("outer task OUT OF TOLERANCE !!!, mll:%.4e, a:%.4e, b:%.4e, mrr:%.4e\n", mll,b,b,mrr);
+           }
+           #pragma omp critical(integal_result)
+           {
+              integral_result += I_7;
+              printf("myid:%d,iter:%d, I7 added, integs: 0=%f,1=%f,2=%f,3=%f,4=%f\n", myid,iter, 
+                    work.inner_integrals[0],work.inner_integrals[1],work.inner_integrals[2],
+                    work.inner_integrals[3],work.inner_integrals[4]);
+           }
+        }
+        else  //subdivide interval and push new work on stack
+        {
+
+printf("myid:%d,iter:%d, iouter_integral approx not accurate: I_7=%.4e,I_4=%.4e,I_13=%.4e, toler*I_13:%.4e...subdivide\n",
+        myid,iter,I_7,I_4,I_13,I_13*toler);
+
+          stack_t stack_inner = work.stack_inner;
+          // #pragma omp critical (stack_inner)          
+          { 
+            //create sub-stack for inner-integrals
+            
+
+            
+            create_stack(&stack_inner, sizeof(work_gkq));            
+            work.is_parent=1;
+            printf("myid:%d,iter:%d, 2\n",myid,iter);
+
+            work_gkq winner;         
+
+            //outer task elem
+            work.a=a;
+            work.b=mll;
+            work.fa=fa;
+            work.fb=fmll;          
+            
+            double m_inner=  (work.a+work.b)/2;
+            double h_inner=  (work.a+work.b)/2;
+            double mll_inner=(m_inner-alpha*h_inner);
+            double ml_inner= (m_inner-beta*h_inner);
+            double mr_inner= (m_inner+beta*h_inner);
+            double mrr_inner=(m_inner+alpha*h_inner);
+
+            //Jedes subinterval bekommt 5 inner tasks für die inneren integrale!
+            double integ_bnd[2];
+
+            //1st subtask
+            get_integ_bounds_inner(integ_bnd, mll_inner, work.p);            
+            winner=gkq_create_inner_task(inner_integrand2, integ_bnd[0],integ_bnd[1],1e-3, work.p);
+            winner.subtask_nr=0;
+            push_stack(work.stack_inner,&winner);
+
+            //2nd subtask
+            get_integ_bounds_inner(integ_bnd, ml_inner, work.p);            
+            winner=gkq_create_inner_task(inner_integrand2, integ_bnd[0],integ_bnd[1],1e-3, work.p);
+            winner.subtask_nr=1;
+            push_stack(work.stack_inner,&winner);
+
+            //3rd subtask
+            get_integ_bounds_inner(integ_bnd, m_inner, work.p);            
+            winner=gkq_create_inner_task(inner_integrand2, integ_bnd[0],integ_bnd[1],1e-3, work.p);
+            winner.subtask_nr=2;
+            push_stack(work.stack_inner,&winner);     
+
+            //4th subtask
+            get_integ_bounds_inner(integ_bnd, mr_inner, work.p);            
+            winner=gkq_create_inner_task(inner_integrand2, integ_bnd[0],integ_bnd[1],1e-3, work.p);
+            winner.subtask_nr=3;
+            push_stack(work.stack_inner,&winner);     
+
+            //5th subtask
+            get_integ_bounds_inner(integ_bnd, mrr_inner, work.p);            
+            winner=gkq_create_inner_task(inner_integrand2, integ_bnd[0],integ_bnd[1],1e-3, work.p);
+            winner.subtask_nr=4;
+            push_stack(work.stack_inner,&winner);
+
+printf("myid:%d,iter:%d, subdiv pre 1\n",myid,iter);
+            #pragma omp critical (stack)
+            push_stack(stack, &work);      
+printf("myid:%d,iter:%d, subdiv post 1\n",myid,iter);
+
+
+            // *************************
+            // *   2nd subinterval
+            // **************************
+            work.a=mll;
+            work.b=ml;
+            work.fa=fmll;
+            work.fb=fml;
+
+            m_inner=  (work.a+work.b)/2;
+            h_inner=  (work.a+work.b)/2;
+            mll_inner=(m_inner-alpha*h_inner);
+            ml_inner= (m_inner-beta*h_inner);
+            mr_inner= (m_inner+beta*h_inner);
+            mrr_inner=(m_inner+alpha*h_inner);
+
+
+            //1st subtask
+            get_integ_bounds_inner(integ_bnd, mll_inner, work.p);            
+            winner=gkq_create_inner_task(inner_integrand2, integ_bnd[0],integ_bnd[1],1e-3, work.p);
+            winner.subtask_nr=0;
+            push_stack(work.stack_inner,&winner);
+            
+
+            //2nd subtask
+            get_integ_bounds_inner(integ_bnd, ml_inner, work.p);            
+            winner=gkq_create_inner_task(inner_integrand2, integ_bnd[0],integ_bnd[1],1e-3, work.p);
+            winner.subtask_nr=1;
+            push_stack(work.stack_inner,&winner);
+              
+
+            //3rd subtask
+            get_integ_bounds_inner(integ_bnd, m_inner, work.p);            
+            winner=gkq_create_inner_task(inner_integrand2, integ_bnd[0],integ_bnd[1],1e-3, work.p);
+            winner.subtask_nr=2;
+            push_stack(work.stack_inner,&winner);
+                          
+
+            //4th subtask
+            get_integ_bounds_inner(integ_bnd, mr_inner, work.p);            
+            winner=gkq_create_inner_task(inner_integrand2, integ_bnd[0],integ_bnd[1],1e-3, work.p);
+            winner.subtask_nr=3;
+            push_stack(work.stack_inner,&winner);
+                          
+
+            //5th subtask
+            get_integ_bounds_inner(integ_bnd, mrr_inner, work.p);            
+            winner=gkq_create_inner_task(inner_integrand2, integ_bnd[0],integ_bnd[1],1e-3, work.p);
+            winner.subtask_nr=4;
+            push_stack(work.stack_inner,&winner);
+
+            #pragma omp critical (stack)
+            push_stack(stack, &work);                  
+
+            // *************************
+            // *   3rd subinterval
+            // **************************
+            work.a=ml;
+            work.b=m;
+            work.fa=fml;
+            work.fb=fm;
+
+            m_inner=  (work.a+work.b)/2;
+            h_inner=  (work.a+work.b)/2;
+            mll_inner=(m_inner-alpha*h_inner);
+            ml_inner= (m_inner-beta*h_inner);
+            mr_inner= (m_inner+beta*h_inner);
+            mrr_inner=(m_inner+alpha*h_inner);            
+
+            //1st subtask
+            get_integ_bounds_inner(integ_bnd, mll_inner, work.p);            
+            winner=gkq_create_inner_task(inner_integrand2, integ_bnd[0],integ_bnd[1],1e-3, work.p);
+            winner.subtask_nr=0;
+            push_stack(work.stack_inner,&winner);
+            
+
+            //2nd subtask
+            get_integ_bounds_inner(integ_bnd, ml_inner, work.p);            
+            winner=gkq_create_inner_task(inner_integrand2, integ_bnd[0],integ_bnd[1],1e-3, work.p);
+            winner.subtask_nr=1;
+            push_stack(work.stack_inner,&winner);
+              
+
+            //3rd subtask
+            get_integ_bounds_inner(integ_bnd, m_inner, work.p);            
+            winner=gkq_create_inner_task(inner_integrand2, integ_bnd[0],integ_bnd[1],1e-3, work.p);
+            winner.subtask_nr=2;
+            push_stack(work.stack_inner,&winner);
+                          
+
+            //4th subtask
+            get_integ_bounds_inner(integ_bnd, mr_inner, work.p);            
+            winner=gkq_create_inner_task(inner_integrand2, integ_bnd[0],integ_bnd[1],1e-3, work.p);
+            winner.subtask_nr=3;
+            push_stack(work.stack_inner,&winner);
+                          
+
+            //5th subtask
+            get_integ_bounds_inner(integ_bnd, mrr_inner, work.p);            
+            winner=gkq_create_inner_task(inner_integrand2, integ_bnd[0],integ_bnd[1],1e-3, work.p);
+            winner.subtask_nr=4;
+            push_stack(work.stack_inner,&winner);
+
+            #pragma omp critical (stack)
+            push_stack(stack, &work);                              
 
 
 
-  return 0;    
+            // *************************
+            // *   4th subinterval
+            // **************************
+            work.a=m;
+            work.b=mr;
+            work.fa=fm;
+            work.fb=fmr;
+
+            m_inner=  (work.a+work.b)/2;
+            h_inner=  (work.a+work.b)/2;
+            mll_inner=(m_inner-alpha*h_inner);
+            ml_inner= (m_inner-beta*h_inner);
+            mr_inner= (m_inner+beta*h_inner);
+            mrr_inner=(m_inner+alpha*h_inner);            
+
+            //1st subtask
+            get_integ_bounds_inner(integ_bnd, mll_inner, work.p);            
+            winner=gkq_create_inner_task(inner_integrand2,integ_bnd[0],integ_bnd[1],1e-3, work.p);
+            winner.subtask_nr=0;
+            push_stack(work.stack_inner,&winner);
+            
+
+            //2nd subtask
+            get_integ_bounds_inner(integ_bnd, ml_inner, work.p);            
+            winner=gkq_create_inner_task(inner_integrand2,integ_bnd[0],integ_bnd[1],1e-3, work.p);
+            winner.subtask_nr=1;
+            push_stack(work.stack_inner,&winner);
+              
+
+            //3rd subtask
+            get_integ_bounds_inner(integ_bnd, m_inner, work.p);            
+            winner=gkq_create_inner_task(inner_integrand2,integ_bnd[0],integ_bnd[1],1e-3, work.p);
+            winner.subtask_nr=2;
+            push_stack(work.stack_inner,&winner);
+                          
+
+            //4th subtask
+            get_integ_bounds_inner(integ_bnd, mr_inner, work.p);            
+            winner=gkq_create_inner_task(inner_integrand2,integ_bnd[0],integ_bnd[1],1e-3, work.p);
+            winner.subtask_nr=3;
+            push_stack(work.stack_inner,&winner);
+                          
+
+            //5th subtask
+            get_integ_bounds_inner(integ_bnd, mrr_inner, work.p);            
+            winner=gkq_create_inner_task(inner_integrand2,integ_bnd[0],integ_bnd[1],1e-3, work.p);
+            winner.subtask_nr=4;
+            push_stack(work.stack_inner,&winner);
+
+            #pragma omp critical (stack)
+            push_stack(stack, &work);                              
+
+            // *************************
+            // *   5th subinterval
+            // **************************
+            work.a=mr;
+            work.b=mrr;
+            work.fa=fmr;
+            work.fb=fmrr;
+
+            m_inner=  (work.a+work.b)/2;
+            h_inner=  (work.a+work.b)/2;
+            mll_inner=(m_inner-alpha*h_inner);
+            ml_inner= (m_inner-beta*h_inner);
+            mr_inner= (m_inner+beta*h_inner);
+            mrr_inner=(m_inner+alpha*h_inner);            
+
+            //1st subtask
+            get_integ_bounds_inner(integ_bnd, mll_inner, work.p);            
+            winner=gkq_create_inner_task(inner_integrand2,integ_bnd[0],integ_bnd[1],1e-3, work.p);
+            winner.subtask_nr=0;
+            push_stack(work.stack_inner,&winner);
+            
+
+            //2nd subtask
+            get_integ_bounds_inner(integ_bnd, ml_inner, work.p);            
+            winner=gkq_create_inner_task(inner_integrand2,integ_bnd[0],integ_bnd[1],1e-3, work.p);
+            winner.subtask_nr=1;
+            push_stack(work.stack_inner,&winner);
+              
+
+            //3rd subtask
+            get_integ_bounds_inner(integ_bnd, m_inner, work.p);            
+            winner=gkq_create_inner_task(inner_integrand2,integ_bnd[0],integ_bnd[1],1e-3, work.p);
+            winner.subtask_nr=2;
+            push_stack(work.stack_inner,&winner);
+                          
+
+            //4th subtask
+            get_integ_bounds_inner(integ_bnd, mr_inner, work.p);            
+            winner=gkq_create_inner_task(inner_integrand2,integ_bnd[0],integ_bnd[1],1e-3, work.p);
+            winner.subtask_nr=3;
+            push_stack(work.stack_inner,&winner);
+                          
+
+            //5th subtask
+            get_integ_bounds_inner(integ_bnd, mrr_inner, work.p);            
+            winner=gkq_create_inner_task(inner_integrand2,integ_bnd[0],integ_bnd[1],1e-3, work.p);
+            winner.subtask_nr=4;
+            push_stack(work.stack_inner,&winner);
+
+            #pragma omp critical (stack)
+            push_stack(stack, &work);                              
+
+            // *************************
+            // *   6th subinterval
+            // **************************
+            work.a=mrr;
+            work.b=b;
+            work.fa=fmrr;
+            work.fb=fb;
+
+            m_inner=  (work.a+work.b)/2;
+            h_inner=  (work.a+work.b)/2;
+            mll_inner=(m_inner-alpha*h_inner);
+            ml_inner= (m_inner-beta*h_inner);
+            mr_inner= (m_inner+beta*h_inner);
+            mrr_inner=(m_inner+alpha*h_inner);            
+
+            //1st subtask
+            get_integ_bounds_inner(integ_bnd, mll_inner, work.p);            
+            winner=gkq_create_inner_task(inner_integrand2,integ_bnd[0],integ_bnd[1],1e-3, work.p);
+            winner.subtask_nr=0;
+            push_stack(work.stack_inner,&winner);
+            
+
+            //2nd subtask
+            get_integ_bounds_inner(integ_bnd, ml_inner, work.p);            
+            winner=gkq_create_inner_task(inner_integrand2,integ_bnd[0],integ_bnd[1],1e-3, work.p);
+            winner.subtask_nr=1;
+            push_stack(work.stack_inner,&winner);
+              
+
+            //3rd subtask
+            get_integ_bounds_inner(integ_bnd, m_inner, work.p);            
+            winner=gkq_create_inner_task(inner_integrand2,integ_bnd[0],integ_bnd[1],1e-3, work.p);
+            winner.subtask_nr=2;
+            push_stack(work.stack_inner,&winner);
+                          
+
+            //4th subtask
+            get_integ_bounds_inner(integ_bnd, mr_inner, work.p);            
+            winner=gkq_create_inner_task(inner_integrand2,integ_bnd[0],integ_bnd[1],1e-3, work.p);
+            winner.subtask_nr=3;
+            push_stack(work.stack_inner,&winner);
+                          
+
+            //5th subtask
+            get_integ_bounds_inner(integ_bnd, mrr_inner, work.p);            
+            winner=gkq_create_inner_task(inner_integrand2,integ_bnd[0],integ_bnd[1],1e-3, work.p);
+            winner.subtask_nr=4;
+            push_stack(work.stack_inner,&winner);
+
+            #pragma omp critical (stack)
+            push_stack(stack, &work);            
+
+            printf("myid:%d,iter:%d, 6 subinvtervals with 5 subtasks each pushed to stack outer\n",myid,iter);
+
+
+          } // pragma critical
+        }   // else ..non-acceptable error
+
+
+      }
+
+
+    } // while
+  } /* end omp parallel */
+
+
+
+  return integral_result;    
 }
 
 
