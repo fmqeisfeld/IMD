@@ -357,15 +357,21 @@ void push_stack(
   int i, new_reserve;
   int log2_count;
 
-  /* check if we need more memory for stack */    
-  if (stack->el_count >= stack->mem_reserve){
+  /* check if we need more memory for stack */      
+  if (stack->el_count >= stack->mem_reserve)
+  {
 
       /* calculate new size for the stack
          it should be a power of two */
-      for (i = stack->el_count, log2_count = 0; 
-           i > 0; 
-           i>>1, log2_count++);
-      new_reserve = 1 << log2_count;
+      // for (i = stack->el_count, log2_count = 0; i > 0;  i>>1, log2_count++);
+      //   new_reserve = 1 << log2_count;
+
+      log2_count=0;
+      for(i=stack->el_count;i>0; i=i*0.5) //i>>1)
+      {
+        log2_count++;
+      }
+      new_reserve= 1 << log2_count;
  
       /* reallocate memory for phase thread tables 
          and nullify new values */
@@ -906,7 +912,7 @@ double gkq_adapt_double(stack_t stack)
   double integral_result = 0.0;    
   busy = 0;
   int myid;
-#pragma omp parallel default(none) \
+#pragma omp parallel default(none)  \
     shared(stack, integral_result,busy,iter) \
     private(work, idle, ready,myid,pwork_outer)
   {      
@@ -919,7 +925,7 @@ double gkq_adapt_double(stack_t stack)
     while(!ready) // && !terminate_gkq)//  && !simpson_error) //<-- so NICHT!
     {
 
-//getchar();
+getchar();
 printf("\n NEXT, curapprox:%.4e\n",integral_result);
 
       #pragma omp critical (stack)
@@ -939,12 +945,12 @@ printf("\n NEXT, curapprox:%.4e\n",integral_result);
         else
           stack_inner=NULL;
 
-
-        //#pragma omp critical (stack_inner)
-        { //stackinner gehört zu work, und work ist private!
+        
+        { //stackinner gehört zu work, und work ist private!          
           if(!empty_stack(stack_inner))
           {           
             printf("myid:%d,iter:%d, inner stack not empty,pop..\n",myid,iter);  
+            #pragma atomic
             pop_stack(stack_inner, &work);
             iter++;
 
@@ -1041,24 +1047,32 @@ printf("myid:%d,iter:%d non parent checkpoint 2.1 passed\n",myid,iter);
                   myid,iter,I_7,I_4, I_13,toler*I_13,toler);
 
 
-          // #pragma omp critical
+          #pragma omp critical (innerinteg) // workers greifen auf selbes array zu.nur an anderer Stelle..evtl. besser 6 versch.doubles statt array?
           {
             double *inner_integrals=pwork_outer->inner_integrals;
 
 printf("myid:%d,iter:%d non parent checkpoint 3 passed\n",myid,iter);            
 
             //integral_result += I_7;      //Terminate recursion.  
+            //#pragma omp atomic (innerinteg)
             inner_integrals[tasknr]+=I_7;
             printf("myid:%d,iter:%d, inner_integral[%d]:%.4e added:%.4e\n",myid,iter,tasknr,inner_integrals[tasknr],I_7);
           }            
         }
         else  //subdivide interval and push new work on stack
         {
-          stack_t stack_inner =  pwork_outer->stack_inner;          
+
+          
+          stack_t stack_inner;
+          #pragma omp critical //(stack_inner) 
+          {
+            stack_inner =  pwork_outer->stack_inner;            
+          }
+          
 
 printf("myid:%d,iter:%d non parent checkpoint 2.2 passed\n",myid,iter);
 
-//          #pragma omp critical (stack_inner)
+          #pragma omp critical //(stack) //(stack_inner)
           { 
 
             printf("myid:%d,iter:%d, inner_integral approx not accurate..subdivide: I_4:%f,I_7:%f,I_13:%f\n",
@@ -1070,36 +1084,42 @@ printf("myid:%d,iter:%d non parent checkpoint 2.4 passed\n",myid,iter);
             work.b=mll;
             work.fa=fa;
             work.fb=fmll;
+            
             push_stack(stack_inner, &work);   
 
             work.a=mll;
             work.b=ml;
             work.fa=fmll;
             work.fb=fml;
+            
             push_stack(stack_inner, &work);   
 
             work.a=ml;
             work.b=m;
             work.fa=fml;
             work.fb=fm;
+            
             push_stack(stack_inner, &work);             
 
             work.a=m;
             work.b=mr;
             work.fa=fm;
             work.fb=fmr;
+            
             push_stack(stack_inner, &work);             
 
             work.a=mr;
             work.b=mrr;
             work.fa=fmr;
             work.fb=fmrr;
+            
             push_stack(stack_inner, &work);             
 
             work.a=mrr;
             work.b=b;
             work.fa=fmrr;
             work.fb=fb;
+            
             push_stack(stack_inner, &work);                       
 
 printf("myid:%d,iter:%d non parent checkpoint 2.4 passed\n",myid,iter);
@@ -1113,7 +1133,7 @@ printf("myid:%d,iter:%d non parent checkpoint 2.4 passed\n",myid,iter);
 
 printf("myid:%d,iter:%d, work is parent\n",myid,iter);
 
-        stack_t stack_inner = work.stack_inner;
+        // stack_t stack_inner = work.stack_inner; //brauch ich hier nicht
         // free(stack_inner->elements);
         // free(stack_inner);
 
@@ -1152,8 +1172,9 @@ printf("myid:%d,iter:%d, work is parent\n",myid,iter);
              // out_of_tolerance=true; // Interval contains no more machine numbers
              printf("outer task OUT OF TOLERANCE !!!, mll:%.4e, a:%.4e, b:%.4e, mrr:%.4e\n", mll,b,b,mrr);
            }
-           #pragma omp critical(integal_result)
+           //#pragma omp critical(integal_result)
            {
+              #pragma omp atomic
               integral_result += I_7;
               printf("myid:%d,iter:%d, I7 added, integs: 0=%f,1=%f,2=%f,3=%f,4=%f\n", myid,iter, 
                     work.inner_integrals[0],work.inner_integrals[1],work.inner_integrals[2],
@@ -1167,11 +1188,10 @@ printf("myid:%d,iter:%d, iouter_integral approx not accurate: I_7=%.4e,I_4=%.4e,
         myid,iter,I_7,I_4,I_13,I_13*toler);
 
           stack_t stack_inner = work.stack_inner;
-          // #pragma omp critical (stack_inner)          
+          #pragma omp critical (stack)          
           { 
             //create sub-stack for inner-integrals
             
-
             
             create_stack(&stack_inner, sizeof(work_gkq));            
             work.is_parent=1;
@@ -1226,8 +1246,10 @@ printf("myid:%d,iter:%d, iouter_integral approx not accurate: I_7=%.4e,I_4=%.4e,
             push_stack(work.stack_inner,&winner);
 
 printf("myid:%d,iter:%d, subdiv pre 1\n",myid,iter);
-            #pragma omp critical (stack)
-            push_stack(stack, &work);      
+            // #pragma omp critical (stack)
+            // {
+              push_stack(stack, &work);
+            // }      
 printf("myid:%d,iter:%d, subdiv post 1\n",myid,iter);
 
 
@@ -1281,8 +1303,10 @@ printf("myid:%d,iter:%d, subdiv post 1\n",myid,iter);
             winner.subtask_nr=4;
             push_stack(work.stack_inner,&winner);
 
-            #pragma omp critical (stack)
-            push_stack(stack, &work);                  
+            // #pragma omp critical (stack)
+            // {
+              push_stack(stack, &work);
+            // }                 
 
             // *************************
             // *   3rd subinterval
@@ -1333,8 +1357,11 @@ printf("myid:%d,iter:%d, subdiv post 1\n",myid,iter);
             winner.subtask_nr=4;
             push_stack(work.stack_inner,&winner);
 
-            #pragma omp critical (stack)
-            push_stack(stack, &work);                              
+            // #pragma omp critical (stack)
+            // {
+              push_stack(stack, &work);
+            // }
+            
 
 
 
@@ -1387,8 +1414,10 @@ printf("myid:%d,iter:%d, subdiv post 1\n",myid,iter);
             winner.subtask_nr=4;
             push_stack(work.stack_inner,&winner);
 
-            #pragma omp critical (stack)
-            push_stack(stack, &work);                              
+            // #pragma omp critical (stack)
+            {
+              push_stack(stack, &work);
+            }                              
 
             // *************************
             // *   5th subinterval
@@ -1439,8 +1468,10 @@ printf("myid:%d,iter:%d, subdiv post 1\n",myid,iter);
             winner.subtask_nr=4;
             push_stack(work.stack_inner,&winner);
 
-            #pragma omp critical (stack)
-            push_stack(stack, &work);                              
+            // #pragma omp critical (stack)
+            {
+              push_stack(stack, &work);
+            }
 
             // *************************
             // *   6th subinterval
@@ -1491,8 +1522,10 @@ printf("myid:%d,iter:%d, subdiv post 1\n",myid,iter);
             winner.subtask_nr=4;
             push_stack(work.stack_inner,&winner);
 
-            #pragma omp critical (stack)
-            push_stack(stack, &work);            
+            // #pragma omp critical (stack)
+            {
+              push_stack(stack, &work);
+            }           
 
             printf("myid:%d,iter:%d, 6 subinvtervals with 5 subtasks each pushed to stack outer\n",myid,iter);
 

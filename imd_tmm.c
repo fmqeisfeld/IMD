@@ -7,7 +7,7 @@
 // ACHTUNG: Falls Qabs=NaN --> Probe wahrscheinlich zu kurz!
 //
 // 
-//#define TMM_t0_suggest //wenn ja, wird t0 so angepasst dass laser E-field gerade @ threshold für laser aktivieren
+#define TMM_t0_suggest //wenn ja, wird t0 so angepasst dass laser E-field gerade @ threshold für laser aktivieren
 
 #ifdef LOADBALANCE
 #define node  l1[i]

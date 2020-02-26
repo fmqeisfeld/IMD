@@ -35,10 +35,10 @@
                    // ACHTUNG: FEG Momentan totaler BS --> t_from_e viel zu ungenau (+/- 10 %)
                    // Grund: weiss nicht genau aber vermute Fermi_dirac integral 
                    // Evtl. wäre "manuelles" integrieren zuverlässiger
-// #define ADVMODE 1  // 0=NO ADVECTION, 1=DISCRETE FLUX SOLVER (PREDICT ATOMIC FLUXES)
+#define ADVMODE 1  // 0=NO ADVECTION, 1=DISCRETE FLUX SOLVER (PREDICT ATOMIC FLUXES)
 //#define ADVMODE2d  // FALLS y dim offen sein soll, müssen atomic-fluxes auch über kanten kommmuniziert werden
 
-//#define VLATTICE   //VIRTUAL LATTICE HINTER DER PROBE. ACHTUNG: NUR 1D !!!!
+#define VLATTICE   //VIRTUAL LATTICE HINTER DER PROBE. ACHTUNG: NUR 1D !!!!
                     //Falls gewünscht kann mit vlatbuffer die zahl
                     //der zellen (vom ende der probe gezählt) angegeben werden, die NICHT im TTM berücksichtigt
                     //werden soll, da diese als Puffer dienen 
@@ -46,8 +46,19 @@
                     //stark ab -> PROBLEM: Wide-range properties...
                     //zellen mit "-1" atomen sind echte, von VLATTICE deaktivierte Zellen
                     //Zellen mit "-2" atomen sind virtuelle Zellen
-#define DEBUG_LEVEL 1
 
+                    //Mögl.Problem: Falls die letzte aktive Zelle durch die stoßwelle eins nach rechts verschoben wird,
+                    //dann wird auch der vlat-puffer nach rechts verschoben.
+                    //Dabei wird die zelle (last_active_cell - vlat_buffer + 1) aktiviert.
+                    //Da buffer-zellen die atomzahl -1 haben, wurde diese zelle bis zu diesem zeitpunkt vom ttm 
+                    //ignoriert. Bei ihrer Aktiviertung hat sich eine elektronen-temp. = 0
+                    //Aus diesem Grund ist es wohl geschickter, das virtual-lattice nicht dynamisch anzupassen
+                    //sondern nur 1 mal zu beginn zu definieren und für den rest der simulation so zu belassen.
+                    //Bisher ist dieser Fall noch nicht eingetreten, aber bei sehr kleinen ttm-zellen kann das durchaus
+                    //passieren.
+#define VLATTICE_STATIC
+
+#define DEBUG_LEVEL 1
 
 
 
@@ -55,7 +66,7 @@
 #define node  l1[i]       //Achtung: MPIIO-lange nicht mehr aktualisiert (z.b. fehlt colrad)
 #define node2 l2[i]
 
-#define RHOMIN       50
+#define RHOMIN       150
 
 
 // ****************************************************
@@ -115,16 +126,16 @@ void calc_ttm()
     tot_elec_energy_local =0;
     for (i=1; i<local_fd_dim.x-1; ++i)
     {
-          if(node.natoms >= 1 && node.dens >= RHOMIN)
+          if(node.natoms >= fd_min_atoms && node.dens >= RHOMIN)
           {
             node.U =EOS_ee_from_r_te(node.dens, node.temp * 11604.5) * 26.9815 * AMU * J2eV; //eV/Atom      
             node2.U=node.U;
             tot_elec_energy_local += node.U*((double) node.natoms);
           }      
-          else
-          {
-            node.U=0.0; node2.U=0.0;
-          }
+          // else
+          // {
+          //   node.U=0.0; node2.U=0.0;
+          // }
 
     }
 }
@@ -496,8 +507,13 @@ for(i_global=0; i_global < global_fd_dim.x;i_global++)
 
 #ifdef VLATTICE
   MPI_Status vlatstatus;  
+
+#ifdef VLATTICE_STATIC
+  if(steps==0) //in diesem fall nur 1 mal zu beginn nötig  
+#endif    
   MPI_Allreduce(&last_active_cell_local, &last_active_cell_global, 1, MPI_INT, MPI_MAX, cpugrid);
-  //cur_vlattice_proc=last_active_cell_global.rank;)  
+
+  //das folgende kann sich jedoch auch bei statischem vlatbuffer ändern, wegen LB
   cur_vlattice_proc=(int) (((double) last_active_cell_global*num_cpus) / ((double) global_fd_dim.x));
 
 //printf("oldvlat:%d,nuvlat:%d, lastcell:%d\n",old_vlattice_proc, cur_vlattice_proc, last_active_cell_global.val);
@@ -512,7 +528,7 @@ for(i_global=0; i_global < global_fd_dim.x;i_global++)
 
   old_vlattice_proc=cur_vlattice_proc;
 
-  //Jetzt müssen noch die zellen deaktiviert werden, die als "puffer" dienen
+  //Jetzt müssen noch die zellen deaktiviert werden, die als "puffer" dienen   
   for (i = 1; i < local_fd_dim.x - 1; ++i)
   {
     i_global =  ((i - 1) + myid * (local_fd_dim.x - 2));
@@ -547,6 +563,9 @@ void do_FILLMESH(void)
   for (i = 1; i < local_fd_dim.x - 1; ++i)
   {
     i_global =  ((i - 1) + myid * (local_fd_dim.x - 2));
+//HOTFIX    
+if(i_global > last_active_cell_global)
+  continue;
 
     if (node.natoms >= fd_min_atoms && node.dens > RHOMIN)
     {
@@ -1090,6 +1109,9 @@ void do_ADV(double tau)
 
       i_global = ((i - 1) + myid * (local_fd_dim.x - 2));
 
+//HOTIFX      
+// if(i_global > last_active_cell_global)
+  // continue;
 
       double Nold = (double) node.natoms_old;
       double Nnew = (double) node.natoms; //tmp;
@@ -1194,6 +1216,11 @@ void do_cell_activation(void)
     // ZELLE AKTIVIERT
     else if (node.natoms_old < fd_min_atoms && node.natoms >= fd_min_atoms && node.dens > RHOMIN)
     {
+
+//HOTIFX      
+if(i_global > last_active_cell_global)
+  continue;
+
 #if DEBUG_LEVEL > 0
       printf("Warning:New FD cell activated on proc %d at ig:%d, il%d, with %d atoms on step:%d and T=%.4e, dens=%.4e, atoms_old:%d\n",
              myid, i_global, i,node.natoms, steps, node.temp, node.dens, node.natoms_old);
@@ -1323,6 +1350,11 @@ void do_DIFF(double tau)
   for (i = 1; i < local_fd_dim.x - 1; i++)
   {     
     i_global =  ((i - 1) + myid* (local_fd_dim.x - 2));
+
+//HOTIFX      
+if(i_global > last_active_cell_global)
+  continue;    
+
     //compute absorbed laser-energy
     if (laser_active)
     {
@@ -2437,13 +2469,15 @@ double FEG_eeminfun(double x, double r, double ne, double e)
 }
 double FEG_ee_from_r_ne_te(double r,double ne, double T) //free-electron internal energy from Fermi-integral, T in K
 {
- 
+ return 0;
+ /*
   double mu=chempot(ne,T);
   double F_3_half= gsl_sf_fermi_dirac_3half(mu/BOLTZMAN/T);
   double Gamma_5_half=3.0*sqrt(M_PI)/4.0;
   double C=EMASS/M_PI/M_PI/pow(HBAR,3.0)*sqrt(2*EMASS)*pow(BOLTZMAN*T,2.5)/Gamma_5_half;
   double result=C*F_3_half/r;
   return result;
+  */
 
 }
 double FEG_te_from_r_ne_ee(double r,double ne,double e)
