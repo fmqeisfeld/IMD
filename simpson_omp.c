@@ -465,7 +465,7 @@ work_gkq gkq_create_inner_task(double (*f)(double, struct my_f_params*), double 
     I_13=b-a;
   I_13=fabs(I_13);
 
-printf("create inner task: a:%f, b:%f, I4:%f,I7:%f,I13:%f\n",a,b,I_4,I_7,I_13);
+// printf("create inner task: a:%f, b:%f, I4:%f,I7:%f,I13:%f\n",a,b,I_4,I_7,I_13);
   work.toler = toler;
   work.I_13=I_13;
   work.fa=fa;
@@ -588,7 +588,7 @@ double gkq_double(double (*f)(double, struct my_f_params*), double (*finner)(dou
   //1st subtask
   get_integ_bounds_inner(integ_bnd, mll_inner, work.p);            
   winner=gkq_create_inner_task(inner_integrand2,integ_bnd[0], integ_bnd[1],1e-3, work.p);
-  winner.subtask_nr=0;
+  winner.subtask_nr=0;  
   winner.task_nr=work.task_nr;
 
   push_stack(work.stack_inner,&winner);
@@ -597,24 +597,28 @@ double gkq_double(double (*f)(double, struct my_f_params*), double (*finner)(dou
   get_integ_bounds_inner(integ_bnd, ml_inner, work.p);            
   winner=gkq_create_inner_task(inner_integrand2,integ_bnd[0], integ_bnd[1],1e-3, work.p);
   winner.subtask_nr=1;
+  winner.task_nr=work.task_nr;
   push_stack(work.stack_inner,&winner); 
 
   //3rd subtask
   get_integ_bounds_inner(integ_bnd, m_inner, work.p);            
   winner=gkq_create_inner_task(inner_integrand2,integ_bnd[0], integ_bnd[1],1e-3, work.p);
   winner.subtask_nr=2;
+  winner.task_nr=work.task_nr;
   push_stack(work.stack_inner,&winner);     
 
   //4th subtask
   get_integ_bounds_inner(integ_bnd, mr_inner, work.p);            
   winner=gkq_create_inner_task(inner_integrand2,integ_bnd[0], integ_bnd[1],1e-3, work.p);
   winner.subtask_nr=3;
+  winner.task_nr=work.task_nr;
   push_stack(work.stack_inner,&winner);     
 
   //5th subtask
   get_integ_bounds_inner(integ_bnd, mrr_inner, work.p);            
   winner=gkq_create_inner_task(inner_integrand2,integ_bnd[0], integ_bnd[1],1e-3, work.p);
   winner.subtask_nr=4;
+  winner.task_nr=work.task_nr;
   push_stack(work.stack_inner,&winner);
 
   //push outer integtand work on outer stack
@@ -902,6 +906,7 @@ double (*f)(double, struct my_f_params*)=work.f;
           work.b=b;
           work.fa=fmrr;
           work.fb=fb;
+
           push_stack(stack, &work);                       
 
         } // pragma critical stack
@@ -936,31 +941,30 @@ double gkq_adapt_double(stack_t stack)
     {
 
 
-printf("\n NEXT, curapprox:%.4e\n",integral_result);
-
+// printf("\n NEXT, curapprox:%.4e\n",integral_result);
       #pragma omp critical (stack)
       {
         //pointer to outer work element
         //work_gkq* pwork=(work_gkq*) stack->elements + stack->el_count*stack->el_size;
 
         elcnt=stack->el_count;
-        printf("myid:%d,elcnt:%d\n",myid,elcnt);        
+     
 
 // if(elcnt>1)
-getchar();
+//  getchar();
         
         stack_t stack_inner;
         if(elcnt>0)
         {
           pwork_outer=(work_gkq*) stack->elements +(elcnt-1); //get top element
 
-          
-            while(pwork_outer->task_nr>0 && pwork_outer->subtasks_left==0)
+          //IST WOHL SUBOPTIMAL
+            while(pwork_outer->task_nr > 0 && pwork_outer->subtasks_left==0) //this task is complete, goto next outer task
             {
-              printf("outer task nr:%d, complete:subs:%d, decrement\n",pwork_outer->task_nr,pwork_outer->subtasks_left);
+              printf("myid:%d, outer task nr:%d, complete:subs:%d, decrement\n",myid,pwork_outer->task_nr,pwork_outer->subtasks_left);
               pwork_outer--;
             }
-          stack_inner=pwork_outer->stack_inner;
+            stack_inner=pwork_outer->stack_inner;
         }
         else
         {
@@ -968,7 +972,8 @@ getchar();
           pwork_outer=NULL;
         }
 
-        
+        printf("myid:%d,elcnt:%d,sinner:%p,pwout:%p\n",myid,elcnt,stack_inner,pwork_outer);   
+
         { //stackinner gehört zu work, und work ist private!          
           if(!empty_stack(stack_inner))
           {           
@@ -986,9 +991,10 @@ getchar();
           }
           else //inner stack is empty, pop from outer
           {
+            printf("myid:%d,iter:%d, inner stack is empty?\n",myid,iter);
             if (!empty_stack(stack)) //work elem ist blockiert solange inner integs nicht vollständig
             {              
-              printf("myid:%d,iter:%d, inner stack empty. work on outer with cnt=%d\n",myid,iter,pwork_outer->subtasks_left);
+              // printf("myid:%d,iter:%d, inner stack empty. work on outer with cnt=%d\n",myid,iter,pwork_outer->subtasks_left);
               if(pwork_outer->subtasks_left==0)
               {
                 printf("myid:%d,iter:%d, outer stack not empty\n",myid,iter);
@@ -1041,7 +1047,9 @@ getchar();
       if(work.is_parent==0)
       {
         printf("myid:%d,iter:%d,tasknr:%d,innertask:%d, left subs:%d\n",
-                myid,iter,work.task_nr,work.subtask_nr,pwork_outer->subtasks_left);
+                myid,iter,work.task_nr,work.subtask_nr,pwork_outer->subtasks_left); //subtasks nr nicht immer aktuell!
+
+// getchar();
 
         double (*f)(double, struct my_f_params*) = work.f;
         double a = work.a;
@@ -1089,7 +1097,8 @@ getchar();
           {
             double *inner_integrals=pwork_outer->inner_integrals;
             inner_integrals[tasknr]+=I_7;
-            pwork_outer->subtasks_left=pwork_outer->subtasks_left-1;
+            pwork_outer->subtasks_left=pwork_outer->subtasks_left-1; //hier sollte subtasks_left aktuell sein
+
             printf("myid:%d,iter:%d, inner_integral[%d]:%.4e added:%.4e,subtask left:%d\n",
                     myid,iter,tasknr,inner_integrals[tasknr],I_7,pwork_outer->subtasks_left);
           }            
