@@ -82,7 +82,9 @@ typedef struct _work_t_gkq{
   double (*f)(double, struct my_f_params*);
   stack_t stack_inner;
   short int is_parent;
-  short int subtask_nr;
+  short int subtask_nr; //inner task nr
+  short int task_nr; //outer task nr
+  short int subtasks_left; //erst pop'n wenn aller inner tasks (intergals) vollständig!
   double inner_integrals[5];
 } work_gkq;
 
@@ -289,7 +291,7 @@ int main(int argc,char** argv)
   create_stack(&stack, sizeof(work_gkq));
 
   gettimeofday(&start, NULL);     
-  double integ=gkq_double(myfun,inner_integrand2, xmin, xmax, 1e-8, &ptest,stack);
+  double integ=gkq_double(myfun,inner_integrand2, xmin, xmax, 1e-2, &ptest,stack);
   
   gettimeofday(&end, NULL);
   free(stack->elements);
@@ -433,6 +435,7 @@ work_gkq gkq_create_inner_task(double (*f)(double, struct my_f_params*), double 
   work.p=pinner;
   work.a=a;
   work.b=b;
+  work.subtasks_left=0;//beliebig!
 
   double m=0.5*(a+b);
   double h=0.5*(b-a);
@@ -462,7 +465,7 @@ work_gkq gkq_create_inner_task(double (*f)(double, struct my_f_params*), double 
     I_13=b-a;
   I_13=fabs(I_13);
 
-printf("create inner tast: a:%f, b:%f, I4:%f,I7:%f,I13:%f\n",a,b,I_4,I_7,I_13);
+printf("create inner task: a:%f, b:%f, I4:%f,I7:%f,I13:%f\n",a,b,I_4,I_7,I_13);
   work.toler = toler;
   work.I_13=I_13;
   work.fa=fa;
@@ -556,6 +559,8 @@ double gkq_double(double (*f)(double, struct my_f_params*), double (*finner)(dou
   work.p=p;
   work.f=f;
   work.is_parent=1;
+  work.task_nr=0; //fange bei 0 das zählen an
+  
 
   for(i=0;i<5;i++)
     work.inner_integrals[i]=0.0;
@@ -584,6 +589,8 @@ double gkq_double(double (*f)(double, struct my_f_params*), double (*finner)(dou
   get_integ_bounds_inner(integ_bnd, mll_inner, work.p);            
   winner=gkq_create_inner_task(inner_integrand2,integ_bnd[0], integ_bnd[1],1e-3, work.p);
   winner.subtask_nr=0;
+  winner.task_nr=work.task_nr;
+
   push_stack(work.stack_inner,&winner);
 
   //2nd subtask
@@ -611,6 +618,7 @@ double gkq_double(double (*f)(double, struct my_f_params*), double (*finner)(dou
   push_stack(work.stack_inner,&winner);
 
   //push outer integtand work on outer stack
+  work.subtasks_left=5;
   push_stack(stack, &work);                   
 
 
@@ -912,8 +920,10 @@ double gkq_adapt_double(stack_t stack)
   double integral_result = 0.0;    
   busy = 0;
   int myid;
+  int elcnt; //nr of outer task elements on stack
+
 #pragma omp parallel default(none)  \
-    shared(stack, integral_result,busy,iter) \
+    shared(stack, integral_result,busy,iter,elcnt) \
     private(work, idle, ready,myid,pwork_outer)
   {      
 
@@ -925,7 +935,7 @@ double gkq_adapt_double(stack_t stack)
     while(!ready) // && !terminate_gkq)//  && !simpson_error) //<-- so NICHT!
     {
 
-getchar();
+
 printf("\n NEXT, curapprox:%.4e\n",integral_result);
 
       #pragma omp critical (stack)
@@ -933,25 +943,39 @@ printf("\n NEXT, curapprox:%.4e\n",integral_result);
         //pointer to outer work element
         //work_gkq* pwork=(work_gkq*) stack->elements + stack->el_count*stack->el_size;
 
-        int elcnt=stack->el_count;
+        elcnt=stack->el_count;
         printf("myid:%d,elcnt:%d\n",myid,elcnt);        
+
+// if(elcnt>1)
+getchar();
         
         stack_t stack_inner;
         if(elcnt>0)
         {
           pwork_outer=(work_gkq*) stack->elements +(elcnt-1); //get top element
+
+          
+            while(pwork_outer->task_nr>0 && pwork_outer->subtasks_left==0)
+            {
+              printf("outer task nr:%d, complete:subs:%d, decrement\n",pwork_outer->task_nr,pwork_outer->subtasks_left);
+              pwork_outer--;
+            }
           stack_inner=pwork_outer->stack_inner;
         }
         else
+        {
           stack_inner=NULL;
+          pwork_outer=NULL;
+        }
 
         
         { //stackinner gehört zu work, und work ist private!          
           if(!empty_stack(stack_inner))
           {           
-            printf("myid:%d,iter:%d, inner stack not empty,pop..\n",myid,iter);  
-            #pragma atomic
+            printf("myid:%d,iter:%d, inner stack not empty,pop..\n",myid,iter);              
             pop_stack(stack_inner, &work);
+//if letztes inner-work elem, blockiere outer work elem bis ich das integral hab
+
             iter++;
 
             if (idle)
@@ -962,19 +986,31 @@ printf("\n NEXT, curapprox:%.4e\n",integral_result);
           }
           else //inner stack is empty, pop from outer
           {
-            printf("myid:%d,iter:%d, inner stack empty\n",myid,iter);
+            if (!empty_stack(stack)) //work elem ist blockiert solange inner integs nicht vollständig
+            {              
+              printf("myid:%d,iter:%d, inner stack empty. work on outer with cnt=%d\n",myid,iter,pwork_outer->subtasks_left);
+              if(pwork_outer->subtasks_left==0)
+              {
+                printf("myid:%d,iter:%d, outer stack not empty\n",myid,iter);
+                pop_stack(stack, &work);
+                iter++;
+                if (idle)
+                {            
+                  busy += 1;
+                  idle = 0;
+                }              
+              }
+              else
+              {
+                printf("myid:%d,iter:%d, inner integs not complete:%d\n",myid,iter,pwork_outer->subtasks_left);
+                if (!idle)
+                {
+                  busy -= 1;
+                  idle = 1;
+                }
 
-            if (!empty_stack(stack))
-            {
-              printf("myid:%d,iter:%d, outer stack not empty\n",myid,iter);
 
-              pop_stack(stack, &work);
-              iter++;
-              if (idle)
-              {            
-                busy += 1;
-                idle = 0;
-              }              
+              }
             }
             else //auch outer stack ist leer
             {           
@@ -1004,7 +1040,8 @@ printf("\n NEXT, curapprox:%.4e\n",integral_result);
       //work on inner tasks first,  if available
       if(work.is_parent==0)
       {
-        printf("myid:%d,iter:%d, work is not parent\n",myid,iter);
+        printf("myid:%d,iter:%d,tasknr:%d,innertask:%d, left subs:%d\n",
+                myid,iter,work.task_nr,work.subtask_nr,pwork_outer->subtasks_left);
 
         double (*f)(double, struct my_f_params*) = work.f;
         double a = work.a;
@@ -1031,7 +1068,7 @@ printf("\n NEXT, curapprox:%.4e\n",integral_result);
         double I_4=h/6.0*(fa+fb+5.0*(fml+fmr));   // 4-point Gauss-Lobatto formula.
         double I_7=h/1470.0*(77.0*(fa+fb)+432.0*(fmll+fmrr)+625.0*(fml+fmr)+672.0*fm);
       
-printf("myid:%d,iter:%d non parent checkpoint 1 passed\n",myid,iter);
+// printf("myid:%d,iter:%d non parent checkpoint 1 passed\n",myid,iter);
 
         if (fabs(I_7-I_4) <= toler*I_13 || mll <= a || b <= mrr) 
         {
@@ -1040,9 +1077,10 @@ printf("myid:%d,iter:%d non parent checkpoint 1 passed\n",myid,iter);
              printf("OUT OF TOLERANCE !!!, mll:%.4e, a:%.4e, b:%.4e, mrr:%.4e\n", mll,a,b,mrr);
            }
             
-printf("myid:%d,iter:%d non parent checkpoint 2.1 passed\n",myid,iter);
+// printf("myid:%d,iter:%d non parent checkpoint 2.1 passed\n",myid,iter);
 
           int tasknr=work.subtask_nr;
+
           printf("myid:%d,iter:%d, winner error acceptable: I_7:%.4e, I_4:%.4e, I_13:%.4e,toler*I_13:%.4e,toler:%.4e\n",
                   myid,iter,I_7,I_4, I_13,toler*I_13,toler);
 
@@ -1050,36 +1088,24 @@ printf("myid:%d,iter:%d non parent checkpoint 2.1 passed\n",myid,iter);
           #pragma omp critical (innerinteg) // workers greifen auf selbes array zu.nur an anderer Stelle..evtl. besser 6 versch.doubles statt array?
           {
             double *inner_integrals=pwork_outer->inner_integrals;
-
-printf("myid:%d,iter:%d non parent checkpoint 3 passed\n",myid,iter);            
-
-            //integral_result += I_7;      //Terminate recursion.  
-            //#pragma omp atomic (innerinteg)
             inner_integrals[tasknr]+=I_7;
-            printf("myid:%d,iter:%d, inner_integral[%d]:%.4e added:%.4e\n",myid,iter,tasknr,inner_integrals[tasknr],I_7);
+            pwork_outer->subtasks_left=pwork_outer->subtasks_left-1;
+            printf("myid:%d,iter:%d, inner_integral[%d]:%.4e added:%.4e,subtask left:%d\n",
+                    myid,iter,tasknr,inner_integrals[tasknr],I_7,pwork_outer->subtasks_left);
           }            
         }
         else  //subdivide interval and push new work on stack
         {
-
           
-          stack_t stack_inner;
-          #pragma omp critical //(stack_inner) 
-          {
-            stack_inner =  pwork_outer->stack_inner;            
-          }
-          
-
-printf("myid:%d,iter:%d non parent checkpoint 2.2 passed\n",myid,iter);
-
+          stack_t stack_inner;         
           #pragma omp critical //(stack) //(stack_inner)
           { 
+            stack_inner =  pwork_outer->stack_inner;
+            pwork_outer->subtasks_left=pwork_outer->subtasks_left-1;//weil dieser stack durch 6 andere ersetzt wird
 
-            printf("myid:%d,iter:%d, inner_integral approx not accurate..subdivide: I_4:%f,I_7:%f,I_13:%f\n",
-                    myid,iter,I_4,I_7,I_13);
 
-printf("myid:%d,iter:%d non parent checkpoint 2.4 passed\n",myid,iter);
-
+            work.task_nr=pwork_outer->task_nr; //inner task soll auch wissen wer sein outer task is (bisher nur für debug)
+            //subtasknr bleibt dieselbe (bezogen auf parent task)
             work.a=a;
             work.b=mll;
             work.fa=fa;
@@ -1122,8 +1148,10 @@ printf("myid:%d,iter:%d non parent checkpoint 2.4 passed\n",myid,iter);
             
             push_stack(stack_inner, &work);                       
 
-printf("myid:%d,iter:%d non parent checkpoint 2.4 passed\n",myid,iter);
+            pwork_outer->subtasks_left=pwork_outer->subtasks_left+6;
 
+            printf("myid:%d,iter:%d, inner_integral approx not accurate..subdivided: I_4:%f,I_7:%f,I_13:%f,left subs:%d\n",
+                    myid,iter,I_4,I_7,I_13,pwork_outer->subtasks_left);
 
           } // pragma critical stack_inner
         }   // else ..non-acceptable error
@@ -1131,7 +1159,7 @@ printf("myid:%d,iter:%d non parent checkpoint 2.4 passed\n",myid,iter);
       else  //parent task without any inner tasks
       {
 
-printf("myid:%d,iter:%d, work is parent\n",myid,iter);
+printf("myid:%d,iter:%d, work is parent,subs left:%d\n",myid,iter,work.subtasks_left);
 
         // stack_t stack_inner = work.stack_inner; //brauch ich hier nicht
         // free(stack_inner->elements);
@@ -1184,18 +1212,20 @@ printf("myid:%d,iter:%d, work is parent\n",myid,iter);
         else  //subdivide interval and push new work on stack
         {
 
-printf("myid:%d,iter:%d, iouter_integral approx not accurate: I_7=%.4e,I_4=%.4e,I_13=%.4e, toler*I_13:%.4e...subdivide\n",
-        myid,iter,I_7,I_4,I_13,I_13*toler);
+printf("myid:%d,iter:%d, iouter_integral approx not accurate: I_7=%.4e,I_4=%.4e,I_13=%.4e, toler*I_13:%.4e\n"
+        "integs: 0=%f,1=%f,2=%f,3=%f,4=%f..subdivide\n",
+        myid,iter,I_7,I_4,I_13,I_13*toler,work.inner_integrals[0],work.inner_integrals[1],work.inner_integrals[2],
+                    work.inner_integrals[3],work.inner_integrals[4] );
 
           stack_t stack_inner = work.stack_inner;
           #pragma omp critical (stack)          
           { 
             //create sub-stack for inner-integrals
             
-            
+            work.subtasks_left=5; //for all new outer work elements
+
             create_stack(&stack_inner, sizeof(work_gkq));            
             work.is_parent=1;
-            printf("myid:%d,iter:%d, 2\n",myid,iter);
 
             work_gkq winner;         
 
@@ -1213,11 +1243,16 @@ printf("myid:%d,iter:%d, iouter_integral approx not accurate: I_7=%.4e,I_4=%.4e,
             double mrr_inner=(m_inner+alpha*h_inner);
 
             //Jedes subinterval bekommt 5 inner tasks für die inneren integrale!
-            double integ_bnd[2];
+
+            int curcnt=stack->el_count;
+            work.task_nr=curcnt; //weil ich bei 0 anfange zu zählen und push_stack gleich el_count incrementiert
+
+            double integ_bnd[2];            
 
             //1st subtask
             get_integ_bounds_inner(integ_bnd, mll_inner, work.p);            
             winner=gkq_create_inner_task(inner_integrand2, integ_bnd[0],integ_bnd[1],1e-3, work.p);
+            winner.task_nr=work.task_nr;
             winner.subtask_nr=0;
             push_stack(work.stack_inner,&winner);
 
@@ -1225,32 +1260,31 @@ printf("myid:%d,iter:%d, iouter_integral approx not accurate: I_7=%.4e,I_4=%.4e,
             get_integ_bounds_inner(integ_bnd, ml_inner, work.p);            
             winner=gkq_create_inner_task(inner_integrand2, integ_bnd[0],integ_bnd[1],1e-3, work.p);
             winner.subtask_nr=1;
+            winner.task_nr=work.task_nr;
             push_stack(work.stack_inner,&winner);
 
             //3rd subtask
             get_integ_bounds_inner(integ_bnd, m_inner, work.p);            
             winner=gkq_create_inner_task(inner_integrand2, integ_bnd[0],integ_bnd[1],1e-3, work.p);
             winner.subtask_nr=2;
+            winner.task_nr=work.task_nr;
             push_stack(work.stack_inner,&winner);     
 
             //4th subtask
             get_integ_bounds_inner(integ_bnd, mr_inner, work.p);            
             winner=gkq_create_inner_task(inner_integrand2, integ_bnd[0],integ_bnd[1],1e-3, work.p);
             winner.subtask_nr=3;
+            winner.task_nr=work.task_nr;
             push_stack(work.stack_inner,&winner);     
 
             //5th subtask
             get_integ_bounds_inner(integ_bnd, mrr_inner, work.p);            
             winner=gkq_create_inner_task(inner_integrand2, integ_bnd[0],integ_bnd[1],1e-3, work.p);
             winner.subtask_nr=4;
+            winner.task_nr=work.task_nr;
             push_stack(work.stack_inner,&winner);
-
-printf("myid:%d,iter:%d, subdiv pre 1\n",myid,iter);
-            // #pragma omp critical (stack)
-            // {
-              push_stack(stack, &work);
-            // }      
-printf("myid:%d,iter:%d, subdiv post 1\n",myid,iter);
+              
+            push_stack(stack, &work);
 
 
             // *************************
@@ -1260,6 +1294,7 @@ printf("myid:%d,iter:%d, subdiv post 1\n",myid,iter);
             work.b=ml;
             work.fa=fmll;
             work.fb=fml;
+            work.task_nr++;
 
             m_inner=  (work.a+work.b)/2;
             h_inner=  (work.a+work.b)/2;
@@ -1273,6 +1308,7 @@ printf("myid:%d,iter:%d, subdiv post 1\n",myid,iter);
             get_integ_bounds_inner(integ_bnd, mll_inner, work.p);            
             winner=gkq_create_inner_task(inner_integrand2, integ_bnd[0],integ_bnd[1],1e-3, work.p);
             winner.subtask_nr=0;
+            winner.task_nr=work.task_nr;
             push_stack(work.stack_inner,&winner);
             
 
@@ -1280,6 +1316,7 @@ printf("myid:%d,iter:%d, subdiv post 1\n",myid,iter);
             get_integ_bounds_inner(integ_bnd, ml_inner, work.p);            
             winner=gkq_create_inner_task(inner_integrand2, integ_bnd[0],integ_bnd[1],1e-3, work.p);
             winner.subtask_nr=1;
+            winner.task_nr=work.task_nr;
             push_stack(work.stack_inner,&winner);
               
 
@@ -1287,6 +1324,7 @@ printf("myid:%d,iter:%d, subdiv post 1\n",myid,iter);
             get_integ_bounds_inner(integ_bnd, m_inner, work.p);            
             winner=gkq_create_inner_task(inner_integrand2, integ_bnd[0],integ_bnd[1],1e-3, work.p);
             winner.subtask_nr=2;
+            winner.task_nr=work.task_nr;
             push_stack(work.stack_inner,&winner);
                           
 
@@ -1294,6 +1332,7 @@ printf("myid:%d,iter:%d, subdiv post 1\n",myid,iter);
             get_integ_bounds_inner(integ_bnd, mr_inner, work.p);            
             winner=gkq_create_inner_task(inner_integrand2, integ_bnd[0],integ_bnd[1],1e-3, work.p);
             winner.subtask_nr=3;
+            winner.task_nr=work.task_nr;
             push_stack(work.stack_inner,&winner);
                           
 
@@ -1301,6 +1340,7 @@ printf("myid:%d,iter:%d, subdiv post 1\n",myid,iter);
             get_integ_bounds_inner(integ_bnd, mrr_inner, work.p);            
             winner=gkq_create_inner_task(inner_integrand2, integ_bnd[0],integ_bnd[1],1e-3, work.p);
             winner.subtask_nr=4;
+            winner.task_nr=work.task_nr;
             push_stack(work.stack_inner,&winner);
 
             // #pragma omp critical (stack)
@@ -1315,6 +1355,7 @@ printf("myid:%d,iter:%d, subdiv post 1\n",myid,iter);
             work.b=m;
             work.fa=fml;
             work.fb=fm;
+            work.task_nr++;
 
             m_inner=  (work.a+work.b)/2;
             h_inner=  (work.a+work.b)/2;
@@ -1327,6 +1368,7 @@ printf("myid:%d,iter:%d, subdiv post 1\n",myid,iter);
             get_integ_bounds_inner(integ_bnd, mll_inner, work.p);            
             winner=gkq_create_inner_task(inner_integrand2, integ_bnd[0],integ_bnd[1],1e-3, work.p);
             winner.subtask_nr=0;
+            winner.task_nr=work.task_nr;
             push_stack(work.stack_inner,&winner);
             
 
@@ -1334,6 +1376,7 @@ printf("myid:%d,iter:%d, subdiv post 1\n",myid,iter);
             get_integ_bounds_inner(integ_bnd, ml_inner, work.p);            
             winner=gkq_create_inner_task(inner_integrand2, integ_bnd[0],integ_bnd[1],1e-3, work.p);
             winner.subtask_nr=1;
+            winner.task_nr=work.task_nr;
             push_stack(work.stack_inner,&winner);
               
 
@@ -1341,6 +1384,7 @@ printf("myid:%d,iter:%d, subdiv post 1\n",myid,iter);
             get_integ_bounds_inner(integ_bnd, m_inner, work.p);            
             winner=gkq_create_inner_task(inner_integrand2, integ_bnd[0],integ_bnd[1],1e-3, work.p);
             winner.subtask_nr=2;
+            winner.task_nr=work.task_nr;
             push_stack(work.stack_inner,&winner);
                           
 
@@ -1348,6 +1392,7 @@ printf("myid:%d,iter:%d, subdiv post 1\n",myid,iter);
             get_integ_bounds_inner(integ_bnd, mr_inner, work.p);            
             winner=gkq_create_inner_task(inner_integrand2, integ_bnd[0],integ_bnd[1],1e-3, work.p);
             winner.subtask_nr=3;
+            winner.task_nr=work.task_nr;
             push_stack(work.stack_inner,&winner);
                           
 
@@ -1355,6 +1400,7 @@ printf("myid:%d,iter:%d, subdiv post 1\n",myid,iter);
             get_integ_bounds_inner(integ_bnd, mrr_inner, work.p);            
             winner=gkq_create_inner_task(inner_integrand2, integ_bnd[0],integ_bnd[1],1e-3, work.p);
             winner.subtask_nr=4;
+            winner.task_nr=work.task_nr;
             push_stack(work.stack_inner,&winner);
 
             // #pragma omp critical (stack)
@@ -1372,6 +1418,7 @@ printf("myid:%d,iter:%d, subdiv post 1\n",myid,iter);
             work.b=mr;
             work.fa=fm;
             work.fb=fmr;
+            work.task_nr++;
 
             m_inner=  (work.a+work.b)/2;
             h_inner=  (work.a+work.b)/2;
@@ -1384,6 +1431,7 @@ printf("myid:%d,iter:%d, subdiv post 1\n",myid,iter);
             get_integ_bounds_inner(integ_bnd, mll_inner, work.p);            
             winner=gkq_create_inner_task(inner_integrand2,integ_bnd[0],integ_bnd[1],1e-3, work.p);
             winner.subtask_nr=0;
+            winner.task_nr=work.task_nr;
             push_stack(work.stack_inner,&winner);
             
 
@@ -1391,6 +1439,7 @@ printf("myid:%d,iter:%d, subdiv post 1\n",myid,iter);
             get_integ_bounds_inner(integ_bnd, ml_inner, work.p);            
             winner=gkq_create_inner_task(inner_integrand2,integ_bnd[0],integ_bnd[1],1e-3, work.p);
             winner.subtask_nr=1;
+            winner.task_nr=work.task_nr;
             push_stack(work.stack_inner,&winner);
               
 
@@ -1398,6 +1447,7 @@ printf("myid:%d,iter:%d, subdiv post 1\n",myid,iter);
             get_integ_bounds_inner(integ_bnd, m_inner, work.p);            
             winner=gkq_create_inner_task(inner_integrand2,integ_bnd[0],integ_bnd[1],1e-3, work.p);
             winner.subtask_nr=2;
+            winner.task_nr=work.task_nr;
             push_stack(work.stack_inner,&winner);
                           
 
@@ -1405,6 +1455,7 @@ printf("myid:%d,iter:%d, subdiv post 1\n",myid,iter);
             get_integ_bounds_inner(integ_bnd, mr_inner, work.p);            
             winner=gkq_create_inner_task(inner_integrand2,integ_bnd[0],integ_bnd[1],1e-3, work.p);
             winner.subtask_nr=3;
+            winner.task_nr=work.task_nr;
             push_stack(work.stack_inner,&winner);
                           
 
@@ -1412,6 +1463,7 @@ printf("myid:%d,iter:%d, subdiv post 1\n",myid,iter);
             get_integ_bounds_inner(integ_bnd, mrr_inner, work.p);            
             winner=gkq_create_inner_task(inner_integrand2,integ_bnd[0],integ_bnd[1],1e-3, work.p);
             winner.subtask_nr=4;
+            winner.task_nr=work.task_nr;
             push_stack(work.stack_inner,&winner);
 
             // #pragma omp critical (stack)
@@ -1426,6 +1478,7 @@ printf("myid:%d,iter:%d, subdiv post 1\n",myid,iter);
             work.b=mrr;
             work.fa=fmr;
             work.fb=fmrr;
+            work.task_nr++;
 
             m_inner=  (work.a+work.b)/2;
             h_inner=  (work.a+work.b)/2;
@@ -1438,6 +1491,7 @@ printf("myid:%d,iter:%d, subdiv post 1\n",myid,iter);
             get_integ_bounds_inner(integ_bnd, mll_inner, work.p);            
             winner=gkq_create_inner_task(inner_integrand2,integ_bnd[0],integ_bnd[1],1e-3, work.p);
             winner.subtask_nr=0;
+            winner.task_nr=work.task_nr;
             push_stack(work.stack_inner,&winner);
             
 
@@ -1445,6 +1499,7 @@ printf("myid:%d,iter:%d, subdiv post 1\n",myid,iter);
             get_integ_bounds_inner(integ_bnd, ml_inner, work.p);            
             winner=gkq_create_inner_task(inner_integrand2,integ_bnd[0],integ_bnd[1],1e-3, work.p);
             winner.subtask_nr=1;
+            winner.task_nr=work.task_nr;
             push_stack(work.stack_inner,&winner);
               
 
@@ -1452,6 +1507,7 @@ printf("myid:%d,iter:%d, subdiv post 1\n",myid,iter);
             get_integ_bounds_inner(integ_bnd, m_inner, work.p);            
             winner=gkq_create_inner_task(inner_integrand2,integ_bnd[0],integ_bnd[1],1e-3, work.p);
             winner.subtask_nr=2;
+            winner.task_nr=work.task_nr;
             push_stack(work.stack_inner,&winner);
                           
 
@@ -1459,6 +1515,7 @@ printf("myid:%d,iter:%d, subdiv post 1\n",myid,iter);
             get_integ_bounds_inner(integ_bnd, mr_inner, work.p);            
             winner=gkq_create_inner_task(inner_integrand2,integ_bnd[0],integ_bnd[1],1e-3, work.p);
             winner.subtask_nr=3;
+            winner.task_nr=work.task_nr;
             push_stack(work.stack_inner,&winner);
                           
 
@@ -1466,6 +1523,7 @@ printf("myid:%d,iter:%d, subdiv post 1\n",myid,iter);
             get_integ_bounds_inner(integ_bnd, mrr_inner, work.p);            
             winner=gkq_create_inner_task(inner_integrand2,integ_bnd[0],integ_bnd[1],1e-3, work.p);
             winner.subtask_nr=4;
+            winner.task_nr=work.task_nr;
             push_stack(work.stack_inner,&winner);
 
             // #pragma omp critical (stack)
@@ -1480,6 +1538,7 @@ printf("myid:%d,iter:%d, subdiv post 1\n",myid,iter);
             work.b=b;
             work.fa=fmrr;
             work.fb=fb;
+            work.task_nr++;
 
             m_inner=  (work.a+work.b)/2;
             h_inner=  (work.a+work.b)/2;
@@ -1492,6 +1551,7 @@ printf("myid:%d,iter:%d, subdiv post 1\n",myid,iter);
             get_integ_bounds_inner(integ_bnd, mll_inner, work.p);            
             winner=gkq_create_inner_task(inner_integrand2,integ_bnd[0],integ_bnd[1],1e-3, work.p);
             winner.subtask_nr=0;
+            winner.task_nr=work.task_nr;
             push_stack(work.stack_inner,&winner);
             
 
@@ -1499,6 +1559,7 @@ printf("myid:%d,iter:%d, subdiv post 1\n",myid,iter);
             get_integ_bounds_inner(integ_bnd, ml_inner, work.p);            
             winner=gkq_create_inner_task(inner_integrand2,integ_bnd[0],integ_bnd[1],1e-3, work.p);
             winner.subtask_nr=1;
+            winner.task_nr=work.task_nr;
             push_stack(work.stack_inner,&winner);
               
 
@@ -1506,6 +1567,7 @@ printf("myid:%d,iter:%d, subdiv post 1\n",myid,iter);
             get_integ_bounds_inner(integ_bnd, m_inner, work.p);            
             winner=gkq_create_inner_task(inner_integrand2,integ_bnd[0],integ_bnd[1],1e-3, work.p);
             winner.subtask_nr=2;
+            winner.task_nr=work.task_nr;
             push_stack(work.stack_inner,&winner);
                           
 
@@ -1513,6 +1575,7 @@ printf("myid:%d,iter:%d, subdiv post 1\n",myid,iter);
             get_integ_bounds_inner(integ_bnd, mr_inner, work.p);            
             winner=gkq_create_inner_task(inner_integrand2,integ_bnd[0],integ_bnd[1],1e-3, work.p);
             winner.subtask_nr=3;
+            winner.task_nr=work.task_nr;
             push_stack(work.stack_inner,&winner);
                           
 
@@ -1520,6 +1583,7 @@ printf("myid:%d,iter:%d, subdiv post 1\n",myid,iter);
             get_integ_bounds_inner(integ_bnd, mrr_inner, work.p);            
             winner=gkq_create_inner_task(inner_integrand2,integ_bnd[0],integ_bnd[1],1e-3, work.p);
             winner.subtask_nr=4;
+            winner.task_nr=work.task_nr;
             push_stack(work.stack_inner,&winner);
 
             // #pragma omp critical (stack)
