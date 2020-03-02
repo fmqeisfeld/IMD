@@ -225,11 +225,19 @@ void move_atoms_nve(void)
 // ****************************************************************************
 #ifndef DAMP /*  Normal NVE */
 
-//MYMOD : Auch ohne ttm moechte ich pdecay nutzen koennen!
+
+if(NUMMER(p,i)==35)
+{
+  KRAFT(p,i,X)-=1200.0; //force multijump
+  printf("me:%d, OH:%f, HA:%f, HE:%f\n",
+  myid,KRAFT(p,i,X),IMPULS(p,i,X)/MASSE(p,i),ORT(p,i,X));
+}
+//MYMOD : Auch ohne ttm moechte ich pdecay nutzen koennen!  KRAFT(p,i,X)-=500.0; //force multijump
+
 #ifdef PDECAY
      if( ORT(p,i,X) > ramp_start )
         KRAFT(p,i,X) -=  ( IMPULS(p,i,X)/MASSE(p,i)) * xipdecay * a * ( ORT(p,i,X) - ramp_start ) * ( ORT(p,i,X) - ramp_start );
-
+#endif
 //HOTIFX fuer +/- y bnd: wude bei 2d-sims. benutzt..brauche ich nun nicht mehr.
 //ACHTUNG: Ablatiertes Material nicht kuehlen!
 // if(ORT(p,i,X)>=pdecay_surfx)      

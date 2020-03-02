@@ -1050,7 +1050,7 @@ void setup_buffers(void)
 #endif
 
 /*** MY MOD ****/
-#if defined(SHOCK) || defined(FILTER)
+#if defined(SHOCK) || defined(FILTER) || defined(MULTIJUMP)
   if (0==dump_buf.n_max) {
     alloc_msgbuf(&dump_buf, 1024);
   }

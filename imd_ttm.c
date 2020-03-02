@@ -66,7 +66,7 @@
 #define node  l1[i]       //Achtung: MPIIO-lange nicht mehr aktualisiert (z.b. fehlt colrad)
 #define node2 l2[i]
 
-#define RHOMIN       150
+#define RHOMIN       2
 
 
 // ****************************************************
@@ -1570,7 +1570,11 @@ void ttm_writeout(int number)
                 i_global, j_global, k_global, node.natoms, node.temp,
                 node.md_temp, node.xi,
                 node.source, node.dens,
+#ifndef LOADBALANCE                
                 node.vcomx, node.vcomy, node.vcomz,
+#else
+                vcomxglobal[i],vcomyglobal[i],vcomzglobal[i],
+#endif                
                 node.fd_k, node.fd_g,
  #ifndef FDTD
                 node.Z, node.proc, node.Ce

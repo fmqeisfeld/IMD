@@ -1029,7 +1029,7 @@ NUMNEIGHS(p,i) += nbttm;
     }
   }
   */
-
+printf("myid:%d,steps.%d\n",myid,steps);
 #ifdef FILTER
 
   if(steps>0)

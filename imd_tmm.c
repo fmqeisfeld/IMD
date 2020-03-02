@@ -17,7 +17,7 @@
 #define node2 l2[i][j][k]
 #endif
 
-#define RHOMIN  50 //kg/m^3 (active cell abh. von minatoms und dens)
+#define RHOMIN  2 //kg/m^3 (active cell abh. von minatoms und dens)
 
 /*2x2 Matrix multiplication*/
 void matmul(double complex *a,double complex *b,double complex *p)
