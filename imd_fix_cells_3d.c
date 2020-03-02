@@ -195,7 +195,7 @@ void fix_cells(void)
             }
             
             else {
-#ifdef SHOCK
+#ifdef SHOCK || MULTIJUMP
               /* remove atom from simulation */
               buf = &dump_buf;
               dump_buf.n = 0;

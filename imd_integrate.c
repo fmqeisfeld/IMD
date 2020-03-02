@@ -229,16 +229,17 @@ void move_atoms_nve(void)
 #ifdef PDECAY
      if( ORT(p,i,X) > ramp_start )
         KRAFT(p,i,X) -=  ( IMPULS(p,i,X)/MASSE(p,i)) * xipdecay * a * ( ORT(p,i,X) - ramp_start ) * ( ORT(p,i,X) - ramp_start );
-//HOTIFX fuer +/- y bnd
+
+//HOTIFX fuer +/- y bnd: wude bei 2d-sims. benutzt..brauche ich nun nicht mehr.
 //ACHTUNG: Ablatiertes Material nicht kuehlen!
-if(ORT(p,i,X)>=pdecay_surfx)
-{
-     if( ORT(p,i,Y) > ramp_y1min )
-        KRAFT(p,i,Y) -=  ( IMPULS(p,i,Y)/MASSE(p,i)) * xipdecay * ay1 * ( ORT(p,i,Y) - ramp_y1min ) * ( ORT(p,i,Y) - ramp_y1min );
-     else if(ORT(p,i,Y)< ramp_y0max)
-        KRAFT(p,i,Y) -=  ( IMPULS(p,i,Y)/MASSE(p,i)) * xipdecay * ay0 * ( ramp_y0max -ORT(p,i,Y) ) * ( ramp_y0max-ORT(p,i,Y) );
-}
-#endif
+// if(ORT(p,i,X)>=pdecay_surfx)      
+// {
+//      if( ORT(p,i,Y) > ramp_y1min )
+//         KRAFT(p,i,Y) -=  ( IMPULS(p,i,Y)/MASSE(p,i)) * xipdecay * ay1 * ( ORT(p,i,Y) - ramp_y1min ) * ( ORT(p,i,Y) - ramp_y1min );
+//      else if(ORT(p,i,Y)< ramp_y0max)
+//         KRAFT(p,i,Y) -=  ( IMPULS(p,i,Y)/MASSE(p,i)) * xipdecay * ay0 * ( ramp_y0max -ORT(p,i,Y) ) * ( ramp_y0max-ORT(p,i,Y) );
+// }
+// #endif
 //ENDOF MYMOD
 
 //MYMOD
