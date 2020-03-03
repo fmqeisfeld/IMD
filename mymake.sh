@@ -1,11 +1,11 @@
 #!/bin/bash
 
 # NORMAL
-make clean
-make -j8 imd_mpi_eam_nve_nbl_multijump_loadbalance_filter
+# make clean
+# make -j8 imd_mpi_eam_nve_nbl_multijump_loadbalance_filter
 #make -j8 imd_mpi_eam_ttm_tmm_nbl_loadbalance_multijump
-exit 1
-# make -j8 imd_mpi_eam_ttm_tmm_colrad_nbl_loadbalance
+
+make -j8 imd_mpi_eam_ttm_tmm_nbl_loadbalance
 #make -j8 imd_mpi_eam_nve_nbl_nrb_stress_filter_loadbalance
 #make -j8 imd_mpi_eam_nve_nrb_stress_loadbalance_ar_filter
 #make -j8 imd_mpi_eam_nve_nrb_stress_loadbalance_nbl_filter
@@ -19,7 +19,7 @@ exit 1
 
 # make -j8 imd_mpi_eam_ttm_tmm_colrad_nbl
 # mv imd_mpi_eam_ttm_tmm_colrad ~/bin/
-# exit 1
+exit 1
 
 
 #standart

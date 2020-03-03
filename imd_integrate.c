@@ -226,16 +226,12 @@ void move_atoms_nve(void)
 #ifndef DAMP /*  Normal NVE */
 
 
-if(NUMMER(p,i)==35)
-{
-  KRAFT(p,i,X)-=1200.0; //force multijump
-  printf("me:%d, OH:%f, HA:%f, HE:%f\n",
-  myid,KRAFT(p,i,X),IMPULS(p,i,X)/MASSE(p,i),ORT(p,i,X));
-}
 //MYMOD : Auch ohne ttm moechte ich pdecay nutzen koennen!  KRAFT(p,i,X)-=500.0; //force multijump
-
 #ifdef PDECAY
      if( ORT(p,i,X) > ramp_start )
+#ifdef NRB
+      if(NRBBND(p,i)==0)
+#endif            
         KRAFT(p,i,X) -=  ( IMPULS(p,i,X)/MASSE(p,i)) * xipdecay * a * ( ORT(p,i,X) - ramp_start ) * ( ORT(p,i,X) - ramp_start );
 #endif
 //HOTIFX fuer +/- y bnd: wude bei 2d-sims. benutzt..brauche ich nun nicht mehr.
@@ -252,7 +248,7 @@ if(NUMMER(p,i)==35)
 
 //MYMOD
 #ifdef NRB
-if(NRBBND(p,i)==0) //d.h. nur für nicht-bnd-atome das standart-schema.Für bnd-atome wird der impuls anders berechnet
+if(NRBBND(p,i)==0) //d.h. in diesem Fall nur für nicht-bnd-atome das standart-schema.Für bnd-atome wird der impuls anders berechnet
 {
       IMPULS(p,i,X) += timestep * KRAFT(p,i,X);
       IMPULS(p,i,Y) += timestep * KRAFT(p,i,Y);
@@ -593,13 +589,13 @@ void move_atoms_ttm(void)
 //MYMOD
 #ifdef PDECAY 
   double a= 1.0/(ramp_end - ramp_start);
+  a*=a;
   //HOTFIX fuer +/- y bnd
 #ifdef FDTD2D
   double ay0 =1.0/(ramp_y0max-ramp_y0min);
   double ay1 =1.0/(ramp_y1max-ramp_y1min);
   ay0*=ay0;
   ay1*=ay1;
-  a*=a;
 #endif
 
 #endif
@@ -645,7 +641,9 @@ void move_atoms_ttm(void)
     { /* loop over all atoms in the cell */
 
 #ifdef LOADBALANCE
-      int i_global=(int) (ORT(p,i,X)/fd_h.x) ;
+      int i_global=(int) (ORT(p,i,X)/fd_h.x);
+      i_global=MIN(i_global,global_fd_dim.x-1);
+      i_global=MAX(i_global,0);          
       fd_xi=xiarr_global[i_global];
 #ifdef VLATTICE
       if(i_global >= last_active_cell_global)
@@ -686,7 +684,12 @@ void move_atoms_ttm(void)
 //MYMOD: Pdecay (mode=3) an dieser stelle um zusaetzliche loop zu vermeiden
 #ifdef PDECAY
  if( ORT(p,i,X) > ramp_start )     
+ {
+#ifdef NRB
+  if(NRBBND(p,i)==0)
+#endif  
     KRAFT(p,i,X) -=  ( IMPULS(p,i,X)/MASSE(p,i)) * xipdecay * a * ( ORT(p,i,X) - ramp_start ) * ( ORT(p,i,X) - ramp_start );     
+ }
 
   #ifdef FDTD2D
   //HOTIFX fuer +/- y bnd

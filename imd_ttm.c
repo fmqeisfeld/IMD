@@ -269,6 +269,8 @@ void update_fd()
     for (l=0; l<p->n; ++l) 
     {
       int i_global=(int) (ORT(p,l,X)/fd_h.x) ;
+      i_global=MIN(i_global,global_fd_dim.x-1);
+      i_global=MAX(i_global,0);
       // int i_local=i_global+1-my_coord.x*(local_fd_dim.x-2);
 
       natomslocal[i_global]++;
@@ -369,6 +371,8 @@ for (k=0; k<NCELLS; ++k)
   for (l=0; l<p->n; ++l) 
   {            
       int i_global=(int) (ORT(p,l,X)/fd_h.x);
+      i_global=MIN(i_global,global_fd_dim.x-1);
+      i_global=MAX(i_global,0);
       // int i_local=i_global+1-my_coord.x*(local_fd_dim.x-2);
       // if(i_local < 0 || i_local > local_fd_dim.x-1)
       //   continue;
@@ -1019,6 +1023,7 @@ void init_ttm()
 #if EOSMODE==1
   nn_read_table(&intp_cve_from_r_te, "EOS_cve_from_r_te.txt");
   nn_read_table(&intp_ee_from_r_tesqrt, "EOS_ee_from_r_tesqrt.txt");
+  nn_read_table(&intp_phase_from_r_ti, "EOS_phase_from_r_ti.txt");
 #endif
   //read_tricub_interp(&kappa_interp,"kappa.txt"); //Hardcoding ist schneller
   //Lese Drude-Lorentz Interpolationstabellen
@@ -1368,10 +1373,7 @@ if(i_global > last_active_cell_global)
     SwapTTM(i, j, k);
 #endif
 
-    // if(i==1 || i==local_fd_dim.x-2)
-    // printf("myid:%d, i:%d, ig:%d, atoms:%d,at-1:%d,at+1:%d\n",myid,i,i_global, node.natoms, l1[i-1].natoms, l1[i+1].natoms);
-
-    /* only do calculation if cell is not deactivated */
+    
     //ACHTUNG: dens in buffer-zelle ist nicht bekannt, da nicht kommuniziert
     //         aber in fill_ghost_layers wird natoms genullt falls dens < RHOMIN    
 
@@ -1421,11 +1423,6 @@ if(i_global > last_active_cell_global)
     ) +node.temp;
     
 
-// if(myid==3)
-// {
-//   printf("tnow:%f,told:%f,k:%f,kmax:%f,tmax:%f,kmin:%f,tmin:%f\n",
-//           node2.temp,node.temp, node.fd_k, xmaxk, xmaxTe, xmink,xminTe);
-// }
     //Folgende Zeile setzt vorraus, dass Cve und U kompatiblen Tabllen zugrunde liegen
     //Sonst macht T_from_E keinen sinn
     node2.U=node.U + (node2.temp-node.temp)*Ce*fd_vol/((double) node.natoms); // eV/atom
@@ -1437,7 +1434,7 @@ if(i_global > last_active_cell_global)
     xiarr_local[i] += (node2.temp - node.md_temp) * xi_fac * node.fd_g / node.md_temp / node.dens;
     //xiarr_global soll auf allen procs (für alle ttm-zellen) vorhanden sein (für imd_integrate.c)
 
-
+#if DEBUG_LEVEL > 0
     if(isnan(node2.temp) != 0 || isinf(node2.temp) != 0)
     {
       char errstr[255];
@@ -1445,6 +1442,8 @@ if(i_global > last_active_cell_global)
                       node.natoms, Ce, node.temp, node.fd_k, node.fd_g, node.md_temp, xmaxk,xmink, xmaxTe,xminTe);
       error(errstr);
     }
+#endif
+
   } //for i
 
 
@@ -1573,7 +1572,7 @@ void ttm_writeout(int number)
 #ifndef LOADBALANCE                
                 node.vcomx, node.vcomy, node.vcomz,
 #else
-                vcomxglobal[i],vcomyglobal[i],vcomzglobal[i],
+                vcomxglobal[i_global],vcomyglobal[i_global],vcomzglobal[i_global],
 #endif                
                 node.fd_k, node.fd_g,
  #ifndef FDTD
@@ -1748,7 +1747,12 @@ void ttm_writeout(int number)
                   i, j, k, lglobal[index].natoms, lglobal[index].temp,
                   lglobal[index].md_temp, lglobal[index].U, lglobal[index].xi,
                   lglobal[index].source, lglobal[index].dens,
-                  lglobal[index].vcomx, lglobal[index].vcomy, lglobal[index].vcomz,
+
+#ifndef LOADBALANCE                
+                  lglobal[index].vcomx,lglobal[index].vcomy,lglobal[index].vcomz,
+#else
+                  vcomxglobal[index],vcomyglobal[index],vcomzglobal[index],
+#endif  
                   lglobal[index].fd_k, lglobal[index].fd_g,
                   lglobal[index].Z, lglobal[index].proc, lglobal[index].Ce);
 
@@ -2430,6 +2434,51 @@ double EOS_cve_from_r_te(double r, double t)
   pout.z *= J2eV; // --> eV/eV/A^3
 
   return pout.z;
+}
+
+double EOS_phase_from_r_ti(double r, double t)
+{
+  
+  point pout;
+  pout.x = r;
+  pout.y = t;
+  
+#if DEBUG_LEVEL > 0   
+  if(r < intp_phase_from_r_ti.xmin || r > intp_phase_from_r_ti.xmax)
+  {
+    char errstr[400];
+    sprintf(errstr, "ERROR in EOS_phase_from_r_ti: Density=%.4e  exceeds interpolation range: xmin=%.4e, xmax=%.4e\n",
+      r,intp_phase_from_r_ti.xmin,intp_phase_from_r_ti.xmax);
+
+    printf("myid:%d, WARNING: %s. using bounds.\n",myid,errstr);
+    r=MIN(intp_phase_from_r_ti.xmax, r);
+    r=MAX(r,intp_phase_from_r_ti.xmin);    
+    //error(errstr);
+  }
+  if(t < intp_phase_from_r_ti.ymin || t > intp_phase_from_r_ti.ymax)
+  {
+    char errstr[400];
+    sprintf(errstr, "ERROR in EOS_phase_from_r_ti: Ti=%.4e  exceeds interpolation range: ymin=%.4e, ymax=%.4e\n",
+      t,intp_phase_from_r_ti.ymin,intp_phase_from_r_ti.ymax);
+
+    printf("myid:%d, WARNING: %s. using bounds.\n",myid,errstr);
+    t=MIN(intp_phase_from_r_ti.ymax, t);
+    t=MAX(t,intp_phase_from_r_ti.ymin);      
+  }
+#endif
+
+  // nnhpi_interpolate(intp_e_from_r_tsqrt.interpolator, &pout); //naturla neigh, sibson-rule
+  lpi_interpolate_point(intp_phase_from_r_ti.interpolator, &pout); //linear
+#if DEBUG_LEVEL > 0
+  if(isnan(pout.z)!=0)
+  { 
+    char errstr[400];
+    sprintf(errstr, "ERROR: phase_from_r_ti retunred NaN!.r:%.4e,t:%.4e",r,t);
+    error(errstr);
+  }
+  #endif
+
+  return round(pout.z);
 }
 
 

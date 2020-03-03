@@ -540,6 +540,12 @@ int tmm_get_epsilon(double lambda, double Te,double Ti, double Z, double Ne, rea
 
 
         double complex epsilon_bb = epsl_bb(il) + (epsl_bb(ir) - epsl_bb(il))/ (eps_bb_data[ir][0] - eps_bb_data[il][0])* (lambda*1e6 - eps_bb_data[il][0]);
+        int phase=((int) EOS_phase_from_r_ti(Ni*26.9815*AMU,Ti));
+
+        if( fabs(phase)==3 || fabs(phase)==4 || fabs(phase)==5)
+          epsilon_bb=0*I*0;
+
+
         double complex epsilon_met = epsilon_bb + un - Ne / Ncr / (un + im * MIN(nu_met, nu_max) / omega_las);
         double complex epsilon_pl  = un - Ne / Ncr * (tmm_K1(ksi) - im * nu_pl / omega_las * tmm_K2(ksi));
         double complex epsilon_wr = epsilon_pl + (epsilon_met - epsilon_pl) * exp(-A4p * Te / TF);

@@ -195,8 +195,8 @@ typedef struct _work_t_gkq{
 typedef struct stack_s* stack_t;
 double integral_simpson_par(double (*f)(double, struct my_f_params*), stack_t stack);
 
-double gkq_adapt(double (*f)(double, struct my_f_params*), stack_t stack);
-double gkq(double (*f)(double, struct my_f_params*), double a, double b, double TOL, struct my_f_params* p,stack_t stack);
+double gkq_adapt_OMP(double (*f)(double, struct my_f_params*), stack_t stack);
+double gkq_OMP(double (*f)(double, struct my_f_params*), double a, double b, double TOL, struct my_f_params* p,stack_t stack);
 
 double gkq_serial(double (*f)(double, struct my_f_params*), double a, double b, double TOL, struct my_f_params* p);
 double gkq_adapt_serial(double (*f)(double, struct my_f_params*), double a, double b, 
@@ -320,7 +320,7 @@ void pop_stack(
 // ***************************************************************************
 // *      Gauss-kronard quadrature, parallel
 // ***************************************************************************
-double gkq(double (*f)(double, struct my_f_params*), double a, double b, double TOL, struct my_f_params* p,stack_t stack)
+double gkq_OMP(double (*f)(double, struct my_f_params*), double a, double b, double TOL, struct my_f_params* p,stack_t stack)
 {
   //1st integration
   double result=0.0;
@@ -423,7 +423,7 @@ double gkq_serial(double (*f)(double, struct my_f_params*), double a, double b, 
 // ***********************************************
 // * RECURSIVE ADAPTION ROUTINE FOR PARALLEL-GK-QUADRATURE 
 // **********************************************
-double gkq_adapt(double (*f)(double, struct my_f_params*), stack_t stack)
+double gkq_adapt_OMP(double (*f)(double, struct my_f_params*), stack_t stack)
 {
   work_gkq work;
   work.iter=0;

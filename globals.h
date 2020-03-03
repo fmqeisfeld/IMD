@@ -313,6 +313,7 @@ EXTERN struct timeval eetime;
 EXTERN struct bicubinterp  QfromT_interp,CfromT_interp; //wird nicht mehr benutzt
 EXTERN nn_interp intp_cve_from_r_te;
 EXTERN nn_interp intp_ee_from_r_tesqrt;
+EXTERN nn_interp intp_phase_from_r_ti;
 struct tricubinterp nueff_interp,kappa_interp;
 
 EXTERN real fd_vol INIT(0);

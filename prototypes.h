@@ -128,6 +128,7 @@ double EpsRealInterpol(double rho,double Te,double Ti);
 //EOS STUFF
 double QfromT(double T,double rho);
 //double CfromT(double T,double rho);
+double EOS_phase_from_r_ti(double r,double t);
 double EOS_cve_from_r_te(double r,double t);
 double EOS_ee_from_r_te(double r,double t);
 double EOS_te_from_r_ee(double r,double e);
