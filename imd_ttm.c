@@ -268,6 +268,7 @@ void update_fd()
     //   continue;
     for (l=0; l<p->n; ++l) 
     {
+      if(SORTE(p,l) !=0 ) continue;
       int i_global=(int) (ORT(p,l,X)/fd_h.x) ;
       i_global=MIN(i_global,global_fd_dim.x-1);
       i_global=MAX(i_global,0);
@@ -295,10 +296,6 @@ void update_fd()
           if (p->fdi[l] > i_global)
           {
             fluxfromrightlocal[i_global]++;            
-// if(myid==1)            
-// {if(i_global==11)
-// printf("\nfluxfromright[%d]:%d\n\n",i_global,fluxfromrightlocal[i_global]);
-// }
           }
           //-x
           else if (p->fdi[l] < i_global)
@@ -370,6 +367,7 @@ for (k=0; k<NCELLS; ++k)
     continue;
   for (l=0; l<p->n; ++l) 
   {            
+      if(SORTE(p,l)!=0) continue;
       int i_global=(int) (ORT(p,l,X)/fd_h.x);
       i_global=MIN(i_global,global_fd_dim.x-1);
       i_global=MAX(i_global,0);

@@ -226,7 +226,7 @@ void move_atoms_nve(void)
 #ifndef DAMP /*  Normal NVE */
 
 
-//MYMOD : Auch ohne ttm moechte ich pdecay nutzen koennen!  KRAFT(p,i,X)-=500.0; //force multijump
+//MYMOD : Auch ohne ttm moechte ich pdecay nutzen koennen!
 #ifdef PDECAY
      if( ORT(p,i,X) > ramp_start )
 #ifdef NRB
@@ -641,10 +641,18 @@ void move_atoms_ttm(void)
     { /* loop over all atoms in the cell */
 
 #ifdef LOADBALANCE
-      int i_global=(int) (ORT(p,i,X)/fd_h.x);
-      i_global=MIN(i_global,global_fd_dim.x-1);
-      i_global=MAX(i_global,0);          
-      fd_xi=xiarr_global[i_global];
+      if(SORTE(p,i)==0)
+      {
+        int i_global=(int) (ORT(p,i,X)/fd_h.x);
+        i_global=MIN(i_global,global_fd_dim.x-1);
+        i_global=MAX(i_global,0);          
+        fd_xi=xiarr_global[i_global];
+      }
+      else
+      {
+        fd_xi=0.0;
+      }
+
 #ifdef VLATTICE
       if(i_global >= last_active_cell_global)
         fx_xi=0.0;

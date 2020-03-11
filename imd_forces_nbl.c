@@ -472,8 +472,11 @@ void calc_forces(int steps)
 #ifdef TTM
 if(r2 <= pair_pot.end[0])
 {        
-  nbttm++;
-  NUMNEIGHS(q,j)++;
+  if(SORTE(p,i)==0 && SORTE(q,j)==0)
+  {
+    nbttm++;
+    NUMNEIGHS(q,j)++;
+  }
   
 }
 #endif
