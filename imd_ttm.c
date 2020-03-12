@@ -1355,11 +1355,11 @@ void do_DIFF(double tau)
   for (i = 1; i < local_fd_dim.x - 1; i++)
   {     
     i_global =  ((i - 1) + myid* (local_fd_dim.x - 2));
-
+#ifdef VLATTICE
 //HOTIFX      
 if(i_global > last_active_cell_global)
   continue;    
-
+#endif
     //compute absorbed laser-energy
     if (laser_active)
     {
@@ -1456,8 +1456,7 @@ if(i_global > last_active_cell_global)
   {
 
     int ilocal= last_active_cell_global+1-myid*(local_fd_dim.x-2);
-    xminTe = l1[ilocal].temp;
-    xmink  = l1[ilocal].fd_k;
+
     // Ci AUS GEOS: rho: 2.665655433e+03 temp: 3.000000000e+02 cvi: 8.589449886e+02           
     double Ci=8.589449886e+02;
     Ci *= vlatdens; // J/(K*kg) --> J/K/m^3
@@ -1466,6 +1465,17 @@ if(i_global > last_active_cell_global)
     Ci *= J2eV; // --> eV/eV/A^3
     for(i=0;i<vlatdim;i++)
     {
+      
+      if(i==0)
+      {
+        xminTe = l1[ilocal].temp;
+        xmink  = l1[ilocal].fd_k;
+      } 
+      else
+      {
+        xminTe=vlattice1[i-1].temp;
+        xmink=vlattice1[i-1].fd_k;
+      }     
       // Te-diffusion
       if(i<vlatdim-1)
       {
