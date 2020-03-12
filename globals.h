@@ -444,6 +444,7 @@ EXTERN double nrb_ylo INIT(-9e9);
 //ACHTUNG: In C gibt's (im gegensatz zu c++)
 //	   leider kein MPI_COMPLEX_DOUBLE datentyp
 //	   Deswegen der umständliche weg mit jeweils einem array für real und eines für imag
+EXTERN double  tmm_absorption_threshold INIT(20.0);
 EXTERN double* tmm_eps_real_arr_local;
 EXTERN double* tmm_eps_imag_arr_local;
 EXTERN double* tmm_eps_real_arr_global;
@@ -469,7 +470,7 @@ EXTERN int    eps_bb_rows INIT(0);
 EXTERN double  **K12;
 EXTERN int    K12_rows INIT(0);
 EXTERN double  **eps_bb_data;
-EXTERN double tmm_threshold INIT(1e-5); //ab wann laser aktivieren? 
+EXTERN double tmm_laser_threshold INIT(1e-5); //ab wann laser aktivieren? 
 #endif
 
 #if defined(FDTD) || defined(LASER) || defined(TMM)

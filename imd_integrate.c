@@ -641,9 +641,10 @@ void move_atoms_ttm(void)
     { /* loop over all atoms in the cell */
 
 #ifdef LOADBALANCE
+      int i_global=0;
       if(SORTE(p,i)==0)
       {
-        int i_global=(int) (ORT(p,i,X)/fd_h.x);
+        i_global=(int) (ORT(p,i,X)/fd_h.x);
         i_global=MIN(i_global,global_fd_dim.x-1);
         i_global=MAX(i_global,0);          
         fd_xi=xiarr_global[i_global];

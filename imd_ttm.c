@@ -566,8 +566,10 @@ void do_FILLMESH(void)
   {
     i_global =  ((i - 1) + myid * (local_fd_dim.x - 2));
 //HOTFIX    
+#ifdef VLATTICE    
 if(i_global > last_active_cell_global)
   continue;
+#endif
 
     if (node.natoms >= fd_min_atoms && node.dens > RHOMIN)
     {

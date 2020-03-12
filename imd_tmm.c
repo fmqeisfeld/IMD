@@ -155,7 +155,7 @@ int tmm_init()
 
 #ifdef TMM_t0_suggest
   // verschiebe t0 sodasss laser E-feld gerade threshold-value erreicht
-  double tstart=laser_sigma_t*sqrt(-2.0*log(tmm_threshold));  
+  double tstart=laser_sigma_t*sqrt(-2.0*log(tmm_laser_threshold));  
   laser_t_0 = tstart;
   laser_t_0 += 100e-15; // plus 100 fs puffer
 #endif
@@ -174,6 +174,8 @@ int tmm_init()
           printf("*****************************************\n");
           printf("lambda:%.4e\n",lambda);
           printf("theta:%f (deg)\n", tmm_theta);
+          printf("tmm_absorption_threshold:%f\n",tmm_absorption_threshold);
+          printf("tmm_laser_threshold:%f\n",tmm_laser_threshold);
           if(tmm_pol==1)
             printf("Polarization: S\n");
           if(tmm_pol==2)
@@ -181,7 +183,7 @@ int tmm_init()
           printf("I0:%.4e W/m^2\n",I0);
           printf("t0:%.4e,sigma_t:%.4e\n",laser_t_0,laser_sigma_t);
           printf("t1:%.4e,sigma_t1:%.4e\n",laser_t_1,laser_sigma_t1);
-          printf("t_FWHM:%.4e, t1_FWHM:%.4e\n", t_FWHM,t1_FWHM);
+          printf("t_FWHM:%.4e, t1_FWHM:%.4e\n", t_FWHM,t1_FWHM);          
           printf("***************************\n");
 	}
 
@@ -196,7 +198,7 @@ int do_tmm(real dt)
   I_t+=I0*exp(-pow(tmm_time-laser_t_1,2)/laser_sigma_t1_squared);
 if(steps<2) return 0;
   //if(I_t<0.001*I0)
-  if(sqrt(2.0*I_t*Imp)<tmm_threshold* sqrt(2*I0*Imp)) //Elec-field strength threshold
+  if(sqrt(2.0*I_t*Imp)<tmm_laser_threshold* sqrt(2*I0*Imp)) //Elec-field strength threshold
   {
     laser_active=false;
     return 0;
@@ -283,7 +285,7 @@ printf("myid:%d,ig:%d, epsr:%.4e,epsimg:%.4e,Te:%.4e,Ti:%.4e,Ne:%.4e,Z:%.4e,atom
 
   double complex BR,BT,B0;
   int ecut=0;
-  real ecut_thresh=exp(-20.0);
+  real ecut_thresh=exp(-tmm_absorption_threshold);
 
   BR=BT=0.0+I*0;
   B0=1.0+I*0;
@@ -359,7 +361,7 @@ if(myid==0)
     {
       printf("km:%f+i*%f\n", creal(km[l]),cimag(km[l]));
     }
-    error("Sample is too short for TMM.");
+    error("Sample is too short for TMM.Consider reducing tmm_threshold.");
     MPI_Abort(cpugrid,0);
   }
   //tans und refl

@@ -2043,6 +2043,11 @@ int getparamfile(char *paramfname, int phase)
 //ENDOF MYMOD
 //MY MOD: FDTD (ACHTUNG: alles in SI-einheiten!)
 #if defined(FDTD) || defined(LASER) || defined(TMM)
+#ifdef TMM
+else if(strcasecmp(token,"tmm_threshold")==0){
+        getparam("tmm_threshold",&tmm_absorption_threshold,PARAM_REAL,1,1);
+    }    
+#endif    
 else if(strcasecmp(token,"I0")==0){
         getparam("I0",&I0,PARAM_REAL,1,1);
     }
@@ -4755,6 +4760,9 @@ MPI_Bcast( &filter_int,             1, MPI_INT, 0, MPI_COMM_WORLD);
   MPI_Bcast( &laser_sigma_t1,    1, REAL,  0, MPI_COMM_WORLD);
   MPI_Bcast( &laser_t_1,        1, REAL,  0, MPI_COMM_WORLD);
   MPI_Bcast( &lambda,           1, REAL,0, MPI_COMM_WORLD);
+#ifdef TMM
+  MPI_Bcast( &tmm_absorption_threshold,    1, REAL,0, MPI_COMM_WORLD);
+#endif 
 #endif
 
 #ifdef LOADBALANCE
