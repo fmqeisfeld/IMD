@@ -21,6 +21,9 @@
 
 #include "imd.h"
 
+//MYMOD
+#define ELECPRESS
+//ENDOF MYMOD
 /*****************************************************************************
 *
 * Basic NVE Integrator
@@ -587,6 +590,9 @@ void move_atoms_ttm(void)
 #endif /*DEBUG*/
 
 //MYMOD
+#ifdef ELECPRESS
+  double epressforce=0.0;
+#endif  
 #ifdef PDECAY 
   double a= 1.0/(ramp_end - ramp_start);
   a*=a;
@@ -648,6 +654,12 @@ void move_atoms_ttm(void)
         i_global=MIN(i_global,global_fd_dim.x-1);
         i_global=MAX(i_global,0);          
         fd_xi=xiarr_global[i_global];
+#ifdef ELECPRESS
+        epressforce=epress_deriv[i_global];
+#endif        
+        // if(NUMMER(p,i)==605)
+        //   printf("kraft:%.4e, eforce:%.4e\n",KRAFT(p,i,X),epressforce);
+
       }
       else
       {
@@ -657,6 +669,9 @@ void move_atoms_ttm(void)
 #ifdef VLATTICE
       if(i_global >= last_active_cell_global)
         fx_xi=0.0;
+#ifdef ELECPRESS
+      epressforce=0.0;
+#endif      
 #endif      
 #endif
 
@@ -723,6 +738,9 @@ void move_atoms_ttm(void)
       IMPULS(p,i,X) += timestep * ( KRAFT(p,i,X) + fd_xi * MASSE(p,i) * ( IMPULS(p,i,X)/MASSE(p,i) - vcomxglobal[i_global]) );
       IMPULS(p,i,Y) += timestep * ( KRAFT(p,i,Y) + fd_xi * MASSE(p,i) * ( IMPULS(p,i,Y)/MASSE(p,i) - vcomyglobal[i_global]) );
       IMPULS(p,i,Z) += timestep * ( KRAFT(p,i,Z) + fd_xi * MASSE(p,i) * ( IMPULS(p,i,Z)/MASSE(p,i) - vcomzglobal[i_global]) );    
+  #ifdef ELECPRESS
+      IMPULS(p,i,X) -= timestep *epressforce;
+  #endif
 #else
       IMPULS(p,i,X) += timestep * ( KRAFT(p,i,X) + fd_xi * MASSE(p,i) * ( IMPULS(p,i,X)/MASSE(p,i) - l1[fd_i][fd_j][fd_k].vcomx) );
       IMPULS(p,i,Y) += timestep * ( KRAFT(p,i,Y) + fd_xi * MASSE(p,i) * ( IMPULS(p,i,Y)/MASSE(p,i) - l1[fd_i][fd_j][fd_k].vcomy) );

@@ -57,7 +57,7 @@
                     //Bisher ist dieser Fall noch nicht eingetreten, aber bei sehr kleinen ttm-zellen kann das durchaus
                     //passieren.
 #define VLATTICE_STATIC
-
+#define ELECPRESS   //wird nochmal in imd_integrate.c definiert
 #define DEBUG_LEVEL 1
 
 
@@ -120,6 +120,10 @@ void calc_ttm()
   //beginnend bei index=1 (brauche ghost-layer nicht)
   MPI_Allgather(&xiarr_local[1], local_fd_dim.x-2, MPI_DOUBLE, 
                 &xiarr_global[0],local_fd_dim.x-2, MPI_DOUBLE, cpugrid);
+
+  #ifdef ELECPRESS 
+    do_electronic_pressure(); // elec press. bleibt für 1 MD-step konst. auch wenn's nicht korrekt ist
+  #endif   
 
 {
     //Calc internal eng and updt new U after diff
@@ -464,11 +468,8 @@ for(i_global=0; i_global < global_fd_dim.x;i_global++)
 // if(myid==1)      
 //   printf("\n\n\nFUCK:%d, you:%f\n\n\n\n", l2[local_fd_dim.x-2].natoms, l2[local_fd_dim.x-2].dens);
     }
-
-
-
-
   }
+
 
   free1darr(natomslocal);
   free1darr(natomsglobal);
@@ -544,6 +545,83 @@ for(i_global=0; i_global < global_fd_dim.x;i_global++)
 #endif
 
 }
+
+//////////////////////////////////////////////////////////////   
+//                   ELECTRON PRESSURE
+//////////////////////////////////////////////////////////////   
+#ifdef ELECPRESS   
+void do_electronic_pressure(void)
+{
+  int i_global;
+
+    
+  //erstmal clearen
+  for(i_global=0; i_global < global_fd_dim.x;i_global++)
+  {
+    epress_local[i_global]=0.0;
+    epress_global[i_global]=0.0;
+    epress_deriv[i_global]=0.0;
+  }
+  //jetzt mit eos berechnen
+  for(i_global=0; i_global < global_fd_dim.x;i_global++)
+  {             
+    int i=i_global+1-myid*(local_fd_dim.x-2);
+    if(i<1 || i > local_fd_dim.x-2)
+      continue;
+
+    if(node.dens< RHOMIN || node.natoms < fd_min_atoms) continue;
+    #ifdef VLATTICE
+      if(i_global > last_active_cell_global)
+        continue;    
+    #endif    
+
+
+    epress_local[i_global]=EOS_pe_from_r_te(node.dens,node.temp*11604.5);    
+    
+  #if DEBUG_LEVEL>0
+    if (isnan(epress_local[i_global]) != 0)
+    {
+      char errstr[255];
+      sprintf(errstr,"proc:%d,i:%d,steps:%d, atoms:%d,elec press is NaN,Te=%.4e,dens=%.4e\n", 
+        myid, i_global,steps, node.natoms, node.temp, node.dens);
+      error(errstr);
+    }
+  #endif
+  }
+  //Kommunizieren 
+  //nicht gerade effizient...aber muss ja nur 1 mal pro mdstep geschehen
+  MPI_Allreduce(epress_local, epress_global, global_fd_dim.x, MPI_DOUBLE, MPI_SUM, cpugrid);  
+
+  //Jetzt epress-deriv berechnen 
+  for(i_global=1; i_global < global_fd_dim.x-1;i_global++)
+  {
+    #ifdef VLATTICE
+    if(i_global > last_active_cell_global)
+      continue;
+    #endif    
+        
+    int i=i_global+1-myid*(local_fd_dim.x-2);
+    if(i<1 || i > local_fd_dim.x-2)
+      continue;        
+    
+    //Kraft aus elec-druck = -grad(Pe)/ni -> division durch ni mitnehmen!
+    int xmin=i_global-1;
+    int xmax=i_global+1;
+
+    // if(l1[i-1].natoms >= fd_min_atoms && l1[i-1].dens >= RHOMIN) xmin=i_global-1;
+    // if(l1[i+1].natoms >= fd_min_atoms && l1[i+1].dens >= RHOMIN) xmin=i_global+1;
+    if(steps>1)
+    {
+      epress_deriv[i_global]=(epress_global[xmax]-epress_global[xmin])/2.0/fd_h.x/(node.natoms/fd_vol);
+      // printf("myid:%d,ig:%d, epderiv:%.4e,p+1:%.4e,p-1:%.4e,te:%.4e\n",
+      //         myid,i_global,epress_deriv[i_global],
+      //         epress_global[xmax],epress_global[xmin],node.temp);
+    }
+
+
+  }  
+}
+#endif  
 // ***************************************************************************************************************************
 // * do_FILLMESH computes wide-range electronic transport and optical properties of fd-cells
 // ****************************************************************************************************************************
@@ -661,6 +739,9 @@ if(i_global > last_active_cell_global)
             error(errstr);
           }
 #endif
+
+
+
           //////////////////////////////////////////////////////////////          
           //        DRUDE - LORENTZ PARAMS FUER MAXWELL SOLVER
           //////////////////////////////////////////////////////////////   
@@ -926,6 +1007,12 @@ void init_ttm()
   alloc1darr(int, fluxfromrightglobal, global_fd_dim.x);
   alloc1darr(int, fluxfromleftglobal, global_fd_dim.x);
 
+#ifdef ELECPRESS
+  alloc1darr(double, epress_local,  global_fd_dim.x);
+  alloc1darr(double, epress_global, global_fd_dim.x);
+  alloc1darr(double, epress_deriv, global_fd_dim.x);
+#endif  
+
   #ifdef VLATTICE //NUR 1D!!! (global_fd_dim.y und global_fd_dim.z=1)
   vlattice1= (ttm_Element*) malloc(sizeof(ttm_Element)* vlatdim);
   vlattice2= (ttm_Element*) malloc(sizeof(ttm_Element)* vlatdim);
@@ -1024,7 +1111,11 @@ void init_ttm()
   nn_read_table(&intp_cve_from_r_te, "EOS_cve_from_r_te.txt");
   nn_read_table(&intp_ee_from_r_tesqrt, "EOS_ee_from_r_tesqrt.txt");
   nn_read_table(&intp_phase_from_r_ti, "EOS_phase_from_r_ti.txt");
+#ifdef ELECPRESS
+  nn_read_table(&intp_pe_from_r_te, "EOS_pe_from_r_te.txt");
+#endif  
 #endif
+
   //read_tricub_interp(&kappa_interp,"kappa.txt"); //Hardcoding ist schneller
   //Lese Drude-Lorentz Interpolationstabellen
 
@@ -2489,6 +2580,65 @@ double EOS_phase_from_r_ti(double r, double t)
   #endif
 
   return round(pout.z);
+}
+
+double EOS_pe_from_r_te(double r, double t)
+{
+
+  //r = MAX(r, RHOMIN);
+  //r = MIN(r, 3500); //CHEAT
+
+  //double tsqrt = sqrt(t);
+  
+  point pout;
+  pout.x = r;
+  pout.y = t;
+  
+#if DEBUG_LEVEL > 0   
+  if(r < intp_pe_from_r_te.xmin || r > intp_pe_from_r_te.xmax)
+  {
+    char errstr[400];
+    sprintf(errstr, "ERROR in EOS_pe_from_r_te: Density=%.4e  exceeds interpolation range: xmin=%.4e, xmax=%.4e\n",
+      r,intp_pe_from_r_te.xmin,intp_pe_from_r_te.xmax);
+
+    printf("myid:%d, WARNING: %s. using bounds.\n",myid,errstr);
+    r=MIN(intp_pe_from_r_te.xmax, r);
+    r=MAX(r,intp_pe_from_r_te.xmin);    
+    //error(errstr);
+  }
+  if(t < intp_pe_from_r_te.ymin || t > intp_pe_from_r_te.ymax)
+  {
+    char errstr[400];
+    sprintf(errstr, "ERROR in EOS_pe_from_r_te: Te=%.4e  exceeds interpolation range: ymin=%.4e, ymax=%.4e\n",
+      t,intp_pe_from_r_te.ymin,intp_pe_from_r_te.ymax);
+
+    printf("myid:%d, WARNING: %s. using bounds.\n",myid,errstr);
+    t=MIN(intp_pe_from_r_te.ymax, t);
+    t=MAX(t,intp_pe_from_r_te.ymin);      
+  }
+#endif
+
+  // nnhpi_interpolate(intp_e_from_r_tsqrt.interpolator, &pout); //naturla neigh, sibson-rule
+  lpi_interpolate_point(intp_pe_from_r_te.interpolator, &pout); //linear
+#if DEBUG_LEVEL > 0
+  if(isnan(pout.z)!=0)
+  { 
+    char errstr[400];
+    sprintf(errstr, "ERROR: pe_from_r_te retunred NaN!.r:%.4e,t:%.4e",r,t);
+    error(errstr);
+  }
+  #endif
+
+  // double tupper=t+0.02*t;
+  // double tlower=t-0.02*t;
+  // double eupper=EOS_ee_from_r_te(r,tupper);
+  // double elower=EOS_ee_from_r_te(r,tlower);
+
+
+  // pout.z=(eupper-elower)/(tupper-tlower);
+
+  pout.z *= 6.242e-12; // Pa to eV/Angstrom^3
+  return pout.z;
 }
 
 

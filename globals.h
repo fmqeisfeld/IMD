@@ -314,6 +314,8 @@ EXTERN struct bicubinterp  QfromT_interp,CfromT_interp; //wird nicht mehr benutz
 EXTERN nn_interp intp_cve_from_r_te;
 EXTERN nn_interp intp_ee_from_r_tesqrt;
 EXTERN nn_interp intp_phase_from_r_ti;
+EXTERN nn_interp  intp_pe_from_r_te;
+
 struct tricubinterp nueff_interp,kappa_interp;
 
 EXTERN real fd_vol INIT(0);
@@ -1159,6 +1161,9 @@ EXTERN double *vcomzlocal,*vcomzglobal;
 
 EXTERN int *fluxfromrightlocal,*fluxfromleftlocal;
 EXTERN int *fluxfromrightglobal,*fluxfromleftglobal;
+
+
+EXTERN double *epress_local,*epress_global,*epress_deriv;
 
 EXTERN int ttmdimx INIT(0); //global_fd_dim.x muss in diesem fall angegeben werden
 #else
