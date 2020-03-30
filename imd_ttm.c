@@ -1670,11 +1670,7 @@ void ttm_writeout(int number)
                 i_global, j_global, k_global, node.natoms, node.temp,
                 node.md_temp, node.xi,
                 node.source, node.dens,
-#ifndef LOADBALANCE                
-                node.vcomx, node.vcomy, node.vcomz,
-#else
                 vcomxglobal[i_global],vcomyglobal[i_global],vcomzglobal[i_global],
-#endif                
                 node.fd_k, node.fd_g,
  #ifndef FDTD
                 node.Z, node.proc, node.Ce
@@ -1848,12 +1844,7 @@ void ttm_writeout(int number)
                   i, j, k, lglobal[index].natoms, lglobal[index].temp,
                   lglobal[index].md_temp, lglobal[index].U, lglobal[index].xi,
                   lglobal[index].source, lglobal[index].dens,
-
-#ifndef LOADBALANCE                
-                  lglobal[index].vcomx,lglobal[index].vcomy,lglobal[index].vcomz,
-#else
                   vcomxglobal[index],vcomyglobal[index],vcomzglobal[index],
-#endif  
                   lglobal[index].fd_k, lglobal[index].fd_g,
                   lglobal[index].Z, lglobal[index].proc, lglobal[index].Ce);
 

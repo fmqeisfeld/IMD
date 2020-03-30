@@ -622,7 +622,7 @@ void move_atoms_ttm(void)
 
     p = CELLPTR(k);
     
-#ifndef LOADBALANCE    
+#ifndef TTM1D
     fd_i=p->fd_cell_idx.x;
     fd_j=p->fd_cell_idx.y;
     fd_k=p->fd_cell_idx.z;
@@ -646,7 +646,7 @@ void move_atoms_ttm(void)
     for (i=0; i<p->n; ++i) 
     { /* loop over all atoms in the cell */
 
-#ifdef LOADBALANCE
+#ifdef TTM1D
       int i_global=0;
       if(SORTE(p,i)==0)
       {
@@ -734,7 +734,7 @@ void move_atoms_ttm(void)
     {
 #endif  
 
-#ifdef LOADBALANCE    
+#ifdef TTM1D
       IMPULS(p,i,X) += timestep * ( KRAFT(p,i,X) + fd_xi * MASSE(p,i) * ( IMPULS(p,i,X)/MASSE(p,i) - vcomxglobal[i_global]) );
       IMPULS(p,i,Y) += timestep * ( KRAFT(p,i,Y) + fd_xi * MASSE(p,i) * ( IMPULS(p,i,Y)/MASSE(p,i) - vcomyglobal[i_global]) );
       IMPULS(p,i,Z) += timestep * ( KRAFT(p,i,Z) + fd_xi * MASSE(p,i) * ( IMPULS(p,i,Z)/MASSE(p,i) - vcomzglobal[i_global]) );    

@@ -9,7 +9,7 @@
 // 
 #define TMM_t0_suggest //wenn ja, wird t0 so angepasst dass laser E-field gerade @ threshold für laser aktivieren
 
-#ifdef LOADBALANCE
+#ifdef TTM1D
 #define node  l1[i]
 #define node2 l2[i]
 #else
@@ -212,7 +212,7 @@ if(steps<2) return 0;
  for(i=1;i<local_fd_dim.x-1;i++)
  {
 
-#ifndef LOADBALANCE
+#ifndef TTM1D
    iglobal = (i-1) + my_coord.x*(local_fd_dim.x-2); 
 #else
    //bei TTM mit LB werden cpu-zuständigkeiten unabh. von position von links nach rechts
@@ -263,7 +263,7 @@ printf("myid:%d,ig:%d, epsr:%.4e,epsimg:%.4e,Te:%.4e,Ti:%.4e,Ne:%.4e,Z:%.4e,atom
  //KORREKTUR-LOOP
  for(i=1;i<local_fd_dim.x-1;i++)
  {
-#ifndef LOADBALANCE  
+#ifndef TTM1D
    iglobal = (i-1) + my_coord.x*(local_fd_dim.x-2);
 #else
    iglobal = (i-1) + myid*(local_fd_dim.x-2);

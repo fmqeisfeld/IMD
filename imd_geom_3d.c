@@ -442,18 +442,8 @@ void init_cells( void )
 	make_cell_lists();
 	lb_syncBufferCellAffinity();
 	make_cell_lists(); /*Now create the proper interactions */
-	setup_buffers();
-	fix_cells();
-
-  //MYMOD   : Wieder entfernt: config hier noch nicht eingelesen ...
-  // printf("\n\n\n natoms:%ld,nactive:%ld \n\n\nn",natoms,nactive);
-// #ifdef NRB
-//   #ifndef NBL
-//     init_nrb();
-//   #endif  
-// #endif
-//ENDOF MYMOD
-
+	setup_buffers();   //ACHTUNG: Dieses setup_buffers auf HAWK führt im DEBUG-Mode zu seg-fault, und zwar an der Stelle "find largest cell", warum auch immer!
+	fix_cells();       //         Im  Realease-mode kein segfault, dafür aber quälend langsam --> nicht zu gebrauchen
 
 #endif
 }
