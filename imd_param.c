@@ -2028,7 +2028,7 @@ int getparamfile(char *paramfname, int phase)
 
 
 //MYMOD FÜR loadbalance mit ttm
-#ifdef LOADBALANCE
+#ifdef TTM1D
      else if(strcasecmp(token,"vlatdim")==0){
         getparam("vlatdim",&vlatdim,PARAM_INT,1,1);
     }
@@ -3966,7 +3966,7 @@ void check_parameters_complete()
     error("You must specify atomic_weight");
   if(atomic_charge==0)
     error("You must specify atomic_charge");
-#ifdef LOADBALANCE
+#ifdef TTM1D
   if(ttmdimx==0)
     error("You must specify ttmdimx");
 #endif
@@ -4765,7 +4765,7 @@ MPI_Bcast( &filter_int,             1, MPI_INT, 0, MPI_COMM_WORLD);
 #endif 
 #endif
 
-#ifdef LOADBALANCE
+#ifdef TTM1D
   MPI_Bcast( &ttmdimx,             1, MPI_INT,0, MPI_COMM_WORLD);
   MPI_Bcast( &vlatdim,             1, MPI_INT,0, MPI_COMM_WORLD);
   MPI_Bcast( &vlatbuffer,          1, MPI_INT,0, MPI_COMM_WORLD);
