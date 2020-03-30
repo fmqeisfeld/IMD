@@ -16,7 +16,7 @@
 
 #include <sys/time.h> // Performance messen
 #include <complex.h>
-#include "/usr/include/gsl/gsl_sf_fermi_dirac.h"  // Fuer fermi-dirac integral zur berechnung der FEG-internen energie
+//#include "/usr/include/gsl/gsl_sf_fermi_dirac.h"  // Fuer fermi-dirac integral zur berechnung der FEG-internen energie
                                                    // als alternative zur interpol.Tabelle (falls gewünscht: EOSMODE = 0)
 //gsl_sf_fermi_dirac deakt. (genau wie FEG_ee_from_r_ne_te), weil es auf hazel nicht zu finden ist
 
@@ -366,9 +366,11 @@ for(i_global=0;i_global<global_fd_dim.x;i_global++)
 // **********************
 for (k=0; k<NCELLS; ++k) 
 {
-  p = CELLPTR(k);
+  p = CELLPTR(k);  
+#ifdef LOADBALANCE  
   if(p->lb_cell_type != LB_REAL_CELL)
     continue;
+#endif  
   for (l=0; l<p->n; ++l) 
   {            
       if(SORTE(p,l)!=0) continue;

@@ -1150,7 +1150,7 @@ EXTERN ivektor force_celldim_divisor INIT(einsivektor); /* if you want cell dime
 
 EXTERN  double max_dt_ttm; //in IMD time-units
 
-#ifdef LOADBALANCE
+#ifdef TTM1D
 EXTERN  ttm_Element * l1, * l2, * l3;
 EXTERN  double *xiarr_local; //Wird mit Allgather reduziert
 EXTERN  double *xiarr_global; //Wird mit Allgather reduziert
