@@ -2201,7 +2201,7 @@ void write_nrb_fun(FILE* out)
 
 
       len += sprintf(outbuf+len, "%d %d %d %lf %lf %lf %d %d %d %d %d %d %d %d %d %d %d %d %lf %lf %lf",
-	   NUMMER(p,i), NRBBND(p,i), NRBNEIGH(p,i), //to_cpu statt NRBENGIH -> nur vorübergehend debugzweck
+	   NUMMER(p,i), NRBBND(p,i), NRBNEIGH(p,i),
 	   ORT(p,i,X), ORT(p,i,Y), ORT(p,i,Z),
 	   NRBI(p,i,0),NRBI(p,i,1),NRBI(p,i,2),NRBI(p,i,3),NRBI(p,i,4),NRBI(p,i,5),
 	   NRBI(p,i,6),NRBI(p,i,7),NRBI(p,i,8),NRBI(p,i,9),NRBI(p,i,10),NRBI(p,i,11),
@@ -2688,60 +2688,5 @@ void nrb_readinputfile(str255 fname)
   free(buf1d);  
 }
 
-void nrb_test_forces(void)
-{
-  int i,k;
-  for(k=0;k<ncells;k++)
-  {
-    cell*p=CELLPTR(k);
-    for(i=0;i<p->n;i++)
-    {
-if(steps<300) 
-{
-//      KRAFT(p,i,X)=10.0; //eV/Angstrom // 1D-Fall
-        //2D FALL
 
-        vektor d0,d1,dist;
-        d0.x=400.0;d0.y=box_y.y/2.0;d0.z=0; //left surface //big sample
-        d0.z=0.0;
-//      d0.x=21; d0.y=145.0; //small sample
-
-        d1.x=ORT(p,i,X);
-        d1.y=ORT(p,i,Y);
-        d1.z=0; //z-abstand interessiert hier nicht
-        dist.x=d1.x-d0.x;
-        dist.y=d1.y-d0.y;
-
-        real sigmay;
-//      sigmay=100.0; // big sample
-        sigmay=100.0;  //small sample
-
-        real sigmaspatial;
-        sigmaspatial=60; //big sample
-        real depth=150.0; //big
-
-
-        real xofy=depth*exp(-0.5*pow(dist.y/sigmay,2.0));
-        //if(dist.x<=xofy)
-        if(dist.x<=depth)
-        {
-          real timefun=exp(-0.5*pow((double) (steps-150)/50,2.0));
-          real spatial=exp(-0.5*pow(dist.x/sigmaspatial,2.0));
-          real intens=timefun*spatial*45; //small sample
-
-          KRAFT(p,i,X)  += ((drand48()-0.5)*intens);
-          KRAFT(p,i,Y)  += ((drand48()-0.5)*intens);
-          KRAFT(p,i,Z)  += ((drand48()-0.5)*intens);
-
-
-// 	  IMPULS(p,i,X)=IMPULS(p,i,X)+ ((drand48()-0.5)*intens);
-//        IMPULS(p,i,Y)=IMPULS(p,i,Y)+ ((drand48()-0.5)*intens);
-//        IMPULS(p,i,Z)=IMPULS(p,i,Z)+ ((drand48()-0.5)*intens);
-
-        }
-}
-
-    }
-  }
-}
 

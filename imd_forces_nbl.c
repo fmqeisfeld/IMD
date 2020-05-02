@@ -1044,7 +1044,7 @@ NUMNEIGHS(p,i) += nbttm;
 #endif 
 
 #ifdef NRB
-  //nrb_test_forces();
+  nrb_test_forces();
 #endif
 //ENDOF MYMOD
 
@@ -1289,3 +1289,64 @@ void calc_sm_chi()
 }
 
 #endif  /* SM */
+
+
+// ***********************
+//  ZUM TESTEN VON NRB
+// *********************
+void nrb_test_forces(void)
+{
+  int i, k;
+  for (k = 0; k < ncells; k++)
+  {
+    cell*p = CELLPTR(k);
+    for (i = 0; i < p->n; i++)
+    {
+      if (steps < 300)
+      {
+//      KRAFT(p,i,X)=10.0; //eV/Angstrom // 1D-Fall
+        //2D FALL
+
+        vektor d0, d1, dist;
+        d0.x = 1100.0; d0.y = box_y.y / 2.0; d0.z = 0; //left surface //big sample
+        d0.z = 0.0;
+//      d0.x=21; d0.y=145.0; //small sample
+
+        d1.x = ORT(p, i, X);
+        d1.y = ORT(p, i, Y);
+        d1.z = 0; //z-abstand interessiert hier nicht
+        dist.x = d1.x - d0.x;
+        dist.y = d1.y - d0.y;
+
+        real sigmay;
+//      sigmay=100.0; // big sample
+        sigmay = 80.0; //small sample
+
+        real sigmaspatial;
+        sigmaspatial = 50; //big sample
+        real depth = 80.0; //big
+
+
+        real xofy = depth * exp(-0.5 * pow(dist.y / sigmay, 2.0));
+        //if(dist.x<=xofy)
+        if (dist.x <= depth)
+        {
+          real timefun = exp(-0.5 * pow((double) (steps - 150) / 50, 2.0));
+          real spatial = exp(-0.5 * pow(dist.x / sigmaspatial, 2.0));
+          real intens = timefun * spatial * 20; //small sample
+
+          KRAFT(p, i, X)  += ((drand48() - 0.5) * intens);
+          KRAFT(p, i, Y)  += ((drand48() - 0.5) * intens);
+          KRAFT(p, i, Z)  += ((drand48() - 0.5) * intens);
+
+
+//    IMPULS(p,i,X)=IMPULS(p,i,X)+ ((drand48()-0.5)*intens);
+//        IMPULS(p,i,Y)=IMPULS(p,i,Y)+ ((drand48()-0.5)*intens);
+//        IMPULS(p,i,Z)=IMPULS(p,i,Z)+ ((drand48()-0.5)*intens);
+
+        }
+      }
+
+    }
+  }
+}

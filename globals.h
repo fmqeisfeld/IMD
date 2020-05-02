@@ -446,6 +446,10 @@ EXTERN double nrb_ylo INIT(-9e9);
 //ACHTUNG: In C gibt's (im gegensatz zu c++)
 //	   leider kein MPI_COMPLEX_DOUBLE datentyp
 //	   Deswegen der umständliche weg mit jeweils einem array für real und eines für imag
+EXTERN double* q_stored; //fuer BALLISTIC und FERMI_RESPONSE
+EXTERN double* q_stored_adv; //fuer BALLISTIC und FERMI_RESPONSE
+EXTERN int *natomsglobal;
+
 EXTERN double  tmm_absorption_threshold INIT(20.0);
 EXTERN double* tmm_eps_real_arr_local;
 EXTERN double* tmm_eps_imag_arr_local;

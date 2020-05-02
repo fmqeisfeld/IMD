@@ -22,7 +22,7 @@
 #include "imd.h"
 
 //MYMOD
-#define ELECPRESS
+//#define ELECPRESS
 //ENDOF MYMOD
 /*****************************************************************************
 *

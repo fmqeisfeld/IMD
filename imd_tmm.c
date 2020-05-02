@@ -7,7 +7,7 @@
 // ACHTUNG: Falls Qabs=NaN --> Probe wahrscheinlich zu kurz!
 //
 // 
-#define TMM_t0_suggest //wenn ja, wird t0 so angepasst dass laser E-field gerade @ threshold für laser aktivieren
+//#define TMM_t0_suggest //wenn ja, wird t0 so angepasst dass laser E-field gerade @ threshold für laser aktivieren
 
 #ifdef TTM1D
 #define node  l1[i]
@@ -96,7 +96,7 @@ double EE(double z, double delta, double complex kl, double complex epsl, double
 }
 
 int tmm_init()
-{
+{  
   laser_sigma_t_squared=laser_sigma_t*laser_sigma_t;
   laser_sigma_t1_squared=laser_sigma_t1*laser_sigma_t1;
 
@@ -113,8 +113,8 @@ int tmm_init()
   alloc1darr(real,tmm_eps_real_arr_local,global_fd_dim.x);
   alloc1darr(real,tmm_eps_imag_arr_local,global_fd_dim.x);  
 
-  tmm_read_arr("alu_eps_bb.dat",&eps_bb_data,3,&eps_bb_rows);
-  tmm_read_arr("K12.dat",&K12,2,&K12_rows);
+  tmm_read_arr("../alu_eps_bb.dat",&eps_bb_data,3,&eps_bb_rows);
+  tmm_read_arr("../K12.dat",&K12,2,&K12_rows); //K1 und K1 num.eval.integrale
 
 
   // km=(double complex*) malloc(global_fd_dim.x*sizeof(double complex));
@@ -132,9 +132,9 @@ int tmm_init()
 
   alloc1darr(double,tmm_Qabs,global_fd_dim.x);
   alloc1darr(double,tmm_Qabs_scat,global_fd_dim.x);
+  int i;
 
   tmm_dt=timestep*10.18/1e15; // in sek.
-  int i;
   for(i=0;i<global_fd_dim.x;++i)
   {
     tmm_eps_real_arr_local[i]=tmm_eps_real_arr_global[i]=0.0;
@@ -296,12 +296,13 @@ printf("myid:%d,ig:%d, epsr:%.4e,epsimg:%.4e,Te:%.4e,Ti:%.4e,Ne:%.4e,Z:%.4e,atom
 //////////////////////
 if(myid==0)
 {
- for(i=0;i<global_fd_dim.x-1;i++)
- {
+  km[0]=k0;
+  for(i=1;i<global_fd_dim.x-1;i++)
+  {
    if(tmm_active_cell_global[i]==0)
-	km[i]=k0;
+	   km[i]=k0;
    else
-	km[i]=k0*csqrt(tmm_eps_real_arr_global[i]+I*tmm_eps_imag_arr_global[i]);
+	   km[i]=k0*csqrt(tmm_eps_real_arr_global[i]+I*tmm_eps_imag_arr_global[i]);
  }
 }
 ///////////////////////
@@ -350,8 +351,8 @@ if(myid==0)
     if(creal(BT)*creal(BT)+cimag(BT)*cimag(BT)< ecut_thresh)
     {
         tooshort=0;
-	ecut=i+1;
-	break;
+	      ecut=i+1;
+	      break;
     }
   }
   if(tooshort==1)
@@ -417,10 +418,11 @@ if(myid==0)
   }
 //////////////////////
 // 4th loop for Qabs
-//////////////////////
+//////////////////////  
   for(i=0;i<ecut;i++)
   {
     if(i==0) dx=1e10;else dx=fd_h.x;
+
     kl=km[i];
     double complex eps=tmm_eps_real_arr_global[i]+I*tmm_eps_imag_arr_global[i];
     tmm_Qabs[i]=I_t*k0*tmm_eps_imag_arr_global[i]*Runge5(dx,kl,eps,Bplus[i],Bminus[i]);
@@ -432,12 +434,10 @@ if(myid==0)
     Ez = (Bplus[i] * eiphi + Bminus[i] / eiphi); // Ez ist complex!
     tmm_Qabs[i]=I_t*k0*tmm_eps_imag_arr_global[i]*(creal(Ez)*creal(Ez)+cimag(Ez)*cimag(Ez));
 */
-
     tmm_Qabs[i]*=1e10; // W/m^2/Angstrom to W/m^3
     tmm_Qabs[i]*=6.3538562638e-26; // W/m^3 to imd-units
    
   }
-
   free(Bplus);
   free(Bminus);
 } // if myid==0

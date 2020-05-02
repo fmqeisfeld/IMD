@@ -29,7 +29,7 @@
                    //als im Bulk. Im Kontinuum-Bild hat oberfläche aber auch bulk-dichte
                    //Fazit: --> kaum unterschied, nur geringfügig größere Refl.
 
-#define DENSHOTFIXSTEP 10000 //bist zu diesem step bleibt surf-dens const.
+#define DENSHOTFIXSTEP 10000 //bist zu diesem step bleibt surf-dens const. nur wenn define DENSHOTFIX
 
 #define EOSMODE 1  // 1=EOS-TABLE, 0 = Free Electron Gas
                    // ACHTUNG: FEG Momentan totaler BS --> t_from_e viel zu ungenau (+/- 10 %)
@@ -57,7 +57,7 @@
                     //Bisher ist dieser Fall noch nicht eingetreten, aber bei sehr kleinen ttm-zellen kann das durchaus
                     //passieren.
 #define VLATTICE_STATIC
-#define ELECPRESS   //wird nochmal in imd_integrate.c definiert
+// #define ELECPRESS   //wird nochmal in imd_integrate.c definiert
 #define DEBUG_LEVEL 1
 
 
@@ -67,7 +67,7 @@
 #define node2 l2[i]
 
 #define RHOMIN       2
-
+//#define BALLISTIC    
 
 // ****************************************************
 // *                MAIN FUNC
@@ -110,7 +110,10 @@ void calc_ttm()
 
   for (i = 0; i < diff_substeps; i++)
   {
-    do_tmm(tau_DIFF); //Helmholtz-solver, tau_DIFF spielt hier keine Rolle mehr
+    do_tmm(tau_DIFF); //Helmholtz-solver, tau_DIFF hat hier keine funktion mehr
+#ifdef BALLISTIC
+    do_BALLISTIC(tau_DIFF);
+#endif    
     tmm_time += tau_DIFF * 10.18 * 1.0e-15; //in sek
     do_DIFF(tau_DIFF);
     do_FILLMESH();
@@ -122,7 +125,7 @@ void calc_ttm()
                 &xiarr_global[0],local_fd_dim.x-2, MPI_DOUBLE, cpugrid);
 
   #ifdef ELECPRESS 
-    do_electronic_pressure(); // elec press. bleibt für 1 MD-step konst. auch wenn's nicht korrekt ist
+    do_electronic_pressure(); // elec press. bleibt für 1 MD-step näherungsweise konst.
   #endif   
 
 {
@@ -167,7 +170,7 @@ void update_fd()
   cellptr p;
 
   //buffer arrays für allreduce
-  int * natomslocal, *natomsglobal;
+  int * natomslocal; //, *natomsglobal; // nach globals verschoben, soll erhalten bleiben für ballistic transüprt
   int * totneighslocal, *totneighsglobal;
 
   //Folgende arrays zu globalen vars gemacht, da
@@ -189,10 +192,8 @@ void update_fd()
 
   double * mdtemplocal,*mdtempglobal;
 
-
-
-  alloc1darr(int, natomslocal, global_fd_dim.x);
-  alloc1darr(int, natomsglobal, global_fd_dim.x);
+  alloc1darr(int, natomslocal, global_fd_dim.x); 
+  //alloc1darr(int, natomsglobal, global_fd_dim.x);//nach init verschoben
 
   alloc1darr(int, totneighslocal, global_fd_dim.x);
   alloc1darr(int, totneighsglobal, global_fd_dim.x);
@@ -474,7 +475,7 @@ for(i_global=0; i_global < global_fd_dim.x;i_global++)
 
 
   free1darr(natomslocal);
-  free1darr(natomsglobal);
+  // free1darr(natomsglobal);
   free1darr(totneighslocal);
   free1darr(totneighsglobal);
   // free1darr(vcomxlocal);
@@ -578,7 +579,7 @@ void do_electronic_pressure(void)
     #endif    
 
 
-    epress_local[i_global]=EOS_pe_from_r_te(node.dens,node.temp*11604.5);    
+  epress_local[i_global]=EOS_pe_from_r_te(node.dens,node.temp*11604.5);    
     
   #if DEBUG_LEVEL>0
     if (isnan(epress_local[i_global]) != 0)
@@ -957,7 +958,6 @@ void init_ttm()
 {
   int i, j, k;
   cell *p;
-
   if (myid == 0)
     printf("imdrestart=%d\n", imdrestart);
 
@@ -989,7 +989,7 @@ void init_ttm()
 
 
   // ******************************************
-  // * AUXILIARAY ARRAYS FOR imd_integrate.c
+  // * AUXILIARAY ARRAYS FOR allreduce
   // ********************************************
   xiarr_global=(double*) malloc( global_fd_dim.x * sizeof(double)); //damit xi auf allen procs vorhanden ist!
   xiarr_local=(double*) malloc(  local_fd_dim.x * sizeof(double)); //damit xi auf allen procs vorhanden ist!
@@ -1009,11 +1009,27 @@ void init_ttm()
   alloc1darr(int, fluxfromrightglobal, global_fd_dim.x);
   alloc1darr(int, fluxfromleftglobal, global_fd_dim.x);
 
+  alloc1darr(int, natomsglobal, global_fd_dim.x);  
+
 #ifdef ELECPRESS
   alloc1darr(double, epress_local,  global_fd_dim.x);
   alloc1darr(double, epress_global, global_fd_dim.x);
   alloc1darr(double, epress_deriv, global_fd_dim.x);
 #endif  
+
+#ifdef BALLISTIC
+if(myid==0)
+{
+  alloc1darr(double, q_stored, global_fd_dim.x);
+  alloc1darr(double, q_stored_adv, global_fd_dim.x);
+  //clear
+
+  for(i=0;i<global_fd_dim.x-1;i++)
+  {
+    q_stored[i]=q_stored_adv[i]=0.0;
+  }
+}
+#endif    
 
   #ifdef VLATTICE //NUR 1D!!! (global_fd_dim.y und global_fd_dim.z=1)
   vlattice1= (ttm_Element*) malloc(sizeof(ttm_Element)* vlatdim);
@@ -1090,6 +1106,9 @@ void init_ttm()
     printf("Virtual lattice dim:%d\n",vlatdim);
     printf("Virtual lattice buffer-cells:%d\n", vlatbuffer);
 #endif    
+#ifdef ELECPRESS
+    printf("Electronic pressure is accounted for\n");
+#endif    
 
 #if DEBUG_LEVEL>0
     printf("DEBUG_LEVEL>0\n");
@@ -1110,11 +1129,11 @@ void init_ttm()
   // * READ AND BCAST INTERPOLATION TABLES
   // ******************************************  
 #if EOSMODE==1
-  nn_read_table(&intp_cve_from_r_te, "EOS_cve_from_r_te.txt");
-  nn_read_table(&intp_ee_from_r_tesqrt, "EOS_ee_from_r_tesqrt.txt");
-  nn_read_table(&intp_phase_from_r_ti, "EOS_phase_from_r_ti.txt");
+  nn_read_table(&intp_cve_from_r_te, "../EOS_cve_from_r_te.txt");
+  nn_read_table(&intp_ee_from_r_tesqrt, "../EOS_ee_from_r_tesqrt.txt");
+  nn_read_table(&intp_phase_from_r_ti, "../EOS_phase_from_r_ti.txt");
 #ifdef ELECPRESS
-  nn_read_table(&intp_pe_from_r_te, "EOS_pe_from_r_te.txt");
+  nn_read_table(&intp_pe_from_r_te, "../EOS_pe_from_r_te.txt");
 #endif  
 #endif
 
@@ -1407,6 +1426,47 @@ if(i_global > last_active_cell_global)
 
 }
 
+void do_BALLISTIC(double tau) // NUR ZUM TESTEN:ballistic transport und delayed thermalization
+{
+  int i;
+  double tau_relax=50e-15; //in sec
+  //if(steps*timestep*10.18*1e-15 > laser_t_0+3*tau_relax)
+  if(tmm_time > laser_t_0+3*tau_relax)
+    return; //Thermalization complete 
+
+  if(myid==0)
+  {
+    int xmax,xmin;
+    //5th loop for ballistic transport: Annahme delta_t << delta_t_Ballistic = delta x/v_F ~ 1 fs
+    double tau_b=tau*10.18*1e-15; //sec.
+    double vF=1.5e6; //fermi vel in m/s
+    double alpha=tau_b*vF/(fd_h.x*1e-10);
+ 
+    for(i=2;i<global_fd_dim.x-1-1;i++)
+    {      
+      q_stored[i]+=tmm_Qabs[i];
+    }
+
+    for(i=2;i<global_fd_dim.x-1;i++) //1st order upwind
+    {
+      q_stored_adv[i]=q_stored[i]-alpha*(q_stored[i]-q_stored[i-1]);
+    }  
+    for(i=1;i<global_fd_dim.x-1;i++) //new qabs from qstored
+    {
+      double dq=q_stored_adv[i]/tau_relax*tau_b;
+      q_stored_adv[i]-=dq;
+      q_stored[i]=q_stored_adv[i];
+      tmm_Qabs[i]=dq;     //overwrite with thermalized eng. only, keep stored eng. for advection
+    }
+  }
+
+MPI_Scatter(&tmm_Qabs[0], local_fd_dim.x-2, MPI_DOUBLE, &tmm_Qabs_scat[0], local_fd_dim.x-2, MPI_DOUBLE, 0, cpugrid);
+for(i=1;i<local_fd_dim.x-1;i++)
+{
+  node.source=node2.source=tmm_Qabs_scat[i-1];
+}  
+  
+}
 // ****************************************************************************************************
 // *   DO A SINGLE DIFFUSION STEP HERE
 // *   tau gibt an, wie groß der ts sein soll
@@ -2584,8 +2644,7 @@ double EOS_pe_from_r_te(double r, double t)
   //double tsqrt = sqrt(t);
   
   point pout;
-  pout.x = r;
-  pout.y = t;
+
   
 #if DEBUG_LEVEL > 0   
   if(r < intp_pe_from_r_te.xmin || r > intp_pe_from_r_te.xmax)
@@ -2610,7 +2669,8 @@ double EOS_pe_from_r_te(double r, double t)
     t=MAX(t,intp_pe_from_r_te.ymin);      
   }
 #endif
-
+  pout.x = r;
+  pout.y = t;
   // nnhpi_interpolate(intp_e_from_r_tsqrt.interpolator, &pout); //naturla neigh, sibson-rule
   lpi_interpolate_point(intp_pe_from_r_te.interpolator, &pout); //linear
 #if DEBUG_LEVEL > 0

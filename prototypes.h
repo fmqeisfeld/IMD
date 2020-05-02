@@ -24,7 +24,7 @@
 *******************/
 #include <complex.h>
 
-
+void nrb_test_forces(void); //ext. kraft um schockwelle zu erzeugen
 #ifdef NRB
 int init_nrb(void);
 int approx(double x,double x0,double deps);
@@ -32,7 +32,7 @@ int compare( const void* a, const void* b);
 int nrb_build_ifromid(void);
 int nrb_binarySearch( int lo, int hi, int x,int n,int** arr);
 int nrb_forces(void);
-void nrb_test_forces(void); //ext. kraft um schockwelle zu erzeugen
+
 
 //void pack_nrb( msgbuf *b, int k, int l, int m);
 void pack_nrb( msgbuf *b, int k, int l, int m, vektor v );
@@ -131,6 +131,7 @@ double QfromT(double T,double rho);
 double EOS_phase_from_r_ti(double r,double t);
 double EOS_pe_from_r_te(double r,double t);
 void   do_electronic_pressure(void);
+void do_BALLISTIC(double tau);
 double EOS_cve_from_r_te(double r,double t);
 double EOS_ee_from_r_te(double r,double t);
 double EOS_te_from_r_ee(double r,double e);
