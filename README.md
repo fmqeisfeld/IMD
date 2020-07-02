@@ -15,4 +15,4 @@ main features:<br/>
 -includes a 1D Helmholtz-solver, a 1D Maxwell-solver and a 2D-Maxwell solver, giving a full-wave solution for the laser-matter interaction<br/>
 -includes non-reflective boundary conditions in order to absorb laser-induced shock-waves at the rear side of the target material<br/>
 
-More information is provided by the manual.pdf
+More information is provided by the [manual](manual.pdf)
