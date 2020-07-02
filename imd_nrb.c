@@ -951,8 +951,8 @@ printf("myid:%d,steps:%d, DOFORCE2, ind:%d, bnd:%d, dpx:%f dpy:%f dpz:%f px:%f p
           U[r].z=ORT(neighcell,neighi,Z)-REF_POS(neighcell,neighi,Z);
  
           U[r].z=MINIMGZ(U[r].z); //ACHTUNG: Bei 1D-Simulation, muss U[r].y auch mittels MINIMGY berechnet werden!
-if(pbc_dirs.y==1)          
-          U[r].y=MINIMGY(U[r].y);
+          if(pbc_dirs.y==1)          
+            U[r].y=MINIMGY(U[r].y);
 
           //velocities
 //          V[r].x=IMPULS(neighcell,neighi,X)/mass;

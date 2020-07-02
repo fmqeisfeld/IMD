@@ -513,7 +513,7 @@ int tmm_get_epsilon(double lambda, double Te,double Ti, double Z, double Ne, rea
         double TF = 2.0 * EF / (3.0 * BOLTZMAN);        // [K] 
         double VF = sqrt(2 * EF / EMASS);               // [m/s] 
         double A1p=4.41; 
-        double A2p=0.8;       //Konstanten siehe patrizio s. 27
+        double A2p=0.8;       
         double A3p=0.7;
         double A4p=0.2;
 

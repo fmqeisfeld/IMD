@@ -29,7 +29,7 @@
                    //als im Bulk. Im Kontinuum-Bild hat oberfläche aber auch bulk-dichte
                    //Fazit: --> kaum unterschied, nur geringfügig größere Refl.
 
-#define DENSHOTFIXSTEP 10000 //bist zu diesem step bleibt surf-dens const. nur wenn define DENSHOTFIX
+//#define DENSHOTFIXSTEP 10000 //bist zu diesem step bleibt surf-dens const. nur wenn define DENSHOTFIX
 
 #define EOSMODE 1  // 1=EOS-TABLE, 0 = Free Electron Gas
                    // ACHTUNG: FEG Momentan totaler BS --> t_from_e viel zu ungenau (+/- 10 %)
@@ -468,8 +468,6 @@ for(i_global=0; i_global < global_fd_dim.x;i_global++)
       l2[local_fd_dim.x-1].natoms=l1[local_fd_dim.x-1].natoms;
       l2[local_fd_dim.x-1].dens  =l1[local_fd_dim.x-1].dens;
 
-// if(myid==1)      
-//   printf("\n\n\nFUCK:%d, you:%f\n\n\n\n", l2[local_fd_dim.x-2].natoms, l2[local_fd_dim.x-2].dens);
     }
   }
 
@@ -2208,7 +2206,10 @@ double bMin(double X, double omega_las, double Z, double ni, double Te) {       
 }
 double bMax(double omega_las, double Z, double ni, double Te) {                 // OUT: [m]
   double teff = sqrt(Te * Te + fermi_T(ni * Z) * fermi_T(ni * Z));
-  return MAX(r0(ni), sqrt(BOLTZMAN * teff / (EMASS)) / MAX(omega_las, omega_pl(ni * Z)));
+  if(laser_active)
+    return MAX(r0(ni), sqrt(BOLTZMAN * teff / (EMASS)) / MAX(omega_las, omega_pl(ni * Z)));
+  else
+    return MAX(r0(ni), sqrt(BOLTZMAN * teff / (EMASS)) / omega_pl(ni * Z));
   //ACHTUNG: Sobald laser aus --> omega_las=0
 }
 double coulomb_log(double X, double omega_las, double Z, double ni, double Te) { //OUTPUT in dimensionless^M

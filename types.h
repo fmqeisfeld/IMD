@@ -460,12 +460,9 @@ typedef struct
   real fd_k,fd_g;
   real Z;
 
-#ifndef LOADBALANCE  
+#ifndef TTM1D  
   //advection
   int flux[8];
-#else
-  //int flux[2]; //left und right in 1D TTM
-  //In diesem fall wird ein anderes, globals array genutzt 
 #endif
 
 

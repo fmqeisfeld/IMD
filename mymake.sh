@@ -3,9 +3,10 @@
 # NORMAL
 # make clean
 # make -j8 imd_mpi_eam_nve_nbl_multijump_loadbalance_filter
+# exit 0
 #make -j8 imd_mpi_eam_ttm_tmm_nbl_loadbalance_multijump
-make clean;
-make -j8 imd_mpi_eam_nve_nbl_stress_loadbalance
+# make clean;
+#make -j8 imd_mpi_eam_nve_nbl_stress_loadbalance
 #make -j8 imd_mpi_eam_ttm_tmm_nbl_loadbalance
 #make -j8 imd_mpi_eam_nve_nbl_nrb_stress_filter_loadbalance
 #make -j8 imd_mpi_eam_nve_nrb_stress_loadbalance_ar_filter
@@ -20,7 +21,7 @@ make -j8 imd_mpi_eam_nve_nbl_stress_loadbalance
 
 # make -j8 imd_mpi_eam_ttm_tmm_colrad_nbl
 # mv imd_mpi_eam_ttm_tmm_colrad ~/bin/
-exit 1
+# exit 1
 
 
 #standart
@@ -50,8 +51,8 @@ exit 1
 
 # #CUSTOM MAKE MIT OPENMP ABER NUR FUER COLRAD
 
-gcc simpson_omp.c -g -fopenmp -lm -lgsl -lgslcblas -o a.out
-exit 0
+# gcc simpson_omp.c -g -fopenmp -lm -lgsl -lgslcblas -o a.out
+# exit 0
  #
  # 
  # #MIT OPENMP
@@ -69,7 +70,7 @@ exit 0
 
  OPTFLAGS=" -funroll-loops -march=corei7-avx -mtune=corei7-avx -mavx2 -ftree-vectorize -m64 -ffast-math"
  # OPTFLAGS="-O2 -ffast-math"
- mpicc   -O2 $CFLAGS -DMPI  -DNBL -DEAM2 -DTTM -DTMM -DCOLRAD -DLOADBALANCE -c -Wno-unused-variable -Wno-unused-result -fopenmp\
+ mpicc   -O2 $CFLAGS -DMPI  -DNBL -DEAM2 -DTTM -DTTM1D -DTMM -DCOLRAD -DLOADBALANCE -c -Wno-unused-variable -Wno-unused-result -fopenmp\
  		 imd_maxwell.c imd_misc.c imd_param.c imd_alloc.c imd_io.c imd_io_3d.c imd_potential.c\
  		 imd_time.c imd_generate.c imd_distrib.c imd_main_3d.c imd_geom_3d.c imd_pictures_3d.c \
  		 imd_geom_mpi_3d.c imd_comm_force_3d.c \

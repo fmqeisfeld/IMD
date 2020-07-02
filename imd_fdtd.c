@@ -54,7 +54,6 @@
 /*********************
 *   AFTER TTM-INIT   *
 **********************/
-//#define FDTD1D
 #define LORENTZ
 //#define FDTD2D
 #define FDTD1D
