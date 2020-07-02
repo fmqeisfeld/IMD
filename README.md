@@ -5,7 +5,7 @@
 * Copyright 1996-2007 Institute for Theoretical and Applied Physics,
 * University of Stuttgart, D-70550 Stuttgart
 *
-******************************************************************************/
+******************************************************************************/<br/>
 lasMD is a large-scale, masively parallelized code for simulating laser-ablation of metallic targets, based on the IMD code
 main features:<br/>
 
