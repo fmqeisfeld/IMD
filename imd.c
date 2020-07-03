@@ -54,7 +54,14 @@ int main(int argc, char **argv)
 
 
 #if defined(MPI) || defined(NEB)
-  MPI_Init(&argc, &argv);
+  //MPI_Init(&argc, &argv);
+
+//MYMOD  
+  
+  int provided;
+  MPI_Init_thread(&argc, &argv,  MPI_THREAD_FUNNELED, &provided);
+//ENDOF MYMOD  
+
   init_mpi();
 #endif
 
@@ -237,13 +244,10 @@ int main(int argc, char **argv)
 #ifdef TMM
   tmm_init();
 #endif
+
 #ifdef COLRAD
   colrad_init();
 #endif
-//#ifdef NRB
-//  init_nrb();
-//#endif
-
 //ENDOF MY MOD
 
 #ifdef SM
@@ -275,6 +279,13 @@ int main(int argc, char **argv)
 	  	printf("LOAD BALANCING: After initial runs variance %f\n", lb_loadVariance);
 	  }
   }
+#endif
+
+  #ifdef NRB //ERFOLGT AN ANDERER STELLE FÜR NRB MIT NBL
+  #ifndef NBL
+    init_nrb(); //das geht nur wenn atome nicht erst identifiziert werden muessen
+                //Problem : Das geht hier noch nicht, weil nrb mpi-buffers brauch (muss nach setup buffers erfolgen )
+  #endif
 #endif
 
   imd_stop_timer(&time_setup);

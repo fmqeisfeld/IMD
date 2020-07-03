@@ -1189,7 +1189,7 @@ if(myid==0)
     if(myfile==NULL)
     {
         error("Error: Input Interpol-table for nn not found.");
-	MPI_Abort(cpugrid,0);
+	      MPI_Abort(cpugrid,0);
     }
 
     fscanf(myfile,"%d %d",&is,&js);
@@ -1207,10 +1207,14 @@ if(myid==0)
     nn->ymin=ymin;
     nn->ymax=ymax;
     nn->npoints=is*js;
-
+/*
     xbuf= malloc(sizeof(double)*nn->npoints);
     ybuf= malloc(sizeof(double)*nn->npoints);
     zbuf= malloc(sizeof(double)*nn->npoints);
+*/
+    alloc1darr(double,xbuf,nn->npoints);
+    alloc1darr(double,ybuf,nn->npoints);
+    alloc1darr(double,zbuf,nn->npoints);
 
   if(myid==0)
   {
@@ -1246,9 +1250,15 @@ if(myid==0)
         p->z=zbuf[i*js+j];
       }
     }
+
+/*    
     free(xbuf);
     free(ybuf);
     free(zbuf);
+*/
+    free1darr(xbuf);
+    free1darr(ybuf);
+    free1darr(zbuf);
     //Build delaunay triangulation
     nn->d = delaunay_build(nn->npoints,nn->points, 0, NULL, 0, NULL);
     //build hash interpolator

@@ -1267,7 +1267,11 @@ void write_atoms_press(FILE *out)
 
 void write_config_press(int nr)
 {
-  write_config_select( nr, "press", write_atoms_press, write_header_press);
+  //write_config_select( nr, "press", write_atoms_press, write_header_press);
+  //MYMOD : benenne die dateien *.stress statt *.press um verwechslungen mit dist-files
+  //        zu vermeiden
+  //write_config_select( nr, "press", write_atoms_press, write_header_press);
+  write_config_select( nr, "stress", write_atoms_press, write_header_press);
 }
 
 #endif /* STRESS_TENS */
@@ -2232,8 +2236,12 @@ void write_eng_file_header()
 #endif    
 #endif
 #ifdef TTM
-//totalQ statt E_el
     fprintf(fl, " E_el");
+//MYMOD
+#ifdef CORLAD
+    fprintf(fl, " P_colrad"); //Gesamtleisuntg über alle zellen summiert
+#endif    
+//ENDOF MYMOD    
 #ifdef DEBUG
     fprintf(fl, " E_el_ab E_ph_auf");
 #endif /*DEBUG*/
@@ -2338,9 +2346,11 @@ void write_eng_file(int steps)
 //MYMOD
 #ifdef TTM
   tot_elec_energy_global=0.0;
-  tot_kin_energy_global=0.0;
   MPI_Reduce(&tot_elec_energy_local,&tot_elec_energy_global,1,MPI_DOUBLE,MPI_SUM,0,cpugrid); //DEBUG PURPOSE
-  MPI_Reduce(&tot_kin_energy_local,&tot_kin_energy_global,1,MPI_DOUBLE,MPI_SUM,0,cpugrid); //DEBUG PURPOSE
+#ifdef COLRAD
+  colrad_ptotal_global=0.0;
+  MPI_Reduce(&colrad_ptotal, &colrad_ptotal_global,1,MPI_DOUBLE,MPI_SUM,0,cpugrid); //Gesamtleistung über alle FD-Zellen
+#endif    
 #endif
 //ENDOF MYMOD  
 
@@ -2509,13 +2519,14 @@ void write_eng_file(int steps)
 #endif    
 #endif
 #ifdef TTM
-  //MYMOD
+//MYMOD
 //#ifdef DEBUG
-  //fprintf(eng_file, " %e", tot_elec_energy_global/natoms*26.9815*AMU*6.2415091E18); //J/kg -> eV/Atom ;
-  fprintf(eng_file, " %e %e %e ", 
-  tot_kin_energy_global,
-  tot_pot_energy,
-  tot_elec_energy_global);///((double) active_cells_global));//*natoms*26.9815*AMU*6.2415091E18); //J/kg * natoms*atom_mass*J2eV -> eV;
+
+  fprintf(eng_file, " %e  ", tot_elec_energy_global);
+#ifdef COLRAD
+  fprintf(eng_file, " %e  ", colrad_ptotal_global);
+#endif  
+
 //#endif /*DEBUG*/
   //ENDOF MYMOD
 #endif /*TTM*/

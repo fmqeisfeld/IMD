@@ -87,6 +87,7 @@
 /* Function Prototypes */
 #include "prototypes.h"
 
+
 /* Global Variables */
 #include "globals.h"
 
@@ -97,7 +98,7 @@
 
 #ifdef COLRAD
 
-#include <gsl/gsl_sf_expint.h>       //FUER EXPONENTIAL INTEGRAL
+// #include <gsl/gsl_sf_expint.h>       //FUER EXPONENTIAL INTEGRAL
 #include <cvode/cvode.h>             /* prototypes for CVODE fcts., consts. */
 #include <nvector/nvector_serial.h>  /* serial N_Vector types, fcts., macros */
 #include <sunmatrix/sunmatrix_dense.h>
@@ -109,5 +110,4 @@
 #else
 #include <sunlinsol/sunlinsol_dense.h> /* access to dense SUNLinearSolver      */
 #endif
-
 #endif //ifdef COLRAD

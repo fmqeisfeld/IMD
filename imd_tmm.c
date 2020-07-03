@@ -7,8 +7,17 @@
 // ACHTUNG: Falls Qabs=NaN --> Probe wahrscheinlich zu kurz!
 //
 // 
+//#define TMM_t0_suggest //wenn ja, wird t0 so angepasst dass laser E-field gerade @ threshold für laser aktivieren
 
+#ifdef TTM1D
+#define node  l1[i]
+#define node2 l2[i]
+#else
+#define node  l1[i][j][k]
+#define node2 l2[i][j][k]
+#endif
 
+#define RHOMIN  2 //kg/m^3 (active cell abh. von minatoms und dens)
 
 /*2x2 Matrix multiplication*/
 void matmul(double complex *a,double complex *b,double complex *p)
@@ -32,9 +41,7 @@ double Runge5(double delta, double complex kl, double complex epsl, double compl
   const double errval = 1e-5;
   double k1, k3, k4, k5;
 
-//TESTCASE  : fd-zelle nicht aufintegrieren zwecks vergleichbarkeit mit fdtd
-//result=dx*EE(cur_xpos, delta, kl, epsl, Bplus, Bminus);
-//return result;
+
   while(cur_xpos < 1 && dx > 1e-5) {
 
         k1 = dx / 3.0 * EE(cur_xpos, delta, kl, epsl, Bplus, Bminus);
@@ -89,37 +96,54 @@ double EE(double z, double delta, double complex kl, double complex epsl, double
 }
 
 int tmm_init()
-{
+{  
   laser_sigma_t_squared=laser_sigma_t*laser_sigma_t;
+  laser_sigma_t1_squared=laser_sigma_t1*laser_sigma_t1;
 
   //alloc eps arr
-  tmm_eps_real_arr_local = (real*) malloc(global_fd_dim.x*sizeof(real));
-  tmm_eps_imag_arr_local = (real*) malloc(global_fd_dim.x*sizeof(real));
+  // tmm_eps_real_arr_local = (real*) malloc(global_fd_dim.x*sizeof(real));
+  // tmm_eps_imag_arr_local = (real*) malloc(global_fd_dim.x*sizeof(real));
 
-  tmm_eps_real_arr_global= (real*) malloc(global_fd_dim.x*sizeof(real));
-  tmm_eps_imag_arr_global= (real*) malloc(global_fd_dim.x*sizeof(real));
+  // tmm_eps_real_arr_global= (real*) malloc(global_fd_dim.x*sizeof(real));
+  // tmm_eps_imag_arr_global= (real*) malloc(global_fd_dim.x*sizeof(real));
 
-  tmm_read_arr("alu_eps_bb.dat",&eps_bb_data,3,&eps_bb_rows);
-  tmm_read_arr("K12.dat",&K12,2,&K12_rows);
+  alloc1darr(real,tmm_eps_real_arr_global,global_fd_dim.x);
+  alloc1darr(real,tmm_eps_imag_arr_global,global_fd_dim.x);
+
+  alloc1darr(real,tmm_eps_real_arr_local,global_fd_dim.x);
+  alloc1darr(real,tmm_eps_imag_arr_local,global_fd_dim.x);  
+
+  tmm_read_arr("../alu_eps_bb.dat",&eps_bb_data,3,&eps_bb_rows);
+  tmm_read_arr("../K12.dat",&K12,2,&K12_rows); //K1 und K1 num.eval.integrale
 
 
-  km=(double complex*) malloc(global_fd_dim.x*sizeof(double complex));
-  km=(double complex*) malloc(global_fd_dim.x*sizeof(double complex));
+  // km=(double complex*) malloc(global_fd_dim.x*sizeof(double complex));
 
-  tmm_active_cell_local=(int*) malloc(global_fd_dim.x*sizeof(int));
-  tmm_active_cell_global=(int*) malloc(global_fd_dim.x*sizeof(int));
+  alloc1darr(double complex,km,global_fd_dim.x);
 
-  tmm_Qabs =      (double*) calloc(global_fd_dim.x,sizeof(double));
-  tmm_Qabs_scat = (double*) calloc(global_fd_dim.x,sizeof(double));
+  // tmm_active_cell_local=(int*) malloc(global_fd_dim.x*sizeof(int));
+  // tmm_active_cell_global=(int*) malloc(global_fd_dim.x*sizeof(int));
+
+  alloc1darr(int,tmm_active_cell_global,global_fd_dim.x);
+  alloc1darr(int,tmm_active_cell_local,global_fd_dim.x);
+
+  // tmm_Qabs =      (double*) calloc(global_fd_dim.x,sizeof(double));
+  // tmm_Qabs_scat = (double*) calloc(global_fd_dim.x,sizeof(double));
+
+  alloc1darr(double,tmm_Qabs,global_fd_dim.x);
+  alloc1darr(double,tmm_Qabs_scat,global_fd_dim.x);
+  int i;
 
   tmm_dt=timestep*10.18/1e15; // in sek.
-  int i;
   for(i=0;i<global_fd_dim.x;++i)
   {
     tmm_eps_real_arr_local[i]=tmm_eps_real_arr_global[i]=0.0;
     tmm_eps_imag_arr_local[i]=tmm_eps_imag_arr_global[i]=0.0;   
     km[i]=0.0+I*0.0;
     tmm_active_cell_local[i]=tmm_active_cell_global[i]=0;
+
+    tmm_Qabs[i]=0.0;
+    tmm_Qabs_scat[i]=0.0;
   }
 
   real freq=c0/lambda;
@@ -128,8 +152,17 @@ int tmm_init()
   k0/=1e10; //weil fd_h.x in Angstrom 
 
 
+
+#ifdef TMM_t0_suggest
+  // verschiebe t0 sodasss laser E-feld gerade threshold-value erreicht
+  double tstart=laser_sigma_t*sqrt(-2.0*log(tmm_laser_threshold));  
+  laser_t_0 = tstart;
+  laser_t_0 += 100e-15; // plus 100 fs puffer
+#endif
+
+
 #if defined(FDTD) || defined(LASER)
-    error("TMM does not work along with FDTD or LASER. Only one of those options is allowed.");
+    error("TMM does not work with FDTD or LASER. Only one of those options is allowed.");
 #endif
 
     laser_spot_area=(fd_h.y*1e-10*fd_h.z*1e-10);
@@ -141,14 +174,16 @@ int tmm_init()
           printf("*****************************************\n");
           printf("lambda:%.4e\n",lambda);
           printf("theta:%f (deg)\n", tmm_theta);
+          printf("tmm_absorption_threshold:%f\n",tmm_absorption_threshold);
+          printf("tmm_laser_threshold:%f\n",tmm_laser_threshold);
           if(tmm_pol==1)
             printf("Polarization: S\n");
           if(tmm_pol==2)
-	    printf("Polarization: P\n");
+	        printf("Polarization: P\n");
           printf("I0:%.4e W/m^2\n",I0);
           printf("t0:%.4e,sigma_t:%.4e\n",laser_t_0,laser_sigma_t);
           printf("t1:%.4e,sigma_t1:%.4e\n",laser_t_1,laser_sigma_t1);
-          printf("t_FWHM:%.4e, t1_FWHM:%.4e\n", t_FWHM,t1_FWHM);
+          printf("t_FWHM:%.4e, t1_FWHM:%.4e\n", t_FWHM,t1_FWHM);          
           printf("***************************\n");
 	}
 
@@ -158,11 +193,12 @@ int tmm_init()
 int do_tmm(real dt)
 {  
   int i,iglobal,j;
-  double Imp=3.769911184307751e+02;
-  I_t=I0*exp(-pow(tmm_time-laser_t_0,2)/laser_sigma_t_squared); //TESTCASE
+  double Imp=3.769911184307751e+02; // vacuum impedanz
+  I_t=I0*exp(-pow(tmm_time-laser_t_0,2)/laser_sigma_t_squared);
+  I_t+=I0*exp(-pow(tmm_time-laser_t_1,2)/laser_sigma_t1_squared);
 if(steps<2) return 0;
   //if(I_t<0.001*I0)
-  if(sqrt(2.0*I_t*Imp)<1e-5* sqrt(2*I0*Imp))
+  if(sqrt(2.0*I_t*Imp)<tmm_laser_threshold* sqrt(2*I0*Imp)) //Elec-field strength threshold
   {
     laser_active=false;
     return 0;
@@ -175,8 +211,18 @@ if(steps<2) return 0;
 
  for(i=1;i<local_fd_dim.x-1;i++)
  {
+
+#ifndef TTM1D
    iglobal = (i-1) + my_coord.x*(local_fd_dim.x-2); 
-   if(l1[i][1][1].natoms<fd_min_atoms)
+#else
+   //bei TTM mit LB werden cpu-zuständigkeiten unabh. von position von links nach rechts
+   //aufsteigend verteilt, sodass proc0 die zellen ganz links und proc "num_cpus-1" 
+   //das rechte ende der simbox abarbeitet
+   iglobal = (i-1) + myid*(local_fd_dim.x-2); 
+#endif
+
+   //if(l1[i][1][1].natoms<fd_min_atoms)
+  if(node.natoms < fd_min_atoms || node.dens < RHOMIN)
    {
      tmm_eps_real_arr_local[iglobal]=0.0;
      tmm_eps_imag_arr_local[iglobal]=0.0;
@@ -185,10 +231,17 @@ if(steps<2) return 0;
    } 
    //tmm_eps_real_arr_local[iglobal]=ttm_get_epsilon();
    //tmm_eps_imag_arr_local[iglobal]=i
-   tmm_get_epsilon(lambda,l1[i][1][1].temp, l1[i][1][1].md_temp,
-                  l1[i][1][1].Z, l1[i][1][1].ne, &tmm_eps_real_arr_local[iglobal],
-                  &tmm_eps_imag_arr_local[iglobal],
-                  i,j);
+
+
+   // tmm_get_epsilon(lambda,0.0258, 0.0258,
+   //                2.5, 2e29, &tmm_eps_real_arr_local[iglobal],
+   //                &tmm_eps_imag_arr_local[iglobal]);
+
+
+   tmm_get_epsilon(lambda,node.temp, node.md_temp,
+                  node.Z, node.ne, &tmm_eps_real_arr_local[iglobal],
+                  &tmm_eps_imag_arr_local[iglobal]);
+
 
 /*
 printf("myid:%d,ig:%d, epsr:%.4e,epsimg:%.4e,Te:%.4e,Ti:%.4e,Ne:%.4e,Z:%.4e,atoms:%d\n",myid,iglobal,
@@ -210,7 +263,11 @@ printf("myid:%d,ig:%d, epsr:%.4e,epsimg:%.4e,Te:%.4e,Ti:%.4e,Ne:%.4e,Z:%.4e,atom
  //KORREKTUR-LOOP
  for(i=1;i<local_fd_dim.x-1;i++)
  {
+#ifndef TTM1D
    iglobal = (i-1) + my_coord.x*(local_fd_dim.x-2);
+#else
+   iglobal = (i-1) + myid*(local_fd_dim.x-2);
+#endif
    if (tmm_eps_real_arr_global[iglobal]==0) tmm_eps_real_arr_global[iglobal]=1.0; //VACUUM hat epsilon_real=1
  }
  // 
@@ -228,7 +285,7 @@ printf("myid:%d,ig:%d, epsr:%.4e,epsimg:%.4e,Te:%.4e,Ti:%.4e,Ne:%.4e,Z:%.4e,atom
 
   double complex BR,BT,B0;
   int ecut=0;
-  real ecut_thresh=exp(-20.0);
+  real ecut_thresh=exp(-tmm_absorption_threshold);
 
   BR=BT=0.0+I*0;
   B0=1.0+I*0;
@@ -239,12 +296,13 @@ printf("myid:%d,ig:%d, epsr:%.4e,epsimg:%.4e,Te:%.4e,Ti:%.4e,Ne:%.4e,Z:%.4e,atom
 //////////////////////
 if(myid==0)
 {
- for(i=0;i<global_fd_dim.x-1;i++)
- {
+  km[0]=k0;
+  for(i=1;i<global_fd_dim.x-1;i++)
+  {
    if(tmm_active_cell_global[i]==0)
-	km[i]=k0;
+	   km[i]=k0;
    else
-	km[i]=k0*csqrt(tmm_eps_real_arr_global[i]+I*tmm_eps_imag_arr_global[i]);
+	   km[i]=k0*csqrt(tmm_eps_real_arr_global[i]+I*tmm_eps_imag_arr_global[i]);
  }
 }
 ///////////////////////
@@ -293,13 +351,18 @@ if(myid==0)
     if(creal(BT)*creal(BT)+cimag(BT)*cimag(BT)< ecut_thresh)
     {
         tooshort=0;
-	ecut=i+1;
-	break;
+	      ecut=i+1;
+	      break;
     }
   }
   if(tooshort==1)
   {
-    error("Sample is too short for TMM.");
+    int l;
+    for(l=0;l<global_fd_dim.x-1;l++)
+    {
+      printf("km:%f+i*%f\n", creal(km[l]),cimag(km[l]));
+    }
+    error("Sample is too short for TMM.Consider reducing tmm_threshold.");
     MPI_Abort(cpugrid,0);
   }
   //tans und refl
@@ -355,10 +418,11 @@ if(myid==0)
   }
 //////////////////////
 // 4th loop for Qabs
-//////////////////////
+//////////////////////  
   for(i=0;i<ecut;i++)
   {
     if(i==0) dx=1e10;else dx=fd_h.x;
+
     kl=km[i];
     double complex eps=tmm_eps_real_arr_global[i]+I*tmm_eps_imag_arr_global[i];
     tmm_Qabs[i]=I_t*k0*tmm_eps_imag_arr_global[i]*Runge5(dx,kl,eps,Bplus[i],Bminus[i]);
@@ -370,12 +434,10 @@ if(myid==0)
     Ez = (Bplus[i] * eiphi + Bminus[i] / eiphi); // Ez ist complex!
     tmm_Qabs[i]=I_t*k0*tmm_eps_imag_arr_global[i]*(creal(Ez)*creal(Ez)+cimag(Ez)*cimag(Ez));
 */
-
     tmm_Qabs[i]*=1e10; // W/m^2/Angstrom to W/m^3
     tmm_Qabs[i]*=6.3538562638e-26; // W/m^3 to imd-units
    
   }
-
   free(Bplus);
   free(Bminus);
 } // if myid==0
@@ -385,7 +447,7 @@ if(myid==0)
 MPI_Scatter(&tmm_Qabs[0], local_fd_dim.x-2, MPI_DOUBLE, &tmm_Qabs_scat[0], local_fd_dim.x-2, MPI_DOUBLE, 0, cpugrid);
 for(i=1;i<local_fd_dim.x-1;i++)
 {
-  l1[i][1][1].source=l2[i][1][1].source=tmm_Qabs_scat[i-1];
+  node.source=node2.source=tmm_Qabs_scat[i-1];
   //printf("me:%d,i:%d,src:%.4e\n",myid,i,l1[i][1][1].source);
 }
  return 0;
@@ -436,7 +498,7 @@ eps_dl=-73.655835558841446 +81.545418969195765*I; // testcase, sharp, omegap_L*2
 */
 
 //int tmm_get_epsilon(double lambda, double Te,double Ti, double Z, double Ne, real* re, real* img)
-int tmm_get_epsilon(double lambda, double Te,double Ti, double Z, double Ne, real* re, real* img,int i,int j)
+int tmm_get_epsilon(double lambda, double Te,double Ti, double Z, double Ne, real* re, real* img)
 {
         Te*=11604.52500617; //ev->K
         Ti*=11604.52500617; //ev->K
@@ -451,7 +513,7 @@ int tmm_get_epsilon(double lambda, double Te,double Ti, double Z, double Ne, rea
         double TF = 2.0 * EF / (3.0 * BOLTZMAN);        // [K] 
         double VF = sqrt(2 * EF / EMASS);               // [m/s] 
         double A1p=4.41; 
-        double A2p=0.8;       //Konstanten siehe patrizio s. 27
+        double A2p=0.8;       
         double A3p=0.7;
         double A4p=0.2;
 
@@ -480,6 +542,12 @@ int tmm_get_epsilon(double lambda, double Te,double Ti, double Z, double Ne, rea
 
 
         double complex epsilon_bb = epsl_bb(il) + (epsl_bb(ir) - epsl_bb(il))/ (eps_bb_data[ir][0] - eps_bb_data[il][0])* (lambda*1e6 - eps_bb_data[il][0]);
+        int phase=((int) EOS_phase_from_r_ti(Ni*26.9815*AMU,Ti));
+
+        if( fabs(phase)==3 || fabs(phase)==4 || fabs(phase)==5)
+          epsilon_bb=0*I*0;
+
+
         double complex epsilon_met = epsilon_bb + un - Ne / Ncr / (un + im * MIN(nu_met, nu_max) / omega_las);
         double complex epsilon_pl  = un - Ne / Ncr * (tmm_K1(ksi) - im * nu_pl / omega_las * tmm_K2(ksi));
         double complex epsilon_wr = epsilon_pl + (epsilon_met - epsilon_pl) * exp(-A4p * Te / TF);
@@ -531,6 +599,8 @@ int tmm_read_arr(char* infilename,double ***arr,int cols,int *rowsout)
   if(myid==0)
   {
     infile = fopen(infilename, "r");
+    if(infile==NULL)      
+      error_str("Cannot open file:%s\n", infilename);
     do
     {
        ch = fgetc(infile);

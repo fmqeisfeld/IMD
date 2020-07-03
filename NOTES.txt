@@ -20,3 +20,33 @@ git push origin branch_name
 
 #show graph/network in terminal
 git log --graph --pretty=oneline --abbrev-commit
+
+
+
+ACHTUNG - FOLGENDE ÄNDERUNGEN VORÜBERGEHEN ZU TESTZWECKEN:
+-imd_tmm.c: ne, und temp const. gesetzt für immer gleiches epsilon
+-imd_ttm.c: wenn mit strang operator splitting:  diff-adv-diff führt dazu, dass neu aktivierte zellen bereits aus dem diff-schritt eine
+			temperatur bekommen und nicht erst in do_ADV wo zell-aktivierung geprüft wird ---> sequentiell machen 
+			und zwar muss adv VOR diff-step kommen
+			HATTE ICH DAS AUCH BEIM PRÜFEN DES ALTEN SCHEMAS BEDACHT?!?!
+			
+
+energie-vergleich bei diffusion via eng. vs via Cv:
+->fast identisch, aber via energie schön konst. während via Cv leicht zunehmend (genau wie bei original imd-ttm wo const. Cv benutzt wird)
+->bei elek-energ.-berechnung aber darauf achten, dass das Schema:
+
+        l1[i][j][k].U =EOS_ee_from_r_te(l1[i][j][k].dens, l1[i][j][k].temp * 11604.5) * 26.9815 * AMU * J2eV; //eV/Atom
+        tot_elec_energy_local += l1[i][j][k].U*((double) l1[i][j][k].natoms);
+
+nur funzt. wenn ich via. energie diffundiere. Wenn ich dasselbe Schema für "via Cv-diffusion" nutze, kommt zu große elektr. energie raus.
+Stattdessen muss ich schon im diffusionsschritt 
+
+		l2[i][j][k].U=l1[i][j][k].U + (l2[i][j][k].temp-l1[i][j][k].temp)*Ce*fd_vol; // eV
+
+rechnen. Warum die beiden Sachen nicht exakt dasselbe liefern weiss ich leider nicht. 
+Habe jedenfalls gecheckt, dass Cv aus interpol.tabel identisch ist zu differenzen-quotienten-näherung.
+Evtl. ist meine Tabelle nicht dicht genug!
+
+22.1.20:
+ imd.c, z90: MPI_Init_thread statt MPI_Init. Besser für OMP?
+        

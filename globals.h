@@ -313,6 +313,9 @@ EXTERN struct timeval eetime;
 EXTERN struct bicubinterp  QfromT_interp,CfromT_interp; //wird nicht mehr benutzt
 EXTERN nn_interp intp_cve_from_r_te;
 EXTERN nn_interp intp_ee_from_r_tesqrt;
+EXTERN nn_interp intp_phase_from_r_ti;
+EXTERN nn_interp  intp_pe_from_r_te;
+
 struct tricubinterp nueff_interp,kappa_interp;
 
 EXTERN real fd_vol INIT(0);
@@ -352,9 +355,15 @@ EXTERN  real ezl_2_old INIT(0.0);; //ez @ n-1 from left @ pos 0,1 and 2
 // * COLRAD STUFF
 // ******************
 EXTERN int total_species;
+EXTERN int colrad_neq INIT(0.0); //nr of equations -> length of y-vector
 EXTERN real totalc;
 EXTERN int neq;
 EXTERN int z0_len,z1_len,z2_len,z3_len,z4_len,z5_len;
+EXTERN real colrad_ptotal INIT(0.0); //for eng-file output
+EXTERN real colrad_ptotal_global INIT(0.0); //for eng-file output
+EXTERN int colrad_write(int number); // output y-vectors for every FD-Cell
+EXTERN int colrad_read(int number);
+EXTERN int telaps_colrad INIT(0);
 // ******************
 // * COLRAD POWER DENSITIES
 // ******************
@@ -389,7 +398,7 @@ EXTERN N_Vector colrad_y;
 #ifdef FILTER
 EXTERN real filter_min_x INIT(-9e9); /* left atom deletion filter cutoff */
 EXTERN real filter_max_x INIT(9e9);
-EXTERN int  filter_int INIT(1);     //nicht jeden md-step loeschen weil neigh-rebuild
+EXTERN int  filter_int INIT(0);     //nicht jeden md-step loeschen weil neigh-rebuild
 EXTERN int  filter_rd  INIT(0);    //recursion-depth, laufvariable
 //MYMOD
 EXTERN real filter_min_y INIT(-9e9); 
@@ -437,6 +446,11 @@ EXTERN double nrb_ylo INIT(-9e9);
 //ACHTUNG: In C gibt's (im gegensatz zu c++)
 //	   leider kein MPI_COMPLEX_DOUBLE datentyp
 //	   Deswegen der umständliche weg mit jeweils einem array für real und eines für imag
+EXTERN double* q_stored; //fuer BALLISTIC und FERMI_RESPONSE
+EXTERN double* q_stored_adv; //fuer BALLISTIC und FERMI_RESPONSE
+EXTERN int *natomsglobal;
+
+EXTERN double  tmm_absorption_threshold INIT(20.0);
 EXTERN double* tmm_eps_real_arr_local;
 EXTERN double* tmm_eps_imag_arr_local;
 EXTERN double* tmm_eps_real_arr_global;
@@ -462,6 +476,7 @@ EXTERN int    eps_bb_rows INIT(0);
 EXTERN double  **K12;
 EXTERN int    K12_rows INIT(0);
 EXTERN double  **eps_bb_data;
+EXTERN double tmm_laser_threshold INIT(1e-5); //ab wann laser aktivieren? 
 #endif
 
 #if defined(FDTD) || defined(LASER) || defined(TMM)
@@ -558,6 +573,10 @@ EXTERN int dist_pressoff_flag    INIT(0); /* write press off diag dists? */
 EXTERN int dist_presstens_flag   INIT(0); /* write presstens dists? */
 EXTERN int dist_dens_flag   INIT(0); /* write density dists? */
 EXTERN int dist_vxavg_flag  INIT(0); /* write average sample velocity dists? */
+//MYMOD
+EXTERN int dist_mdtemp_flag INIT(0);
+//ENDOF MYMOD
+
 EXTERN int dist_int              INIT(0); /* Period of distribution writes */
 EXTERN int dist_chunk_size       INIT(2*1024*1024); /* size of dist reduct. */
 EXTERN ivektor dist_dim          INIT(einsivektor); /* resolution of dist */
@@ -1134,22 +1153,50 @@ EXTERN ivektor force_celldim_divisor INIT(einsivektor); /* if you want cell dime
   /* These will point to the calculation net in a nice 3D array fashion */
 
 EXTERN  double max_dt_ttm; //in IMD time-units
+
+#ifdef TTM1D
+EXTERN  ttm_Element * l1, * l2, * l3;
+EXTERN  double *xiarr_local; //Wird mit Allgather reduziert
+EXTERN  double *xiarr_global; //Wird mit Allgather reduziert
+
+EXTERN double *vcomxlocal,*vcomxglobal;
+EXTERN double *vcomylocal,*vcomyglobal;
+EXTERN double *vcomzlocal,*vcomzglobal;
+
+EXTERN int *fluxfromrightlocal,*fluxfromleftlocal;
+EXTERN int *fluxfromrightglobal,*fluxfromleftglobal;
+
+
+EXTERN double *epress_local,*epress_global,*epress_deriv;
+
+EXTERN int ttmdimx INIT(0); //global_fd_dim.x muss in diesem fall angegeben werden
+#else
 EXTERN  ttm_Element *** l1, *** l2, *** l3;
+#endif
+
   /* These will be used to allocate and free the nets in bulk */
 EXTERN  ttm_Element * lattice1, * lattice2;
-EXTERN real fd_k INIT(1.0); /* electronic thermal conductivity */
+EXTERN real fd_k INIT(17.33); /* electronic thermal conductivity */
 EXTERN real fd_c INIT(0.0); /* electronic thermal capacity */
-EXTERN real fd_gamma INIT(0.0); /* fd_c / T_e, proport. const. */
-EXTERN real fd_g INIT(1.0);        /* electron-phonon coupling constant */
+EXTERN real fd_gamma INIT(0.11305); /* fd_c / T_e, proport. const. */
+EXTERN real fd_g INIT(0.0004196);        /* electron-phonon coupling constant */
 EXTERN int fd_n_timesteps INIT(0); /* how many FD steps to a MD timestep? */
 EXTERN int fd_update_steps INIT(1);/* how often are FD cells updated */
 EXTERN real tot_elec_energy_local INIT(0.0);  //total internal energy of
 EXTERN real tot_elec_energy_global INIT(0.0); //electrons (DEBUG PURPOSE)
-EXTERN real tot_kin_energy_local INIT(0.0); //ionic
-EXTERN real tot_kin_energy_global INIT(0.0); //ionic
 EXTERN int diff_substeps INIT(100);
 
+//For convenience 
+EXTERN real J2eV   INIT(6.2415090744607626077762409809304458998869658961709711e18);
+
+EXTERN real eV2J   INIT(1.602176634E-19);
+
+EXTERN real densSI INIT(1660.53907); //u/Angstrom^3 --> kg/m^3
+
+EXTERN double Temin INIT(1e-3); //MININUM aller interpol. tabellen in eV
+EXTERN double rhomin INIT(1e-3); // in SI
 //Dirichlet boundary conditions
+//MYMOD
 #ifdef DIRICHLET
 EXTERN int *dirichlet_maxy_local;	   //outermost non-empty cells in +y-direction
 EXTERN int *dirichlet_miny_local;	   // .... in -y-direction
@@ -1160,7 +1207,24 @@ EXTERN int *dirichlet_maxx_global;
 EXTERN real dirichlet_surfx INIT(0);
 EXTERN int dirichlet_surfx_int INIT(0);
 #endif
+//ENDOF MYMOD
 
+//MYMOD FOR VIRTUAL TTM LATTICE
+EXTERN  ttm_Element * vlattice1, * vlattice2; //virtual lattice // nur 1D!!
+EXTERN  ttm_Element * vlattice3; //brauche nur den pointer (wie)
+EXTERN int vlatdim INIT(30);
+//EXTERN int last_active_cell_local INIT(0); //iglobal of last ttm-cell with >= fd_min_atoms
+//EXTERN int last_active_cell_global INIT(0); 
+EXTERN int cur_vlattice_proc INIT(0); //welcher proc kümmert sich darum?
+EXTERN int old_vlattice_proc INIT(-1); //falls sich was ändert -> Bcast das komplette vlattice zum neuen proc!
+EXTERN int vlatbuffer INIT(8); // So viele zellen werden von der letzten aus ignoriert...diese paar letzten zellen 
+                                // werden in DIFFLOOP als leer wahrgenommen, da sie durch nicht-reflektierende
+                                // Randbedingungen runtergekühlt werden und unnatürlichen temperaturfluss herbeiführen!
+//EXTERN vlatmax last_active_cell_local,last_active_cell_global;
+EXTERN int last_active_cell_local,last_active_cell_global;
+
+EXTERN real vlatdens INIT(2.665655433e+03); // kg/m^3
+//ENDOF MYMOD
 
 EXTERN int fd_min_atoms INIT(0);   /* minimum number of atoms needed in a
 				      FD cell for it to be active */
@@ -1194,6 +1258,10 @@ EXTERN MPI_Request reque[6];
 #endif /*MPI*/
 EXTERN double E_new INIT(0.0); /* Energy of newly created FD cells */
 EXTERN double E_new_local INIT(0.0);
+
+EXTERN int first_active_cell_local INIT(99999);
+EXTERN int first_active_cell_global INIT(99999);
+
 #ifdef DEBUG /* for debugging (duh) */
 EXTERN double E_el_ab INIT(0.0);  /* Energy taken from electrons */
 EXTERN double E_el_ab_local INIT(0.0);

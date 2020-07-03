@@ -30,7 +30,7 @@
 // * 1st LOOP TO INIT FILTER VARIABLES
 // *************************************
 //
-#define NEIGHDEPTH 1500
+#define NEIGHDEPTH 1000
 
 void filter_init(void)
 {
@@ -150,9 +150,11 @@ error("FILTER only works with NBL or PAIR LISTS WITH AR");
 // **********************************
 void filter_atoms(void)
 {
-  MPI_Barrier(cpugrid);
+
+  //MPI_Barrier(cpugrid);
 
   //printf("myid:%d,steps:%d,entered filter_atoms,%d\n",myid,steps,have_valid_nbl);
+
   int i,j,k,l;
   filter_init();
   filter_forces();
@@ -222,8 +224,13 @@ int filter_check_neighs(cell* p,int l)
   filter_stackq[0]=p;
   filter_stackindex=0;
 
+//printf("myid:%d, entered filter_check_neighs\n",myid);
+
   while(filter_stackindex >=0 ) //Stack abarbeiten
   {
+
+//printf("myid:%d,index:%d\n",myid,filter_stackindex) ;
+
     filter_stackindex_before=filter_stackindex;   //Fuer dead-end check (nach neighloop)
 
     int   l2=filter_stacki[filter_stackindex]; //latest i

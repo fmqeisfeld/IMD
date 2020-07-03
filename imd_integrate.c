@@ -21,6 +21,9 @@
 
 #include "imd.h"
 
+//MYMOD
+//#define ELECPRESS
+//ENDOF MYMOD
 /*****************************************************************************
 *
 * Basic NVE Integrator
@@ -225,25 +228,30 @@ void move_atoms_nve(void)
 // ****************************************************************************
 #ifndef DAMP /*  Normal NVE */
 
+
 //MYMOD : Auch ohne ttm moechte ich pdecay nutzen koennen!
 #ifdef PDECAY
      if( ORT(p,i,X) > ramp_start )
+#ifdef NRB
+      if(NRBBND(p,i)==0)
+#endif            
         KRAFT(p,i,X) -=  ( IMPULS(p,i,X)/MASSE(p,i)) * xipdecay * a * ( ORT(p,i,X) - ramp_start ) * ( ORT(p,i,X) - ramp_start );
-//HOTIFX fuer +/- y bnd
-//ACHTUNG: Ablatiertes Material nicht kuehlen!
-if(ORT(p,i,X)>=pdecay_surfx)
-{
-     if( ORT(p,i,Y) > ramp_y1min )
-        KRAFT(p,i,Y) -=  ( IMPULS(p,i,Y)/MASSE(p,i)) * xipdecay * ay1 * ( ORT(p,i,Y) - ramp_y1min ) * ( ORT(p,i,Y) - ramp_y1min );
-     else if(ORT(p,i,Y)< ramp_y0max)
-        KRAFT(p,i,Y) -=  ( IMPULS(p,i,Y)/MASSE(p,i)) * xipdecay * ay0 * ( ramp_y0max -ORT(p,i,Y) ) * ( ramp_y0max-ORT(p,i,Y) );
-}
 #endif
+//HOTIFX fuer +/- y bnd: wude bei 2d-sims. benutzt..brauche ich nun nicht mehr.
+//ACHTUNG: Ablatiertes Material nicht kuehlen!
+// if(ORT(p,i,X)>=pdecay_surfx)      
+// {
+//      if( ORT(p,i,Y) > ramp_y1min )
+//         KRAFT(p,i,Y) -=  ( IMPULS(p,i,Y)/MASSE(p,i)) * xipdecay * ay1 * ( ORT(p,i,Y) - ramp_y1min ) * ( ORT(p,i,Y) - ramp_y1min );
+//      else if(ORT(p,i,Y)< ramp_y0max)
+//         KRAFT(p,i,Y) -=  ( IMPULS(p,i,Y)/MASSE(p,i)) * xipdecay * ay0 * ( ramp_y0max -ORT(p,i,Y) ) * ( ramp_y0max-ORT(p,i,Y) );
+// }
+// #endif
 //ENDOF MYMOD
 
 //MYMOD
 #ifdef NRB
-if(NRBBND(p,i)==0) //d.h. nur für nicht-bnd-atome das standart-schema.Für bnd-atome wird der impuls anders berechnet
+if(NRBBND(p,i)==0) //d.h. in diesem Fall nur für nicht-bnd-atome das standart-schema.Für bnd-atome wird der impuls anders berechnet
 {
       IMPULS(p,i,X) += timestep * KRAFT(p,i,X);
       IMPULS(p,i,Y) += timestep * KRAFT(p,i,Y);
@@ -582,15 +590,18 @@ void move_atoms_ttm(void)
 #endif /*DEBUG*/
 
 //MYMOD
+#ifdef ELECPRESS
+  double epressforce=0.0;
+#endif  
 #ifdef PDECAY 
   double a= 1.0/(ramp_end - ramp_start);
+  a*=a;
   //HOTFIX fuer +/- y bnd
 #ifdef FDTD2D
   double ay0 =1.0/(ramp_y0max-ramp_y0min);
   double ay1 =1.0/(ramp_y1max-ramp_y1min);
   ay0*=ay0;
   ay1*=ay1;
-  a*=a;
 #endif
 
 #endif
@@ -600,7 +611,8 @@ void move_atoms_ttm(void)
 #ifdef _OPENMP
 #pragma omp parallel for reduction(+:tot_kin_energy,omega_E)
 #endif
-  for (k=0; k<NCELLS; ++k) { /* loop over all cells */
+  for (k=0; k<NCELLS; ++k) 
+  { /* loop over all cells */
 
     int  i,j, sort;
     int fd_i, fd_j, fd_k;
@@ -609,28 +621,62 @@ void move_atoms_ttm(void)
     real kin_energie_1, kin_energie_2, tmp;
 
     p = CELLPTR(k);
-
-     
+    
+#ifndef TTM1D
     fd_i=p->fd_cell_idx.x;
     fd_j=p->fd_cell_idx.y;
     fd_k=p->fd_cell_idx.z;
 
     /* get coupling constant, if fd cell is inactive, no coupling */
     fd_xi=(l1[fd_i][fd_j][fd_k].natoms>=fd_min_atoms)?(l1[fd_i][fd_j][fd_k].xi):(0.0);
+  #else        
+    //fd_xi=(l1[fd_i].natoms >= fd_min_atoms) ? (l1[fd_i].xi):(0.0); 
+    //Das funktioniert in diesem Fall nicht:
+    //z.B. kümmert sich proc 0 immer um die TTM-Zellen ganz links auch wenn dort keine atome sind
+    //gleichzeitig kann sich proc0 aber auch um außerhalb seines TTM-Bereichs kümmern...
+    //--> Brauche globales xi-array
+    //--> das geschieht in der schleife über atome weiter unten
+
+    //Dasselbe gilt für vcom.x,y,z 
+  #endif
 
     // MY MOD : DEBUG
     // printf("proc:%d,steps:%d,i:%d,j:%d,k:%d,fd_xi:%e\n",myid,steps,fd_i,fd_j,fd_k,fd_xi);
 
-    for (i=0; i<p->n; ++i) { /* loop over all atoms in the cell */
-#ifdef DEBUG
-      double delta_E_atom;
+    for (i=0; i<p->n; ++i) 
+    { /* loop over all atoms in the cell */
+
+#ifdef TTM1D
+      int i_global=0;
+      if(SORTE(p,i)==0)
+      {
+        i_global=(int) (ORT(p,i,X)/fd_h.x);
+        i_global=MIN(i_global,global_fd_dim.x-1);
+        i_global=MAX(i_global,0);          
+        fd_xi=xiarr_global[i_global];
+#ifdef ELECPRESS
+        epressforce=epress_deriv[i_global];
+#endif        
+        // if(NUMMER(p,i)==605)
+        //   printf("kraft:%.4e, eforce:%.4e\n",KRAFT(p,i,X),epressforce);
+
+      }
+      else
+      {
+        fd_xi=0.0;
+      }
+
+#ifdef VLATTICE
+      if(i_global >= last_active_cell_global)
+        fx_xi=0.0;
+#ifdef ELECPRESS
+      epressforce=0.0;
+#endif      
+#endif      
 #endif
 
-      /**********************
-      * MY MOD: MEAN CHARGE *
-      ***********************/
-#ifdef VARCHG
-      CHARGE(p,i)=l1[fd_i][fd_j][fd_k].Z;
+#ifdef DEBUG
+      double delta_E_atom;
 #endif
 
       kin_energie_1 = SPRODN(IMPULS,p,i,IMPULS,p,i);
@@ -644,8 +690,6 @@ void move_atoms_ttm(void)
       KRAFT(p,i,Z) += (fbc_forces + sort)->z;
 #endif
 #endif
-
-
       
       /* and set their force (->momentum) in restricted directions to 0 */
       KRAFT(p,i,X) *= (restrictions + sort)->x;
@@ -658,53 +702,53 @@ void move_atoms_ttm(void)
       omega_E += SPRODN(KRAFT,p,i,KRAFT,p,i) / MASSE(p,i);
 #endif
 
-#ifdef DEBUG
-      /* dE = dt * v * F(el->ph)
-       * mit F(el->ph) = xi*m*v_therm
-       * ******************************* */
-      delta_E_atom = 1/MASSE(p,i) * timestep
-	             * (  IMPULS(p,i,X) * fd_xi * MASSE(p,i) * ( IMPULS(p,i,X)/MASSE(p,i) - l1[fd_i][fd_j][fd_k].vcomx)
-			+ IMPULS(p,i,Y) * fd_xi * MASSE(p,i) * ( IMPULS(p,i,Y)/MASSE(p,i) - l1[fd_i][fd_j][fd_k].vcomy)
-#ifndef TWOD
-			+ IMPULS(p,i,Z) * fd_xi * MASSE(p,i) * ( IMPULS(p,i,Z)/MASSE(p,i) - l1[fd_i][fd_j][fd_k].vcomz)
-#endif /*TWOD*/
-		       );
-      E_ph_auf_local += delta_E_atom;
-#endif /*DEBUG*/
-
 
       /* TTM: p += (F + xi*m*v_therm) * dt  
-       * ********************************** */
-	
-/*
-      if(isnan(fd_xi)!=0)
-      {
-	printf("step:%d,proc:%d,xi is NaN\n",steps,myid);
-	error("xi is NaN\n");
-      }
-*/
+       * ********************************** */	
 //MYMOD: Pdecay (mode=3) an dieser stelle um zusaetzliche loop zu vermeiden
 #ifdef PDECAY
-     if( ORT(p,i,X) > ramp_start )     
-        KRAFT(p,i,X) -=  ( IMPULS(p,i,X)/MASSE(p,i)) * xipdecay * a * ( ORT(p,i,X) - ramp_start ) * ( ORT(p,i,X) - ramp_start );     
+ if( ORT(p,i,X) > ramp_start )     
+ {
+#ifdef NRB
+  if(NRBBND(p,i)==0)
+#endif  
+    KRAFT(p,i,X) -=  ( IMPULS(p,i,X)/MASSE(p,i)) * xipdecay * a * ( ORT(p,i,X) - ramp_start ) * ( ORT(p,i,X) - ramp_start );     
+ }
 
-#ifdef FDTD2D
-//HOTIFX fuer +/- y bnd
-//ACHTUNG: Ablatiertes Material nicht kuehlen!
-if(ORT(p,i,X)>=pdecay_surfx)
-{
-     if( ORT(p,i,Y) > ramp_y1min )
-        KRAFT(p,i,Y) -=  ( IMPULS(p,i,Y)/MASSE(p,i)) * xipdecay * ay1 * ( ORT(p,i,Y) - ramp_y1min ) * ( ORT(p,i,Y) - ramp_y1min );
-     else if(ORT(p,i,Y)< ramp_y0max)
-        KRAFT(p,i,Y) -=  ( IMPULS(p,i,Y)/MASSE(p,i)) * xipdecay * ay0 * ( ramp_y0max -ORT(p,i,Y) ) * ( ramp_y0max-ORT(p,i,Y) );
-}
+  #ifdef FDTD2D
+  //HOTIFX fuer +/- y bnd
+  //ACHTUNG: Ablatiertes Material nicht kuehlen!
+    if(ORT(p,i,X)>=pdecay_surfx)
+    {
+       if( ORT(p,i,Y) > ramp_y1min )
+          KRAFT(p,i,Y) -=  ( IMPULS(p,i,Y)/MASSE(p,i)) * xipdecay * ay1 * ( ORT(p,i,Y) - ramp_y1min ) * ( ORT(p,i,Y) - ramp_y1min );
+       else if(ORT(p,i,Y)< ramp_y0max)
+          KRAFT(p,i,Y) -=  ( IMPULS(p,i,Y)/MASSE(p,i)) * xipdecay * ay0 * ( ramp_y0max -ORT(p,i,Y) ) * ( ramp_y0max-ORT(p,i,Y) );
+    }
+  #endif
 #endif
-#endif
+
+
+#ifdef NRB
+    if(NRBBND(p,i) == 0) //Nur nicht-bnd atome werden aufgeheizt!
+    {
+#endif  
+
+#ifdef TTM1D
+      IMPULS(p,i,X) += timestep * ( KRAFT(p,i,X) + fd_xi * MASSE(p,i) * ( IMPULS(p,i,X)/MASSE(p,i) - vcomxglobal[i_global]) );
+      IMPULS(p,i,Y) += timestep * ( KRAFT(p,i,Y) + fd_xi * MASSE(p,i) * ( IMPULS(p,i,Y)/MASSE(p,i) - vcomyglobal[i_global]) );
+      IMPULS(p,i,Z) += timestep * ( KRAFT(p,i,Z) + fd_xi * MASSE(p,i) * ( IMPULS(p,i,Z)/MASSE(p,i) - vcomzglobal[i_global]) );    
+  #ifdef ELECPRESS
+      IMPULS(p,i,X) -= timestep *epressforce;
+  #endif
+#else
       IMPULS(p,i,X) += timestep * ( KRAFT(p,i,X) + fd_xi * MASSE(p,i) * ( IMPULS(p,i,X)/MASSE(p,i) - l1[fd_i][fd_j][fd_k].vcomx) );
       IMPULS(p,i,Y) += timestep * ( KRAFT(p,i,Y) + fd_xi * MASSE(p,i) * ( IMPULS(p,i,Y)/MASSE(p,i) - l1[fd_i][fd_j][fd_k].vcomy) );
-#ifndef TWOD
       IMPULS(p,i,Z) += timestep * ( KRAFT(p,i,Z) + fd_xi * MASSE(p,i) * ( IMPULS(p,i,Z)/MASSE(p,i) - l1[fd_i][fd_j][fd_k].vcomz) );
 #endif
+#ifdef NRB      
+    }
+#endif      
 
       /* MY MOD DEBUG */
       //IMPULS(p,i,X)=0;
@@ -724,9 +768,8 @@ if(ORT(p,i,X)>=pdecay_surfx)
 
       ORT(p,i,X) += tmp * IMPULS(p,i,X);
       ORT(p,i,Y) += tmp * IMPULS(p,i,Y);
-#ifndef TWOD
       ORT(p,i,Z) += tmp * IMPULS(p,i,Z);
-#endif
+
      
 
 #ifdef STRESS_TENS

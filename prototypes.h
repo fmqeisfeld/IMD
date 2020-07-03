@@ -24,7 +24,7 @@
 *******************/
 #include <complex.h>
 
-
+void nrb_test_forces(void); //ext. kraft um schockwelle zu erzeugen
 #ifdef NRB
 int init_nrb(void);
 int approx(double x,double x0,double deps);
@@ -32,7 +32,7 @@ int compare( const void* a, const void* b);
 int nrb_build_ifromid(void);
 int nrb_binarySearch( int lo, int hi, int x,int n,int** arr);
 int nrb_forces(void);
-void nrb_test_forces(void); //ext. kraft um schockwelle zu erzeugen
+
 
 //void pack_nrb( msgbuf *b, int k, int l, int m);
 void pack_nrb( msgbuf *b, int k, int l, int m, vektor v );
@@ -98,6 +98,7 @@ void do_ADV(double tau);
 void update_u(void);
 void do_DIFF(double tau);
 void factor_xi(void); //ist jetzt losgelöst von do_DIFF
+void do_cell_activation(void); // Cell activ/inactive
 
 //Interpol. tables for electronic EOS
 int read_bc_interp(struct bicubinterp *bi,const char *fname);
@@ -127,12 +128,25 @@ double EpsRealInterpol(double rho,double Te,double Ti);
 //EOS STUFF
 double QfromT(double T,double rho);
 //double CfromT(double T,double rho);
+double EOS_phase_from_r_ti(double r,double t);
+double EOS_pe_from_r_te(double r,double t);
+void   do_electronic_pressure(void);
+void do_BALLISTIC(double tau);
 double EOS_cve_from_r_te(double r,double t);
 double EOS_ee_from_r_te(double r,double t);
 double EOS_te_from_r_ee(double r,double e);
 double eeminfun(double x, double r, double e);
+//minimiert e_from_r_te-e für EOSMODE=1 (D.h. interne energie aus tabelle)
 double fminbnd(double a, double b,double (* f)(double,double,double), double tolx,double rho,double eng);
+//selbes für FEG-model
+double fminbnd2(double a, double b,double (* f)(double,double,double,double), double tolx,double rho,double ne,double eng);
 void CFL_maxdt(void);  //CFL Condition for max. stable diffusion timestep
+double chempot(double ne,double Te);
+double FEG_ee_from_r_ne_te(double r,double ne, double T);
+double FEG_cve_from_ne_te(double r,double ne,double T);
+double FEG_eeminfun(double x, double r, double ne, double e);
+double FEG_te_from_r_ne_ee(double r,double ne,double ee);
+
 #endif
 
 
@@ -144,18 +158,39 @@ void invmat(double complex *a,double complex *p);/* Inverse of 2x2 matrix*/
 void matmul(double complex *a,double complex *b,double complex *p); /*2x2 Matrix multiplication*/
 void matmul2(double complex *mat,double complex *vec,double complex *out);/* 2x2 matrix and 2x1 vector multiplication */ 
 int tmm_init(void);
-int tmm_get_epsilon(double lambda, double Te,double Ti, double Z, double Ne, real* re, real* img,int i,int j);
+int tmm_get_epsilon(double lambda, double Te,double Ti, double Z, double Ne, real* re, real* img);
 double complex epsl_bb(int bi);
 int tmm_read_arr(char* infilename,double ***arr,int cols,int *rowsout);
 double tmm_K2(double nu);
 double tmm_K1(double nu);
 #endif
 
-#ifdef COLRAD
-void colrad_read_states(void);
-void colrad_init(void);
 
+// Verschoben nach imd_colrad.h
+#ifdef COLRAD
+void do_colrad(double dt);
+void colrad_init(void);
+// int colrad_ydot(double t, N_Vector u, N_Vector udot, void *user_data);
+// void do_Saha(double Te,double totalc,double ne,N_Vector y);
+// int colrad_GetCoeffs(N_Vector y,double It, void * user_data);
+// void do_colrad(double dt);
+
+// //double ExpInt(double x);
+// // double fak(double t, double x, double j,double s); //aux. function for genexpint
+// // double genexpint(double x,double ss,double j);
+// // double EscapeFactor(double w,double tau0);
+// // double StarkWidth(double nu,double nl,double Te,double Ti,double Tr,double Ne,double Ni);
+// // double EinsteinCoeff(double n1,double n2,double g2,double DeltaE);
+
+// //folgende funcs sind alle für Berechnung des Transmission/Escape-Faktors!
+// // double Lorentzian(double w,double lambda); //both params in angs!
+// // double integrand(double w,double lambda,double tau,double phi0); // integrant von T=int[ exp(-tau*phi*phi0)*phi dx ]
+// // double trapz(double a,double b,int n,double w,double tau); //integriert die func. "integrand"
+// void colrad_read_states(void);
+// void colrad_init(void);
+// void colrad_Saha_init(int i,int j,int k);
 #endif
+
 #ifdef FDTD
 int init_fdtd(void);
 void init_pml(void);
@@ -191,16 +226,12 @@ double nupl(double omega_las, double Z, double ni, double ne, double Te);
 double getKappa(double Te, double Ti, double Ne,double Z);
 double getGamma(double Te, double Ti, double Ne,double Z);
 
-double Cv(double Te,double ne); 
 double nu_e_e(double Te, double EF,double Ne,double Na,double valence); 
 double v_e(double Te,double EF);
 double sigma_e_e(double Te, double EF,double Na,double valence);
 double sigma_e_ph(double Te,double Ti,double EF,double Na,double Z);
 double nueff(double Te,double Ti,double ne,double ni,double ni0,double Ce,double lod); //für drude Kombination aus Petrov & Mazhukin
 
-//for advection step we need relation btw. internal eng. and elec. temp
-double UfromT(double Te,double ne);
-double TfromU(double U,double ne);
 
 char **strsplit(const char* str, const char* delim, size_t* numtokens);
 void ttm_read(int number);
@@ -653,6 +684,9 @@ int bb_minimize(int);
 
 
 /* write distributions - file imd_distrib.c */
+//MYMOD
+void make_distrib_temperature(int fzhlr); //<-- berechnet und schreibt direkt aus
+//ENDOF MYMOD
 void make_distrib_density(void); 
 void write_distrib_density(int, int);
 void make_write_distrib_select(int, void (*fun)(float*, cell*, int), 

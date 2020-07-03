@@ -156,8 +156,27 @@ void calc_forces(int steps)
                                           &vir_yz, &vir_zx, &vir_xy);
     }
   }
-//MYMOD:warum wird nicht über alle Paare geloopt?
 
+//MYMOD
+#ifdef NRB
+  #ifndef NBL
+    nrb_forces(); //Dass mus VOR send_forces geschehen
+    //Im NBL-Fall steht dies direkt am Ende der force-loop, weil send_forces dort 
+    //aufgerufen wird und nicht hier
+    //nrb_test_forces(); //TESTZWECKE
+  #endif
+#endif  
+
+#ifdef FILTER
+
+if(steps>0)
+  if(steps % filter_int ==0)
+  {
+    filter_atoms();
+  }
+#endif 
+
+//ENDOF MYMOD
 
 #ifdef COVALENT
   /* complete neighbor tables for remaining pairs of cells */

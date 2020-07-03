@@ -460,10 +460,12 @@ typedef struct
   real fd_k,fd_g;
   real Z;
 
+#ifndef TTM1D  
   //advection
-  int flux[8]; //<--23.11.18: Mit dem neuen advection solver brauche ich die atomzahlen nicht
-  //real slx,sly,slz; // dafuer aber flux-interface-slopes
-  //real lod; //local order param,averaged over all atoms in this cell
+  int flux[8];
+#endif
+
+
   real Ce; //electronic Volumetric specific heat
   real ne;      //elec dens
   real U;  // internal energy in eV/Atom
@@ -484,8 +486,10 @@ typedef struct
 #endif
 #ifdef COLRAD
   N_Vector y; //<-enthält: Te,Ti,ne,c0,c1,c2,c3,....
+  real P_EE,P_EI,P_MPI2,P_MPI3,P_RR; //Leistungsdichten für TTM-OUTPUT
 #endif
-} ttm_Element;
+
+} ttm_Element;   //ACHTUNG: letztes Element in ttm_Element muss vom typ real sein!
 
 //MYMOD
 //INTERPOL STUFF

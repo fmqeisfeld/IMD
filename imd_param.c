@@ -436,7 +436,7 @@ int getparamfile(char *paramfname, int phase)
 #endif
       else if (strcasecmp(tmpstr,"ttm")==0) {
         ensemble = ENS_TTM;
-	move_atoms = move_atoms_ttm;
+	       move_atoms = move_atoms_ttm;
       }
     else {
         error("unknown ensemble");
@@ -466,6 +466,12 @@ int getparamfile(char *paramfname, int phase)
       /* number of steps between energy dist. writes */
       getparam(token,&dist_int,PARAM_INT,1,1);
     }
+//MYMOD
+     else if (strcasecmp(token,"dist_mdtemp_flag")==0) {
+      /* write average sample velocity? */
+      getparam(token,&dist_mdtemp_flag,PARAM_INT,1,1);
+    }
+//ENDOF MYMOD    
     else if (strcasecmp(token,"dist_dim")==0) {
       /* dimension of distributions */
       getparam(token,&dist_dim,PARAM_INT,DIM,DIM);
@@ -1992,11 +1998,13 @@ int getparamfile(char *paramfname, int phase)
     //  /* FD electronic heat capacity  */
     //  getparam("fd_c", &fd_c, PARAM_REAL, 1, 1);
     //}
+    // fd_gamma wird nicht mehr benötigt
+    // else if (strcasecmp(token, "fd_gamma")==0)
+    // { 
+    //   // FD electronic heat capacity / T_e (proport. const.) 
+    //   getparam("fd_gamma", &fd_gamma, PARAM_REAL, 1, 1);
+    // }
 
-    else if (strcasecmp(token, "fd_gamma")==0){
-      /* FD electronic heat capacity / T_e (proport. const.) */
-      getparam("fd_gamma", &fd_gamma, PARAM_REAL, 1, 1);
-    }
     else if (strcasecmp(token, "fd_n_timesteps")==0){
       // How many FD time steps to one MD time step? 
       getparam("fd_n_timesteps", &fd_n_timesteps, PARAM_INT, 1, 1);
@@ -2018,8 +2026,28 @@ int getparamfile(char *paramfname, int phase)
         getparam("fd_min_atoms",&fd_min_atoms,PARAM_INT,1,1);
     }
 
+
+//MYMOD FÜR loadbalance mit ttm
+#ifdef TTM1D
+     else if(strcasecmp(token,"vlatdim")==0){
+        getparam("vlatdim",&vlatdim,PARAM_INT,1,1);
+    }
+     else if(strcasecmp(token,"vlatbuffer")==0){
+        getparam("vlatbuffer",&vlatbuffer,PARAM_INT,1,1);
+    }    
+
+     else if(strcasecmp(token,"ttmdimx")==0){
+        getparam("ttmdimx",&ttmdimx,PARAM_INT,1,1);
+    }
+#endif    
+//ENDOF MYMOD
 //MY MOD: FDTD (ACHTUNG: alles in SI-einheiten!)
 #if defined(FDTD) || defined(LASER) || defined(TMM)
+#ifdef TMM
+else if(strcasecmp(token,"tmm_threshold")==0){
+        getparam("tmm_threshold",&tmm_absorption_threshold,PARAM_REAL,1,1);
+    }    
+#endif    
 else if(strcasecmp(token,"I0")==0){
         getparam("I0",&I0,PARAM_REAL,1,1);
     }
@@ -3916,11 +3944,12 @@ void check_parameters_complete()
   else if (strcasecmp(fd_one_d_str,"")!=0) {
     warning("Ignoring unknown value of fe_one_d\n");
   }
-  if ((fd_gamma==0.0 && fd_c==0.0)||(fd_gamma!=0.0 && fd_c!=0.0)) {
-    error ("You must specify either fd_gamma or fd_c for TTM simulations.");
-  }
+  //wird nicht mehr benutzt!
+  // if ((fd_gamma==0.0 && fd_c==0.0)||(fd_gamma!=0.0 && fd_c!=0.0)) {
+  //   error ("You must specify either fd_gamma or fd_c for TTM simulations.");
+  // }
 
-// MY MOD:
+// MY MOD: 
   if(fd_min_atoms==0)
     error("You must specify fd_min_atoms");
 #if defined(FDTD) || defined(TMM)
@@ -3937,7 +3966,17 @@ void check_parameters_complete()
     error("You must specify atomic_weight");
   if(atomic_charge==0)
     error("You must specify atomic_charge");
+#ifdef TTM1D
+  if(ttmdimx==0)
+    error("You must specify ttmdimx");
+#endif
 #endif /* TTM */
+
+#ifdef FILTER
+  if(filter_int==0)
+    error("You must specify filter_int");
+#endif
+//ENDOF MYMOD  
 
 #ifdef MPI
   {
@@ -4259,6 +4298,9 @@ void broadcast_params() {
   MPI_Bcast( &dist_dens_flag,        1, MPI_INT, 0, MPI_COMM_WORLD);
   MPI_Bcast( &dist_vxavg_flag,       1, MPI_INT, 0, MPI_COMM_WORLD);
   MPI_Bcast( &box_from_header,       1, MPI_INT, 0, MPI_COMM_WORLD);
+  //MYMOD
+  MPI_Bcast( &dist_mdtemp_flag,       1, MPI_INT, 0, MPI_COMM_WORLD);
+  //ENDOF MYMOD
 
 #ifdef TWOD
   /*  MPI_Bcast( &pic_scale   , 2, REAL, 0, MPI_COMM_WORLD); */
@@ -4718,6 +4760,16 @@ MPI_Bcast( &filter_int,             1, MPI_INT, 0, MPI_COMM_WORLD);
   MPI_Bcast( &laser_sigma_t1,    1, REAL,  0, MPI_COMM_WORLD);
   MPI_Bcast( &laser_t_1,        1, REAL,  0, MPI_COMM_WORLD);
   MPI_Bcast( &lambda,           1, REAL,0, MPI_COMM_WORLD);
+#ifdef TMM
+  MPI_Bcast( &tmm_absorption_threshold,    1, REAL,0, MPI_COMM_WORLD);
+#endif 
+#endif
+
+#ifdef TTM1D
+  MPI_Bcast( &ttmdimx,             1, MPI_INT,0, MPI_COMM_WORLD);
+  MPI_Bcast( &vlatdim,             1, MPI_INT,0, MPI_COMM_WORLD);
+  MPI_Bcast( &vlatbuffer,          1, MPI_INT,0, MPI_COMM_WORLD);
+
 #endif
 #ifdef FDTD
   MPI_Bcast( &srcw,             1, REAL,0, MPI_COMM_WORLD);

@@ -442,8 +442,9 @@ void init_cells( void )
 	make_cell_lists();
 	lb_syncBufferCellAffinity();
 	make_cell_lists(); /*Now create the proper interactions */
-	setup_buffers();
-	fix_cells();
+	setup_buffers();   //ACHTUNG: Dieses setup_buffers auf HAWK führt im DEBUG-Mode zu seg-fault, und zwar an der Stelle "find largest cell", warum auch immer!
+	fix_cells();       //         Im  Realease-mode kein segfault, dafür aber quälend langsam --> nicht zu gebrauchen
+
 #endif
 }
 
